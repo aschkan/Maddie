@@ -132,24 +132,37 @@ export function toLocalUrl(url: string, origins: readonly string[], mount = "/ap
 }
 
 /**
- * Walking the basemap chain, for the health probe: a style names a source, a
- * source names a tile template, and a template needs numbers before it is a
- * URL. Any of the three can be the broken link, and a blank map looks the same
- * whichever it is — the background colour and attribution come from the style,
- * so they render happily while no tile has ever arrived.
+ * Walking the basemap chain, for the health probe.
+ *
+ * A style names sources; a source is EITHER a TileJSON URL to fetch or an
+ * inline list of tile templates. Conflating the two is how the probe's first
+ * version reported a 404 that was its own fault: it took `tiles[0]` from a
+ * raster source and fetched "…/{z}/{x}/{y}.png" verbatim, which no tile host
+ * will ever serve. The distinction is the whole point of walking the chain.
  */
-export function firstSourceUrl(style: unknown): string | null {
-  if (style === null || typeof style !== "object") return null;
+export interface StyleSource {
+  id: string;
+  /** A TileJSON document to fetch, if the source names one. */
+  url: string | null;
+  /** A `{z}/{x}/{y}` template, if the source lists tiles inline. */
+  tileTemplate: string | null;
+}
+
+export function styleSources(style: unknown): StyleSource[] {
+  if (style === null || typeof style !== "object") return [];
   const sources = (style as { sources?: unknown }).sources;
-  if (sources === null || typeof sources !== "object") return null;
-  for (const source of Object.values(sources as Record<string, unknown>)) {
+  if (sources === null || typeof sources !== "object") return [];
+  const out: StyleSource[] = [];
+  for (const [id, source] of Object.entries(sources as Record<string, unknown>)) {
     if (source === null || typeof source !== "object") continue;
-    const url = (source as { url?: unknown }).url;
-    if (typeof url === "string" && url !== "") return url;
-    const tiles = (source as { tiles?: unknown }).tiles;
-    if (Array.isArray(tiles) && typeof tiles[0] === "string") return tiles[0];
+    const rawUrl = (source as { url?: unknown }).url;
+    const rawTiles = (source as { tiles?: unknown }).tiles;
+    const url = typeof rawUrl === "string" && rawUrl !== "" ? rawUrl : null;
+    const first = Array.isArray(rawTiles) && typeof rawTiles[0] === "string" && rawTiles[0] !== "" ? rawTiles[0] : null;
+    if (url === null && first === null) continue;
+    out.push({ id, url, tileTemplate: first });
   }
-  return null;
+  return out;
 }
 
 export function firstTileTemplate(tilejson: unknown): string | null {
@@ -157,6 +170,11 @@ export function firstTileTemplate(tilejson: unknown): string | null {
   const tiles = (tilejson as { tiles?: unknown }).tiles;
   if (Array.isArray(tiles) && typeof tiles[0] === "string" && tiles[0] !== "") return tiles[0];
   return null;
+}
+
+/** Does this URL still have placeholders in it? Then it is not fetchable yet. */
+export function isTileTemplate(url: string): boolean {
+  return /\{[zxy]\}/i.test(url);
 }
 
 /** `{z}/{x}/{y}` → real numbers. Case-insensitive; anything else is left alone. */

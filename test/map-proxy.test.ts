@@ -8,9 +8,10 @@ import {
   toLocalUrl,
   upstreamUrlFor,
   publicOrigin,
-  firstSourceUrl,
+  styleSources,
   firstTileTemplate,
   fillTileTemplate,
+  isTileTemplate,
   resolveMapStyleUrl,
   DEFAULT_TILE_UPSTREAM,
   DEFAULT_MAP_STYLE_URL,
@@ -179,25 +180,36 @@ test("a missing, malformed or multi-valued forwarded header never wins over a us
  * the style — so a map whose every tile 404s still draws a tinted rectangle
  * with a credit in the corner. These walk the chain the browser walks.
  */
-test("the first usable source URL is found, whether it is a TileJSON or inline tiles", () => {
-  assert.equal(
-    firstSourceUrl({ sources: { openmaptiles: { type: "vector", url: "https://tiles.openfreemap.org/planet" } } }),
-    "https://tiles.openfreemap.org/planet",
-  );
-  // Some styles skip the TileJSON and list templates directly.
-  assert.equal(
-    firstSourceUrl({ sources: { ofm: { type: "vector", tiles: ["https://t.example/{z}/{x}/{y}.pbf"] } } }),
-    "https://t.example/{z}/{x}/{y}.pbf",
-  );
-  // A source with neither is skipped, not treated as the answer.
-  assert.equal(
-    firstSourceUrl({ sources: { empty: { type: "vector" }, real: { url: "https://t.example/planet" } } }),
-    "https://t.example/planet",
-  );
-  assert.equal(firstSourceUrl({ sources: {} }), null);
-  assert.equal(firstSourceUrl({}), null);
-  assert.equal(firstSourceUrl(null), null);
-  assert.equal(firstSourceUrl("not a style"), null);
+test("a TileJSON source and an inline-tiles source are told apart, never conflated", () => {
+  // This is the bug the probe shipped with: it took tiles[0] from the raster
+  // source and fetched ".../{z}/{x}/{y}.png" verbatim, then reported the 404 as
+  // if the tile host were broken. A template is not a URL.
+  const sources = styleSources({
+    sources: {
+      natural_earth: { type: "raster", tiles: ["https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png"] },
+      openmaptiles: { type: "vector", url: "https://tiles.openfreemap.org/planet" },
+      nothing: { type: "vector" },
+    },
+  });
+  assert.deepEqual(sources, [
+    { id: "natural_earth", url: null, tileTemplate: "https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png" },
+    { id: "openmaptiles", url: "https://tiles.openfreemap.org/planet", tileTemplate: null },
+  ]);
+  // A source with neither is dropped, not probed as if it had one.
+  assert.equal(sources.some((source) => source.id === "nothing"), false);
+});
+
+test("every source is reported, so one broken layer is not mistaken for all of them", () => {
+  assert.equal(styleSources({ sources: {} }).length, 0);
+  assert.equal(styleSources({}).length, 0);
+  assert.equal(styleSources(null).length, 0);
+  assert.equal(styleSources("not a style").length, 0);
+});
+
+test("a URL still holding placeholders is not fetchable", () => {
+  assert.equal(isTileTemplate("https://t.example/{z}/{x}/{y}.png"), true);
+  assert.equal(isTileTemplate("https://t.example/{Z}/{X}/{Y}.png"), true);
+  assert.equal(isTileTemplate("https://tiles.openfreemap.org/planet"), false);
 });
 
 test("the tile template is read from the TileJSON, and missing is null not a guess", () => {

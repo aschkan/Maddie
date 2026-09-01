@@ -3,7 +3,7 @@ import { json } from "@/lib/api";
 import { proxyStatus, upstreamBytes } from "@/lib/http/fetch";
 import { aiHealth } from "@/lib/ai/client";
 import { getStore } from "@/lib/store";
-import { fillTileTemplate, firstSourceUrl, firstTileTemplate, DEFAULT_TILE_UPSTREAM } from "@/lib/map/proxy";
+import { fillTileTemplate, firstTileTemplate, isTileTemplate, styleSources, DEFAULT_TILE_UPSTREAM } from "@/lib/map/proxy";
 
 interface ProbeStep {
   step: string;
@@ -43,13 +43,7 @@ async function probeBasemap(upstream: string): Promise<ProbeStep[]> {
       });
       return response.ok ? response.bytes : null;
     } catch (error) {
-      steps.push({
-        step,
-        url,
-        ok: false,
-        status: null,
-        detail: error instanceof Error ? error.message : String(error),
-      });
+      steps.push({ step, url, ok: false, status: null, detail: error instanceof Error ? error.message : String(error) });
       return null;
     }
   };
@@ -66,27 +60,32 @@ async function probeBasemap(upstream: string): Promise<ProbeStep[]> {
   const style = parse(await fetchStep("style", `${base}/styles/liberty`));
   if (style === null) return steps;
 
-  const sourceUrl = firstSourceUrl(style);
-  if (sourceUrl === null) {
-    steps.push({ step: "source", url: "", ok: false, status: null, detail: "the style names no source to fetch tiles from" });
-    return steps;
-  }
-
-  const tilejson = parse(await fetchStep("source", sourceUrl));
-  if (tilejson === null) return steps;
-
-  const template = firstTileTemplate(tilejson);
-  if (template === null) {
-    steps.push({ step: "tile", url: "", ok: false, status: null, detail: "the source lists no tile template" });
+  const sources = styleSources(style);
+  if (sources.length === 0) {
+    steps.push({ step: "sources", url: "", ok: false, status: null, detail: "the style names no source to fetch tiles from" });
     return steps;
   }
 
   // z14 over Amsterdam — a tile that exists if any tile does.
-  await fetchStep("tile", fillTileTemplate(template, 14, 8425, 5387));
+  const fillHere = (template: string): string => fillTileTemplate(template, 14, 8425, 5387);
+
+  for (const source of sources) {
+    // A TileJSON URL is fetched and read; an inline template is already the
+    // tile, and fetching it unfilled is what produced a bogus 404 before.
+    let template = source.tileTemplate;
+    if (source.url !== null && !isTileTemplate(source.url)) {
+      const tilejson = parse(await fetchStep(`source:${source.id}`, source.url));
+      if (tilejson === null) continue;
+      template = firstTileTemplate(tilejson) ?? template;
+    }
+    if (template === null) {
+      steps.push({ step: `tile:${source.id}`, url: "", ok: false, status: null, detail: "this source lists no tile template" });
+      continue;
+    }
+    await fetchStep(`tile:${source.id}`, fillHere(template));
+  }
   return steps;
 }
-
-export const dynamic = "force-dynamic";
 
 /**
  * What this deployment can actually see. Every entry says whether a capability
