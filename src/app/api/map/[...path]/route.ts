@@ -54,7 +54,11 @@ export async function GET(request: Request, context: { params: Promise<{ path: s
         status: 200,
         headers: {
           "content-type": "application/json; charset=utf-8",
-          "cache-control": "public, max-age=600",
+          // 60s, not 600. This document now embeds an origin and its shape has
+          // changed twice; pinning it for ten minutes means a fix is invisible
+          // for ten minutes, on exactly the machine someone is setting up. The
+          // style is one request per map load — the saving was never the point.
+          "cache-control": "public, max-age=60",
           // The body now names an origin, so a shared cache must not hand a
           // document built for one host to a browser that asked on another.
           vary: "X-Forwarded-Host, X-Forwarded-Proto, Host",
