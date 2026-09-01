@@ -91,7 +91,37 @@ export function upstreamUrlFor(segments: readonly string[], upstream: string, se
   return isAllowedUrl(url, allowedOrigins(upstream)) ? url : null;
 }
 
-/** Absolute upstream URL to this app's own route, preserving the query string. */
+/**
+ * The public origin this response is being viewed at — scheme://host[:port].
+ *
+ * MapLibre REQUIRES an absolute `sprite` and rejects the root-relative path the
+ * rewrite below produces ("Invalid sprite URL … must be absolute"), so the
+ * style has to name an origin. It cannot be taken from `request.url`: behind
+ * the proxy that is the loopback upstream (127.0.0.1:8087), and a sprite URL
+ * pointing there is unreachable for everyone but the server itself.
+ *
+ * So: the forwarded headers the proxy sets, then Host, then the request's own
+ * origin. Only ever used to address THIS app, never to choose an upstream — the
+ * tile host is fixed in code, and nothing here can move it.
+ */
+export function publicOrigin(headers: Headers, fallback: string): string {
+  // A proxy chain appends, so the first entry is the client-facing one.
+  const first = (raw: string | null): string => ((raw ?? "").split(",")[0] ?? "").trim();
+  const host = first(headers.get("x-forwarded-host")) || first(headers.get("host"));
+  if (host === "") return fallback;
+  const forwarded = first(headers.get("x-forwarded-proto")).toLowerCase();
+  const scheme = forwarded === "http" || forwarded === "https" ? forwarded : fallback.startsWith("https:") ? "https" : "http";
+  try {
+    return new URL(`${scheme}://${host}`).origin;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * URL pointing back at this app's own route, preserving the query string.
+ * Absolute when `mount` is absolute — which is how the sprite gets a scheme.
+ */
 export function toLocalUrl(url: string, origins: readonly string[], mount = "/api/map"): string {
   if (!isAllowedUrl(url, origins)) return url;
   const parsed = new URL(url);

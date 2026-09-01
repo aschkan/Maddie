@@ -404,6 +404,12 @@ Two more that this build added, both from the toolchain:
     "Leave both blank", the documented setup produced a blank map and a
     `basemap.servedByApp: true` in `/api/health` at the same time. Both sides
     go through `resolveMapStyleUrl()` now. `test/map-proxy.test.ts`
+20. **MapLibre requires an ABSOLUTE `sprite` URL** and rejects the
+    root-relative one the style rewrite produced — the basemap then draws its
+    ground and none of its symbols, with one console line to say so. The origin
+    cannot come from `request.url`, which behind the proxy is the loopback
+    upstream: it comes from the forwarded headers, and the response `Vary`s on
+    them so a shared cache cannot mix hosts. `test/map-proxy.test.ts`
 
 ---
 

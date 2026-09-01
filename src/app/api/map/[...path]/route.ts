@@ -1,6 +1,6 @@
 import { getConfig } from "@/lib/config";
 import { upstreamBytes } from "@/lib/http/fetch";
-import { allowedOrigins, isJsonContentType, rewriteStyle, upstreamUrlFor } from "@/lib/map/proxy";
+import { allowedOrigins, isJsonContentType, publicOrigin, rewriteStyle, upstreamUrlFor } from "@/lib/map/proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -44,12 +44,20 @@ export async function GET(request: Request, context: { params: Promise<{ path: s
     // the same treatment: every absolute URL inside is pointed back here.
     if (isJsonContentType(contentType)) {
       const document: unknown = JSON.parse(new TextDecoder().decode(response.bytes));
-      const rewritten = rewriteStyle(document, allowedOrigins(config.mapTilesUpstream));
+      // Absolute, not root-relative: MapLibre rejects a relative `sprite`
+      // outright ("must be absolute") and draws the basemap without any of its
+      // symbols. The origin comes from the forwarded headers, so it is the one
+      // the browser actually used.
+      const mount = `${publicOrigin(request.headers, url.origin)}/api/map`;
+      const rewritten = rewriteStyle(document, allowedOrigins(config.mapTilesUpstream), mount);
       return new Response(JSON.stringify(rewritten), {
         status: 200,
         headers: {
           "content-type": "application/json; charset=utf-8",
           "cache-control": "public, max-age=600",
+          // The body now names an origin, so a shared cache must not hand a
+          // document built for one host to a browser that asked on another.
+          vary: "X-Forwarded-Host, X-Forwarded-Proto, Host",
           "access-control-allow-origin": "*",
         },
       });

@@ -7,6 +7,7 @@ import {
   safePath,
   toLocalUrl,
   upstreamUrlFor,
+  publicOrigin,
   resolveMapStyleUrl,
   DEFAULT_TILE_UPSTREAM,
   DEFAULT_MAP_STYLE_URL,
@@ -115,4 +116,56 @@ test("the browser and the server agree on the style URL for the same env", () =>
     const env = configured === undefined ? {} : { NEXT_PUBLIC_MAP_STYLE_URL: configured };
     assert.equal(resolveMapStyleUrl(configured), loadConfig(env).mapStyleUrl);
   }
+});
+
+/*
+ * TRAP: MapLibre REQUIRES an absolute sprite URL.
+ *
+ * The rewrite pointed every URL at "/api/map/…", which is fine for tiles and
+ * glyphs and fatal for the sprite: "Invalid sprite URL … must be absolute".
+ * The basemap then draws its ground and none of its symbols, and the only
+ * clue is one console line. So the mount has to carry an origin — and it
+ * cannot come from request.url, which behind the proxy is the loopback
+ * upstream nobody else can reach.
+ */
+test("the style mount can be absolute, so the sprite has a scheme", () => {
+  const style = {
+    sprite: "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
+    glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+    sources: { ofm: { url: "https://tiles.openfreemap.org/planet" } },
+  };
+  const out = rewriteStyle(style, origins, "https://maddie.example/api/map") as typeof style;
+  assert.equal(out.sprite, "https://maddie.example/api/map/sprites/ofm_f384/ofm");
+  // The braces still survive the round trip through URL().
+  assert.equal(out.glyphs, "https://maddie.example/api/map/fonts/{fontstack}/{range}.pbf");
+  assert.equal(out.sources.ofm.url, "https://maddie.example/api/map/planet");
+});
+
+test("the public origin comes from the forwarded headers, not the loopback upstream", () => {
+  const forwarded = new Headers({
+    host: "127.0.0.1:8087",
+    "x-forwarded-host": "maddie.arsaces.ir",
+    "x-forwarded-proto": "https",
+  });
+  assert.equal(publicOrigin(forwarded, "http://127.0.0.1:8087"), "https://maddie.arsaces.ir");
+
+  // Local test mode: plain HTTP, forwarded by the proxy on a laptop.
+  const local = new Headers({ host: "localhost:9087", "x-forwarded-proto": "http" });
+  assert.equal(publicOrigin(local, "http://127.0.0.1:8087"), "http://localhost:9087");
+});
+
+test("a missing, malformed or multi-valued forwarded header never wins over a usable fallback", () => {
+  const fallback = "https://maddie.arsaces.ir";
+  assert.equal(publicOrigin(new Headers(), fallback), fallback);
+  assert.equal(publicOrigin(new Headers({ host: "" }), fallback), fallback);
+  assert.equal(publicOrigin(new Headers({ host: " " }), fallback), fallback);
+  // A proxy chain appends; the FIRST entry is the client-facing one.
+  assert.equal(
+    publicOrigin(new Headers({ "x-forwarded-host": "a.example, b.example", "x-forwarded-proto": "https, http" }), fallback),
+    "https://a.example",
+  );
+  // An unknown scheme does not become part of the URL.
+  assert.equal(publicOrigin(new Headers({ host: "a.example", "x-forwarded-proto": "gopher" }), fallback), "https://a.example");
+  // A host carrying a path contributes only its origin.
+  assert.equal(publicOrigin(new Headers({ host: "a.example/evil" }), fallback), "https://a.example");
 });
