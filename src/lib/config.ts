@@ -1,3 +1,5 @@
+import { DEFAULT_MAP_STYLE_URL } from "./map/proxy.ts";
+
 /**
  * Every environment variable Maddie reads, parsed exactly once.
  *
@@ -167,7 +169,7 @@ export function loadConfig(env: Env): MaddieConfig {
     proxyProbeIntervalMs: num(env, "UPSTREAM_PROXY_PROBE_INTERVAL_MS", 600_000),
     upstreamTimeoutMs: num(env, "UPSTREAM_TIMEOUT_MS", 20_000),
 
-    mapStyleUrl: str(env, "NEXT_PUBLIC_MAP_STYLE_URL", "/api/map/styles/liberty"),
+    mapStyleUrl: str(env, "NEXT_PUBLIC_MAP_STYLE_URL", DEFAULT_MAP_STYLE_URL),
     mapTilesUpstream: str(env, "MAP_TILES_UPSTREAM", "https://tiles.openfreemap.org").replace(/\/+$/, ""),
 
     googleMapsKey: str(env, "GOOGLE_MAPS_SERVER_API_KEY"),

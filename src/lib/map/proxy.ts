@@ -21,6 +21,29 @@
 /** The only hosts this route will ever fetch from. Not configurable per request. */
 export const DEFAULT_TILE_UPSTREAM = "https://tiles.openfreemap.org";
 
+/** Where the browser asks for the style when nothing overrides it: this app. */
+export const DEFAULT_MAP_STYLE_URL = "/api/map/styles/liberty";
+
+/**
+ * The style URL the browser should use, given whatever was configured.
+ *
+ * An EMPTY value is an ABSENT one — the same rule `str()` applies in config.ts,
+ * and the two have to agree because they read the same key from opposite sides.
+ * They did not. The env file says "Leave both blank", so
+ * `NEXT_PUBLIC_MAP_STYLE_URL=` is the documented setup; Next inlines that as
+ * `""` at build time; and `?? DEFAULT` keeps it, because an empty string is not
+ * nullish. The server resolved the same key to this default and reported
+ * `basemap.servedByApp: true` in /api/health while the browser handed MapLibre
+ * an empty URL and logged "There is no style added to the map."
+ *
+ * A blank map, no failed request to find in the network tab, and the two halves
+ * of the app disagreeing about whether the basemap was configured at all.
+ */
+export function resolveMapStyleUrl(configured: string | undefined): string {
+  const trimmed = (configured ?? "").trim();
+  return trimmed === "" ? DEFAULT_MAP_STYLE_URL : trimmed;
+}
+
 export function allowedOrigins(configured: string): string[] {
   const origins = new Set<string>();
   for (const candidate of [DEFAULT_TILE_UPSTREAM, configured]) {

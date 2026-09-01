@@ -7,8 +7,11 @@ import {
   safePath,
   toLocalUrl,
   upstreamUrlFor,
+  resolveMapStyleUrl,
   DEFAULT_TILE_UPSTREAM,
+  DEFAULT_MAP_STYLE_URL,
 } from "../src/lib/map/proxy.ts";
+import { loadConfig } from "../src/lib/config.ts";
 
 const origins = allowedOrigins("");
 
@@ -83,4 +86,33 @@ test("the OpenStreetMap attribution survives the rewrite — it is a licence obl
 test("URLs that are not ours are left exactly as they are", () => {
   assert.equal(toLocalUrl("https://example.test/a.png", origins), "https://example.test/a.png");
   assert.equal(toLocalUrl("not a url", origins), "not a url");
+});
+
+/*
+ * TRAP: an EMPTY NEXT_PUBLIC_MAP_STYLE_URL is an ABSENT one.
+ *
+ * The env file says "Leave both blank", so blank is the documented setup. Next
+ * inlines a blank as "" at build time, and `?? DEFAULT` keeps it — an empty
+ * string is not nullish. MapView handed MapLibre "" and logged "There is no
+ * style added to the map."; the server resolved the same key to the default and
+ * reported basemap.servedByApp: true. A blank map with nothing failing.
+ */
+test("a blank style URL resolves to the app's own basemap, not to nothing", () => {
+  assert.equal(resolveMapStyleUrl(""), DEFAULT_MAP_STYLE_URL);
+  assert.equal(resolveMapStyleUrl("   "), DEFAULT_MAP_STYLE_URL);
+  assert.equal(resolveMapStyleUrl(undefined), DEFAULT_MAP_STYLE_URL);
+});
+
+test("a configured style URL is used as given, trimmed", () => {
+  assert.equal(resolveMapStyleUrl("https://tiles.example/styles/x"), "https://tiles.example/styles/x");
+  assert.equal(resolveMapStyleUrl("  https://tiles.example/styles/x  "), "https://tiles.example/styles/x");
+});
+
+test("the browser and the server agree on the style URL for the same env", () => {
+  // The two read the same key from opposite sides. When they disagree,
+  // /api/health says the basemap is served by the app while the map is blank.
+  for (const configured of [undefined, "", "   ", "https://tiles.example/s"]) {
+    const env = configured === undefined ? {} : { NEXT_PUBLIC_MAP_STYLE_URL: configured };
+    assert.equal(resolveMapStyleUrl(configured), loadConfig(env).mapStyleUrl);
+  }
 });

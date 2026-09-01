@@ -397,6 +397,13 @@ Two more that this build added, both from the toolchain:
     build step, so this is a hard constraint on `src/`, not a style choice.
 18. **`new URL()` percent-encodes the braces** in `{z}/{x}/{y}` tile templates
     and drops a default port from a proxy authority. Both are decoded back.
+19. **An empty `NEXT_PUBLIC_*` is not a missing one.** Next inlines a blank env
+    var as `""` at build time, so `?? DEFAULT` keeps the empty string — while
+    `str()` on the server treats blank as absent and returns the default. The
+    map read `NEXT_PUBLIC_MAP_STYLE_URL` that way, and since the env file says
+    "Leave both blank", the documented setup produced a blank map and a
+    `basemap.servedByApp: true` in `/api/health` at the same time. Both sides
+    go through `resolveMapStyleUrl()` now. `test/map-proxy.test.ts`
 
 ---
 

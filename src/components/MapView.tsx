@@ -3,6 +3,7 @@
 // TRAP: maplibre-gl has NO default export. Named imports only.
 import { Map as MapLibreMap, Marker, NavigationControl, type StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef } from "react";
+import { resolveMapStyleUrl } from "@/lib/map/proxy";
 
 export interface MapMarker {
   lat: number;
@@ -17,7 +18,10 @@ export interface MapLine {
   width?: number;
 }
 
-const STYLE_URL = process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? "/api/map/styles/liberty";
+// Blank is the documented setup ("Leave both blank"), and Next inlines a blank
+// as "" — which `??` would keep. resolveMapStyleUrl applies the same
+// empty-is-absent rule the server uses, so both halves agree on the default.
+const STYLE_URL = resolveMapStyleUrl(process.env.NEXT_PUBLIC_MAP_STYLE_URL);
 
 export function MapView({
   centre,
