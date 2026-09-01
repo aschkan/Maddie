@@ -1,0 +1,19 @@
+{
+  "reviews": [
+    {
+      "name": "places/ChIJVXealLU_xkcRja_At0z9AGY/reviews/1",
+      "relativePublishTimeDescription": "2 months ago",
+      "rating": 5,
+      "text": { "text": "A man followed me in from the street and the woman behind the counter came straight out and stood with me until he left. I will never forget that.", "languageCode": "en" },
+      "publishTime": "2026-06-20T18:20:00Z"
+    },
+    {
+      "name": "places/ChIJVXealLU_xkcRja_At0z9AGY/reviews/2",
+      "relativePublishTimeDescription": "a week ago",
+      "rating": 2,
+      "originalText": { "text": "Rij was lang en het personeel was onvriendelijk.", "languageCode": "nl" },
+      "publishTime": "2026-08-22T09:10:00Z"
+    },
+    { "name": "places/x/reviews/3", "rating": 4 }
+  ]
+}

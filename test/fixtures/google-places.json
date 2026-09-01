@@ -1,0 +1,14 @@
+{
+  "places": [
+    {
+      "id": "ChIJVXealLU_xkcRja_At0z9AGY",
+      "types": ["pharmacy", "store", "point_of_interest"],
+      "formattedAddress": "Damstraat 2, 1012 JM Amsterdam, Netherlands",
+      "location": { "latitude": 52.3730558, "longitude": 4.8949 },
+      "rating": 4.1,
+      "userRatingCount": 214,
+      "displayName": { "text": "Apotheek Damstraat", "languageCode": "nl" },
+      "currentOpeningHours": { "openNow": true }
+    }
+  ]
+}

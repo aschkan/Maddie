@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0b0d12;
+  --color-ink-soft: #12151d;
+  --color-line: #232838;
+  --color-paper: #e9ecf4;
+  --color-muted: #8b93a7;
+  --color-accent: #b98cff;
+  --color-good: #4ade80;
+  --color-fair: #a3e635;
+  --color-caution: #fbbf24;
+  --color-poor: #f87171;
+  --color-unknown: #6b7280;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+}
+
+/* A gap is never styled like a finding: it is quieter, and it is always
+   attributed to us rather than to the place. */
+.gap-note {
+  border-left: 2px solid var(--color-unknown);
+  background: color-mix(in srgb, var(--color-unknown) 12%, transparent);
+}
+
+.maplibregl-map {
+  font-family: var(--font-sans);
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}

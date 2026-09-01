@@ -1,0 +1,38 @@
+{
+  "name": "maddie",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Maddie — a women's safety-intelligence platform for the Netherlands.",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p ${DEV_PORT:-5007}",
+    "build": "next build",
+    "start": "next start -H ${HOST:-127.0.0.1} -p ${PORT:-8087}",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "tsc --noEmit && eslint . && node --test \"test/**/*.test.ts\"",
+    "verify:nl-crime": "node scripts/verify-nl-crime.ts"
+  },
+  "dependencies": {
+    "maplibre-gl": "6.6.0",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tz-lookup": "6.1.25",
+    "undici": "8.10.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}
