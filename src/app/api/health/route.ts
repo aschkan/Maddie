@@ -3,7 +3,16 @@ import { json } from "@/lib/api";
 import { proxyStatus, upstreamBytes } from "@/lib/http/fetch";
 import { aiHealth } from "@/lib/ai/client";
 import { getStore } from "@/lib/store";
-import { fillTileTemplate, firstTileTemplate, isTileTemplate, styleSources, DEFAULT_TILE_UPSTREAM } from "@/lib/map/proxy";
+import {
+  fillTileTemplate,
+  firstTileTemplate,
+  isTileTemplate,
+  styleSources,
+  tileForLatLng,
+  zoomRange,
+  zoomWithin,
+  DEFAULT_TILE_UPSTREAM,
+} from "@/lib/map/proxy";
 
 interface ProbeStep {
   step: string;
@@ -66,23 +75,26 @@ async function probeBasemap(upstream: string): Promise<ProbeStep[]> {
     return steps;
   }
 
-  // z14 over Amsterdam — a tile that exists if any tile does.
-  const fillHere = (template: string): string => fillTileTemplate(template, 14, 8425, 5387);
-
   for (const source of sources) {
     // A TileJSON URL is fetched and read; an inline template is already the
     // tile, and fetching it unfilled is what produced a bogus 404 before.
     let template = source.tileTemplate;
+    let range = { minzoom: source.minzoom, maxzoom: source.maxzoom };
     if (source.url !== null && !isTileTemplate(source.url)) {
       const tilejson = parse(await fetchStep(`source:${source.id}`, source.url));
       if (tilejson === null) continue;
       template = firstTileTemplate(tilejson) ?? template;
+      const declared = zoomRange(tilejson);
+      range = { minzoom: declared.minzoom ?? range.minzoom, maxzoom: declared.maxzoom ?? range.maxzoom };
     }
     if (template === null) {
       steps.push({ step: `tile:${source.id}`, url: "", ok: false, status: null, detail: "this source lists no tile template" });
       continue;
     }
-    await fetchStep(`tile:${source.id}`, fillHere(template));
+    // Amsterdam, at a zoom THIS source actually has tiles for. Asking a
+    // low-zoom relief layer for z14 is a 404 that says nothing about the host.
+    const { z, x, y } = tileForLatLng(52.3728, 4.8936, zoomWithin(14, range));
+    await fetchStep(`tile:${source.id}`, fillTileTemplate(template, z, x, y));
   }
   return steps;
 }

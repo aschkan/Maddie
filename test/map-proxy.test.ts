@@ -12,6 +12,9 @@ import {
   firstTileTemplate,
   fillTileTemplate,
   isTileTemplate,
+  zoomRange,
+  zoomWithin,
+  tileForLatLng,
   resolveMapStyleUrl,
   DEFAULT_TILE_UPSTREAM,
   DEFAULT_MAP_STYLE_URL,
@@ -192,8 +195,14 @@ test("a TileJSON source and an inline-tiles source are told apart, never conflat
     },
   });
   assert.deepEqual(sources, [
-    { id: "natural_earth", url: null, tileTemplate: "https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png" },
-    { id: "openmaptiles", url: "https://tiles.openfreemap.org/planet", tileTemplate: null },
+    {
+      id: "natural_earth",
+      url: null,
+      tileTemplate: "https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png",
+      minzoom: null,
+      maxzoom: null,
+    },
+    { id: "openmaptiles", url: "https://tiles.openfreemap.org/planet", tileTemplate: null, minzoom: null, maxzoom: null },
   ]);
   // A source with neither is dropped, not probed as if it had one.
   assert.equal(sources.some((source) => source.id === "nothing"), false);
@@ -224,4 +233,35 @@ test("a tile template becomes a real URL, in either case", () => {
   assert.equal(fillTileTemplate("https://t.example/{Z}/{X}/{Y}.pbf", 1, 2, 3), "https://t.example/1/2/3.pbf");
   // Anything that is not z/x/y is left for whoever owns it (e.g. {ratio}).
   assert.equal(fillTileTemplate("https://t.example/{z}/{x}/{y}{ratio}.pbf", 1, 2, 3), "https://t.example/1/2/3{ratio}.pbf");
+});
+
+/*
+ * TRAP: a 404 from outside a source's zoom range says nothing about the host.
+ *
+ * The liberty style's `natural_earth` layer is shaded relief for low zooms.
+ * Probing it at z14 404s on a basemap that is working perfectly — and because
+ * `reachable` is "every step ok", one such 404 reported the whole basemap
+ * unreachable while real vector tiles were arriving at 59 KB apiece.
+ */
+test("a source's zoom range is read, from the style or its TileJSON", () => {
+  assert.deepEqual(zoomRange({ type: "raster", minzoom: 0, maxzoom: 8 }), { minzoom: 0, maxzoom: 8 });
+  assert.deepEqual(zoomRange({ type: "vector" }), { minzoom: null, maxzoom: null });
+  assert.deepEqual(zoomRange({ minzoom: "5" }), { minzoom: null, maxzoom: null });
+  assert.deepEqual(zoomRange(null), { minzoom: null, maxzoom: null });
+});
+
+test("the probe zoom is pulled inside the range the source declares", () => {
+  assert.equal(zoomWithin(14, { minzoom: 0, maxzoom: 8 }), 8);
+  assert.equal(zoomWithin(14, { minzoom: 0, maxzoom: 22 }), 14);
+  assert.equal(zoomWithin(2, { minzoom: 6, maxzoom: 14 }), 6);
+  // Undeclared is not a constraint: ask for what was wanted.
+  assert.equal(zoomWithin(14, { minzoom: null, maxzoom: null }), 14);
+});
+
+test("the tile covering a coordinate is computed, not hard-coded to one zoom", () => {
+  assert.deepEqual(tileForLatLng(52.3728, 4.8936, 14), { z: 14, x: 8414, y: 5384 });
+  assert.deepEqual(tileForLatLng(52.3728, 4.8936, 0), { z: 0, x: 0, y: 0 });
+  // The poles are outside Web Mercator; clamping keeps the tile on the map.
+  assert.deepEqual(tileForLatLng(90, 180, 1), { z: 1, x: 1, y: 0 });
+  assert.deepEqual(tileForLatLng(-90, -180, 1), { z: 1, x: 0, y: 1 });
 });

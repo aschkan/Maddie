@@ -146,6 +146,9 @@ export interface StyleSource {
   url: string | null;
   /** A `{z}/{x}/{y}` template, if the source lists tiles inline. */
   tileTemplate: string | null;
+  /** The zoom range this source actually has tiles for, when it says. */
+  minzoom: number | null;
+  maxzoom: number | null;
 }
 
 export function styleSources(style: unknown): StyleSource[] {
@@ -160,9 +163,47 @@ export function styleSources(style: unknown): StyleSource[] {
     const url = typeof rawUrl === "string" && rawUrl !== "" ? rawUrl : null;
     const first = Array.isArray(rawTiles) && typeof rawTiles[0] === "string" && rawTiles[0] !== "" ? rawTiles[0] : null;
     if (url === null && first === null) continue;
-    out.push({ id, url, tileTemplate: first });
+    out.push({ id, url, tileTemplate: first, ...zoomRange(source) });
   }
   return out;
+}
+
+/**
+ * A source's declared zoom range, from the style or from its TileJSON.
+ *
+ * Asking a source for a tile outside its range is a 404 that means nothing —
+ * and it is the 404 the probe's second version produced: `natural_earth` is
+ * shaded relief for low zooms, so a z14 request fails on a basemap that is
+ * working perfectly, and `reachable` went false for the whole thing.
+ */
+export function zoomRange(source: unknown): { minzoom: number | null; maxzoom: number | null } {
+  const read = (key: string): number | null => {
+    if (source === null || typeof source !== "object") return null;
+    const value = (source as Record<string, unknown>)[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+  return { minzoom: read("minzoom"), maxzoom: read("maxzoom") };
+}
+
+/** A zoom this source can actually answer, preferring the one asked for. */
+export function zoomWithin(preferred: number, range: { minzoom: number | null; maxzoom: number | null }): number {
+  const min = range.minzoom ?? 0;
+  const max = range.maxzoom ?? preferred;
+  return Math.max(min, Math.min(max, preferred));
+}
+
+/**
+ * Slippy-map tile covering a coordinate at a zoom — the Web Mercator formula.
+ * Hard-coding one tile only works at one zoom, and the sources here do not
+ * share a zoom range.
+ */
+export function tileForLatLng(lat: number, lng: number, zoom: number): { z: number; x: number; y: number } {
+  const n = 2 ** zoom;
+  const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+  const radians = (clampedLat * Math.PI) / 180;
+  const x = Math.floor(((lng + 180) / 360) * n);
+  const y = Math.floor(((1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2) * n);
+  return { z: zoom, x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
 }
 
 export function firstTileTemplate(tilejson: unknown): string | null {
