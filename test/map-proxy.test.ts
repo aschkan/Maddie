@@ -8,6 +8,9 @@ import {
   toLocalUrl,
   upstreamUrlFor,
   publicOrigin,
+  firstSourceUrl,
+  firstTileTemplate,
+  fillTileTemplate,
   resolveMapStyleUrl,
   DEFAULT_TILE_UPSTREAM,
   DEFAULT_MAP_STYLE_URL,
@@ -168,4 +171,45 @@ test("a missing, malformed or multi-valued forwarded header never wins over a us
   assert.equal(publicOrigin(new Headers({ host: "a.example", "x-forwarded-proto": "gopher" }), fallback), "https://a.example");
   // A host carrying a path contributes only its origin.
   assert.equal(publicOrigin(new Headers({ host: "a.example/evil" }), fallback), "https://a.example");
+});
+
+/*
+ * The basemap chain, for the health probe. A blank map looks the same whichever
+ * link is broken, because the background colour and the attribution come from
+ * the style — so a map whose every tile 404s still draws a tinted rectangle
+ * with a credit in the corner. These walk the chain the browser walks.
+ */
+test("the first usable source URL is found, whether it is a TileJSON or inline tiles", () => {
+  assert.equal(
+    firstSourceUrl({ sources: { openmaptiles: { type: "vector", url: "https://tiles.openfreemap.org/planet" } } }),
+    "https://tiles.openfreemap.org/planet",
+  );
+  // Some styles skip the TileJSON and list templates directly.
+  assert.equal(
+    firstSourceUrl({ sources: { ofm: { type: "vector", tiles: ["https://t.example/{z}/{x}/{y}.pbf"] } } }),
+    "https://t.example/{z}/{x}/{y}.pbf",
+  );
+  // A source with neither is skipped, not treated as the answer.
+  assert.equal(
+    firstSourceUrl({ sources: { empty: { type: "vector" }, real: { url: "https://t.example/planet" } } }),
+    "https://t.example/planet",
+  );
+  assert.equal(firstSourceUrl({ sources: {} }), null);
+  assert.equal(firstSourceUrl({}), null);
+  assert.equal(firstSourceUrl(null), null);
+  assert.equal(firstSourceUrl("not a style"), null);
+});
+
+test("the tile template is read from the TileJSON, and missing is null not a guess", () => {
+  assert.equal(firstTileTemplate({ tiles: ["https://t.example/1/{z}/{x}/{y}.pbf"] }), "https://t.example/1/{z}/{x}/{y}.pbf");
+  assert.equal(firstTileTemplate({ tiles: [] }), null);
+  assert.equal(firstTileTemplate({}), null);
+  assert.equal(firstTileTemplate(null), null);
+});
+
+test("a tile template becomes a real URL, in either case", () => {
+  assert.equal(fillTileTemplate("https://t.example/{z}/{x}/{y}.pbf", 14, 8425, 5387), "https://t.example/14/8425/5387.pbf");
+  assert.equal(fillTileTemplate("https://t.example/{Z}/{X}/{Y}.pbf", 1, 2, 3), "https://t.example/1/2/3.pbf");
+  // Anything that is not z/x/y is left for whoever owns it (e.g. {ratio}).
+  assert.equal(fillTileTemplate("https://t.example/{z}/{x}/{y}{ratio}.pbf", 1, 2, 3), "https://t.example/1/2/3{ratio}.pbf");
 });

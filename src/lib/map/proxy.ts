@@ -131,6 +131,42 @@ export function toLocalUrl(url: string, origins: readonly string[], mount = "/ap
   return `${mount}${pathname}${parsed.search}`;
 }
 
+/**
+ * Walking the basemap chain, for the health probe: a style names a source, a
+ * source names a tile template, and a template needs numbers before it is a
+ * URL. Any of the three can be the broken link, and a blank map looks the same
+ * whichever it is — the background colour and attribution come from the style,
+ * so they render happily while no tile has ever arrived.
+ */
+export function firstSourceUrl(style: unknown): string | null {
+  if (style === null || typeof style !== "object") return null;
+  const sources = (style as { sources?: unknown }).sources;
+  if (sources === null || typeof sources !== "object") return null;
+  for (const source of Object.values(sources as Record<string, unknown>)) {
+    if (source === null || typeof source !== "object") continue;
+    const url = (source as { url?: unknown }).url;
+    if (typeof url === "string" && url !== "") return url;
+    const tiles = (source as { tiles?: unknown }).tiles;
+    if (Array.isArray(tiles) && typeof tiles[0] === "string") return tiles[0];
+  }
+  return null;
+}
+
+export function firstTileTemplate(tilejson: unknown): string | null {
+  if (tilejson === null || typeof tilejson !== "object") return null;
+  const tiles = (tilejson as { tiles?: unknown }).tiles;
+  if (Array.isArray(tiles) && typeof tiles[0] === "string" && tiles[0] !== "") return tiles[0];
+  return null;
+}
+
+/** `{z}/{x}/{y}` → real numbers. Case-insensitive; anything else is left alone. */
+export function fillTileTemplate(template: string, z: number, x: number, y: number): string {
+  return template
+    .replace(/\{z\}/gi, String(z))
+    .replace(/\{x\}/gi, String(x))
+    .replace(/\{y\}/gi, String(y));
+}
+
 const ATTRIBUTION_KEYS = new Set(["attribution", "copyright", "license", "licence"]);
 
 /**
