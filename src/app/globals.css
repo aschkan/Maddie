@@ -156,3 +156,6 @@ button.clear { padding: .5rem .6rem; color: var(--muted); }
 
 .findings { margin: 0; padding-left: 1.05rem; display: flex; flex-direction: column; gap: .25rem; }
 .findings li { font-size: .81rem; color: var(--muted); line-height: 1.45; }
+
+/* A search that could not run is not a search that found nothing. */
+.search-failed { margin: 0; font-size: .78rem; color: #ffc9b0; line-height: 1.4; }

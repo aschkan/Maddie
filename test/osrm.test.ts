@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { fetchRoute, parseRoute, routeUrl } from "../src/lib/osrm.ts";
-import { parsePlaces } from "../src/lib/geocode.ts";
+import { parsePlaces, searchPlaces } from "../src/lib/geocode.ts";
 import { formatDistance, formatDuration } from "../src/lib/format.ts";
 
 const AMSTERDAM = { lat: 52.3728, lng: 4.8936 };
@@ -236,6 +236,45 @@ test("an unreachable routing service says so plainly", async () => {
     const result = await fetchRoute(AMSTERDAM, DAM_SQUARE);
     assert.ok(!result.ok);
     assert.match(result.error, /Could not reach the routing service/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+/* ------------------------- address search failures ------------------------- */
+
+test("a search that could not run is told apart from one that found nothing", async () => {
+  // Both used to be an empty array, so a blocked or slow Nominatim looked
+  // exactly like a typo — and you would sit retyping an address that was fine.
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+  try {
+    const outcome = await searchPlaces("Dam Amsterdam");
+    assert.deepEqual(outcome.places, []);
+    assert.match(outcome.error ?? "", /could not be reached/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("finding nothing is not reported as a failure", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("[]", { status: 200 })) as typeof fetch;
+  try {
+    const outcome = await searchPlaces("qwertyuiop nowhere");
+    assert.deepEqual(outcome.places, []);
+    assert.equal(outcome.error, undefined);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("an aborted search is silent — we replaced the request", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => { throw new DOMException("aborted", "AbortError"); }) as typeof fetch;
+  try {
+    const outcome = await searchPlaces("Dam Amsterdam");
+    assert.equal(outcome.error, undefined);
   } finally {
     globalThis.fetch = original;
   }

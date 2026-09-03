@@ -28,6 +28,7 @@ export default function PlaceSearch({ label, badge, accent, value, text, onText,
   const [hits, setHits] = useState<Place[]>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,13 +46,15 @@ export default function PlaceSearch({ label, badge, accent, value, text, onText,
           setHits([]);
           setOpen(false);
           setBusy(false);
+          setFailed(null);
           return;
         }
         setBusy(true);
-        const found = await searchPlaces(query, { signal: controller.signal });
+        const outcome = await searchPlaces(query, { signal: controller.signal });
         if (controller.signal.aborted) return;
-        setHits(found);
-        setOpen(found.length > 0);
+        setHits(outcome.places);
+        setOpen(outcome.places.length > 0);
+        setFailed(outcome.error ?? null);
         setBusy(false);
       })();
     }, 500);
@@ -95,6 +98,7 @@ export default function PlaceSearch({ label, badge, accent, value, text, onText,
         <p className="coords">{value.lat.toFixed(5)}, {value.lng.toFixed(5)}</p>
       )}
       {busy && <p className="coords">searching…</p>}
+      {failed && !busy && <p className="search-failed">{failed}</p>}
 
       {open && hits.length > 0 && (
         <ul className="hits">

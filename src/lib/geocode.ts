@@ -40,13 +40,26 @@ export function parsePlaces(reply: unknown): Place[] {
   return places;
 }
 
-/** Search for a place by name. Never throws; an empty list means "nothing". */
+export interface SearchOutcome {
+  places: Place[];
+  /** Set when the search could not be run. Not the same as finding nothing. */
+  error?: string;
+}
+
+/**
+ * Search for a place by name. Never throws.
+ *
+ * Returns an outcome rather than a bare list, because "the search timed out"
+ * and "there is no such street" are different answers that were previously
+ * both an empty array — so a blocked or slow Nominatim looked exactly like a
+ * typo, and you would sit there retyping an address that was fine.
+ */
 export async function searchPlaces(
   query: string,
   options: { base?: string; limit?: number; signal?: AbortSignal } = {},
-): Promise<Place[]> {
+): Promise<SearchOutcome> {
   const text = query.trim();
-  if (text.length < 3) return [];
+  if (text.length < 3) return { places: [] };
 
   const params = new URLSearchParams({
     q: text,
@@ -61,9 +74,17 @@ export async function searchPlaces(
       signal: options.signal,
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) return [];
-    return parsePlaces(await response.json());
-  } catch {
-    return [];
+    if (response.status === 429) {
+      return { places: [], error: "Address search is rate limited just now — type more slowly, or click the map." };
+    }
+    if (!response.ok) {
+      return { places: [], error: `Address search answered ${response.status}.` };
+    }
+    return { places: parsePlaces(await response.json()) };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return { places: [] };   // we replaced the request; not a failure
+    }
+    return { places: [], error: "Address search could not be reached. Click the map to set a point instead." };
   }
 }

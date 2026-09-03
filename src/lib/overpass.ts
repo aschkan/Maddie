@@ -13,7 +13,7 @@
  * on the path for any of it.
  */
 
-import { boundsAround, distanceToPathM, pathLengthM, samplePath } from "./geo.ts";
+import { distanceToPathM, pathLengthM, samplePath } from "./geo.ts";
 import type { LatLng } from "./osrm.ts";
 
 export const DEFAULT_OVERPASS =
@@ -60,31 +60,63 @@ interface OverpassElement {
   geometry?: { lat?: number; lon?: number }[];
 }
 
+/** Points every this far along the route, used as the spine of the corridor. */
+const SPINE_EVERY_M = 150;
 /**
- * One Overpass query for everything the read needs.
+ * A ceiling on the spine.
+ *
+ * The coordinate list is repeated once per clause, so the query grows as
+ * points × clauses — 250 points made a 34 KB query, which Overpass has to
+ * parse before it can refuse it.
+ */
+const MAX_SPINE_POINTS = 120;
+
+/**
+ * One Overpass query for everything the read needs, along a CORRIDOR.
+ *
+ * Not a bounding box. A bbox around a 7.4 km route across Amsterdam covers
+ * 7.5 km² — fifteen times the area the route occupies — and asking for every
+ * `way["highway"]` and every shop inside that is an expensive enough query that
+ * Overpass answers 504 whenever it is busy. That failure comes and goes, which
+ * reads like a flaky connection and is actually a query that is too big.
+ *
+ * `around:` takes a polyline and matches anything within a radius of it, so the
+ * query asks about the streets the route runs along rather than the rectangle
+ * it happens to span.
  *
  * One query, not several: Overpass hands out a couple of slots per IP and
- * several parallel queries is what earns a 429. `out tags geom` is needed
- * because ways have to be matched to the route by geometry — OSRM returns a
- * line, not OSM way ids.
+ * parallel queries are what earn a 429. `out tags geom` is needed because ways
+ * have to be matched to the route by geometry — OSRM returns a line, not OSM
+ * way ids.
  */
 export function overpassQuery(path: LatLng[], timeoutS = 25): string | null {
-  const box = boundsAround(path, NEARBY_M + 15);
-  if (!box) return null;
-  const bbox = `${box.south},${box.west},${box.north},${box.east}`;
+  if (path.length < 2) return null;
+
+  // The spine only bounds the search; more points than this lengthen the query
+  // string without narrowing the corridor.
+  let spine = samplePath(path, SPINE_EVERY_M);
+  if (spine.length > MAX_SPINE_POINTS) {
+    const stride = Math.ceil(spine.length / MAX_SPINE_POINTS);
+    spine = spine.filter((_, index) => index % stride === 0 || index === spine.length - 1);
+  }
+  if (spine.length < 2) return null;
+
+  // Five decimals is about a metre — more is noise in a 35 m corridor and only
+  // makes the query longer.
+  const line = spine.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(",");
+  const near = `around:${NEARBY_M},${line}`;
 
   return `[out:json][timeout:${timeoutS}];
 (
-  way["highway"](${bbox});
-  way["landuse"~"^(forest|grass|meadow|village_green)$"](${bbox});
-  way["leisure"~"^(park|garden|nature_reserve)$"](${bbox});
-  way["natural"~"^(wood|scrub|water)$"](${bbox});
-  node["highway"="street_lamp"](${bbox});
-  node["highway"="crossing"](${bbox});
-  node["amenity"~"^(cafe|bar|pub|restaurant|fast_food|pharmacy|fuel|police|hospital)$"](${bbox});
-  node["shop"](${bbox});
+  way["highway"](${near});
+  way["landuse"~"^(forest|grass|meadow|village_green)$"](${near});
+  way["leisure"~"^(park|garden|nature_reserve)$"](${near});
+  way["natural"~"^(wood|scrub)$"](${near});
+  node["highway"~"^(street_lamp|crossing)$"](${near});
+  node["amenity"~"^(cafe|bar|pub|restaurant|fast_food|pharmacy|fuel|police|hospital)$"](${near});
+  node["shop"](${near});
 );
-out tags geom 3000;`;
+out tags geom 2000;`;
 }
 
 function wayPath(element: OverpassElement): LatLng[] {
@@ -215,6 +247,15 @@ export async function fetchFacts(
     });
     if (response.status === 429) {
       return { ok: false, error: "OpenStreetMap's query service is rate limiting us. Try again in a minute." };
+    }
+    if (response.status === 504) {
+      // Overpass timed out running the query. It reached them — this is not a
+      // connection problem, and saying so stops the next hour being spent on
+      // the network instead of on the query.
+      return {
+        ok: false,
+        error: "OpenStreetMap's query service timed out on this route. It is busy — try again, or try a shorter route.",
+      };
     }
     if (!response.ok) {
       return { ok: false, error: `OpenStreetMap's query service answered ${response.status}.` };

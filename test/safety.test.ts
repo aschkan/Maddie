@@ -65,7 +65,44 @@ test("the Overpass query asks for geometry, because ways are matched by shape", 
   assert.match(q, /out tags geom/);
   assert.match(q, /way\["highway"\]/);
   assert.match(q, /street_lamp/);
+  // Lamps and crossings share one clause — each clause repeats every coordinate.
+  assert.equal((q.match(/around:/g) ?? []).length, 7);
   assert.match(q, /\[out:json\]\[timeout:\d+\]/);
+});
+
+test("the query is a corridor along the route, not a box around it", () => {
+  // The bug this locks: a bbox around a 7.4 km route across Amsterdam covers
+  // 7.5 km², fifteen times the area the route occupies, and asking for every
+  // road and shop inside it is expensive enough that Overpass answers 504
+  // whenever it is busy — an intermittent failure that reads like a bad
+  // connection and is actually a query that is too big.
+  const long: { lat: number; lng: number }[] = [];
+  for (let i = 0; i <= 40; i++) {
+    const t = i / 40;
+    long.push({ lat: 52.37172 + (52.38629 - 52.37172) * t, lng: 4.89080 + (4.82780 - 4.89080) * t });
+  }
+  const q = overpassQuery(long)!;
+  assert.match(q, /around:\d+,/, "must search along the line");
+  // A bare four-number bbox clause would mean the rectangle came back.
+  const withoutCorridors = q.replace(/around:\d+,[-\d.,]+/g, "CORRIDOR");
+  assert.doesNotMatch(withoutCorridors, /\(\s*-?[\d.]+,-?[\d.]+,-?[\d.]+,-?[\d.]+\s*\)/);
+});
+
+test("a very long route does not produce an unbounded query", () => {
+  // 200 km. The spine is capped, so the query stays a sane size instead of
+  // growing until Overpass refuses to parse it.
+  const huge: { lat: number; lng: number }[] = [];
+  for (let i = 0; i <= 400; i++) huge.push({ lat: 52 + i * 0.005, lng: 4.9 });
+  const q = overpassQuery(huge)!;
+  // The coordinate list is repeated per clause, so this grows as points ×
+  // clauses. 250 points across eight clauses made a 34 KB query that Overpass
+  // has to parse before it can refuse it.
+  assert.ok(q.length < 20_000, `query is ${q.length} bytes`);
+});
+
+test("a route of one point has no query rather than a broken one", () => {
+  assert.equal(overpassQuery([{ lat: 52.37, lng: 4.89 }]), null);
+  assert.equal(overpassQuery([]), null);
 });
 
 test("an empty path has no query rather than a broken one", () => {
