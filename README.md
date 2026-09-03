@@ -21,6 +21,28 @@ npm run build && npm run start
 npm run check      # typecheck, lint, and 21 tests — all offline
 ```
 
+## The safety read
+
+With a route on screen, the page reads the streets it runs along and says how
+they look at the hour you set.
+
+**One data source: OpenStreetMap.** Not recorded crime — that is published per
+neighbourhood per month, and a walking route usually sits inside a single
+neighbourhood, so it hands every candidate route the same number and cannot
+answer "which of these two streets". OSM changes metre by metre, carries `lit=*`
+(what most decides how a street feels after dark), and is the same data the
+route was planned on.
+
+**The score is computed in code; the model writes the sentence.** Lit and unlit
+samples, street lamps, frontage, parkland, tunnels — counted from the map, in
+`src/lib/score.ts`, where anyone can check them. A small local model asked to
+invent a safety number would produce a confident one with nothing behind it.
+
+**"Unknown" is never "fine".** Most streets in most of the world carry no `lit`
+tag, and an unlit street and an unmapped one look identical in the data. When
+coverage is too thin the page says so and shows no score at all, rather than a
+reassuring number drawn from an empty map.
+
 ## What it is built on
 
 | Piece | Service | Key needed |
@@ -28,9 +50,36 @@ npm run check      # typecheck, lint, and 21 tests — all offline
 | Map and tiles | [Leaflet](https://leafletjs.com) + [react-leaflet](https://react-leaflet.js.org) over [OpenStreetMap](https://www.openstreetmap.org) | no |
 | Routing | [OSRM](https://project-osrm.org) — the engine behind OSM's own directions | no |
 | Address search | [Nominatim](https://nominatim.org) | no |
+| Street data | [Overpass](https://overpass-api.de) over OpenStreetMap | no |
+| The sentence | a local OpenAI-compatible model, Liara as fallback | local: no |
 
-All three are fetched **by the browser**. There is no server-side code beyond
-rendering the page: no API routes, no proxy, no secrets.
+The first four are fetched **by the browser**. There is exactly one API route,
+and it exists for one reason: the model cannot be called from the browser — the
+LAN box is unreachable from a phone, and the hosted key would be shipped to
+every visitor.
+
+## The model
+
+Local first, hosted fallback:
+
+```bash
+LOCAL_AI_HOST=192.168.11.165     # LM Studio on :1234, no key needed
+LOCAL_AI_MODEL=gemma-3-4b-it
+
+LIARA_AI_URL=                    # both, or the tier is skipped entirely
+LIARA_AI_KEY=
+```
+
+Local first because it is free per call, private — this app is told where
+someone is walking and at what hour — and cannot be rate-limited or cut off for
+a billing failure. Liara only when the LAN box is off.
+
+Both values are needed for the fallback: a URL with no key 401s on every call,
+turning "the LAN box is off" into a confusing error instead of a quiet
+degradation.
+
+**If neither answers, the page still works.** You get the score and the
+findings; only the sentence is missing.
 
 ## Configuration
 

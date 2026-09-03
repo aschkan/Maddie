@@ -132,3 +132,27 @@ button.clear { padding: .5rem .6rem; color: var(--muted); }
   color: var(--muted) !important;
 }
 .leaflet-control-attribution a { color: #a78bfa !important; }
+
+/* ── the safety read ───────────────────────────────────────────────────── */
+
+.when { display: flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--muted); }
+.when select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: .4rem .5rem; font: inherit; font-size: .84rem; cursor: pointer;
+}
+
+.safety { display: flex; flex-direction: column; gap: .55rem; }
+
+.verdict {
+  display: flex; align-items: baseline; justify-content: space-between;
+  background: var(--bg); border: 1px solid var(--line); border-left-width: 3px;
+  border-radius: 11px; padding: .6rem .75rem;
+}
+.v-label { font-weight: 650; font-size: .95rem; }
+.v-score { font-size: 1.3rem; font-weight: 650; }
+.v-score small { font-size: .7rem; color: var(--muted); font-weight: 400; }
+
+.narration { margin: 0; font-size: .88rem; line-height: 1.5; }
+
+.findings { margin: 0; padding-left: 1.05rem; display: flex; flex-direction: column; gap: .25rem; }
+.findings li { font-size: .81rem; color: var(--muted); line-height: 1.45; }

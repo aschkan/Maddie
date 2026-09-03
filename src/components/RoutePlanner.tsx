@@ -13,6 +13,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PlaceSearch from "@/components/PlaceSearch";
+import SafetyPanel from "@/components/SafetyPanel";
 import type { Place } from "@/lib/geocode";
 import { fetchRoute, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { formatDistance, formatDuration } from "@/lib/format";
@@ -43,6 +44,9 @@ export default function RoutePlanner() {
   const [startText, setStartText] = useState("");
   const [endText, setEndText] = useState("");
   const [profile, setProfile] = useState<Profile>("driving");
+  // The safety read turns almost entirely on whether it is dark, so the hour is
+  // something you set rather than something the page assumes.
+  const [hour, setHour] = useState<number>(() => new Date().getHours());
 
   const [route, setRoute] = useState<Route | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +178,17 @@ export default function RoutePlanner() {
 
         {busy && <p className="hint">Finding a route…</p>}
 
+        <div className="row">
+          <label className="when">
+            Walking at
+            <select value={hour} onChange={(event) => setHour(Number(event.target.value))}>
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
         {route && !busy && (
           <div className="summary">
             <div><span>{formatDistance(route.metres)}</span><small>distance</small></div>
@@ -182,6 +197,8 @@ export default function RoutePlanner() {
         )}
 
         {error && <p className="error">{error}</p>}
+
+        {!busy && <SafetyPanel route={route} hour={hour} />}
 
         {tilesFailed && (
           <p className="error">
