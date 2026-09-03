@@ -2,7 +2,7 @@
   "name": "maddie",
   "version": "1.0.0",
   "private": true,
-  "description": "Maddie — a women's safety-intelligence platform for the Netherlands.",
+  "description": "A map where you set a start and a destination and it draws the route.",
   "engines": {
     "node": ">=22.6"
   },
@@ -13,17 +13,14 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "check": "tsc --noEmit && eslint . && node --test \"test/**/*.test.ts\"",
-    "verify:nl-crime": "node scripts/verify-nl-crime.ts"
+    "check": "tsc --noEmit && eslint . && node --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "maplibre-gl": "6.6.0",
+    "leaflet": "1.9.4",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "tz-lookup": "6.1.25",
-    "undici": "8.10.1",
-    "zod": "4.5.4"
+    "react-leaflet": "5.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
@@ -33,6 +30,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "4.3.3",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "@types/leaflet": "1.9.22"
   }
 }

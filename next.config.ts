@@ -1,11 +1,10 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
+  // Leaflet is mounted once and then owns its own DOM. Strict mode's double
+  // mount in development is exactly the case react-leaflet's container
+  // handling exists for, so leaving this on is a real test of it.
   reactStrictMode: true,
-  // Every server-side upstream goes out through undici with an explicit
-  // dispatcher (see src/lib/http/fetch.ts). Nothing here may be bundled for
-  // the browser.
-  serverExternalPackages: ["undici", "tz-lookup"],
 };
 
 export default config;

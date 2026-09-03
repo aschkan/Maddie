@@ -2,7 +2,7 @@ import next from "eslint-config-next";
 import tseslint from "typescript-eslint";
 
 const config = [
-  { ignores: [".next/**", "node_modules/**", "next-env.d.ts", "overpass-db/**", ".data/**"] },
+  { ignores: [".next/**", "node_modules/**", "next-env.d.ts"] },
   ...next,
   {
     files: ["**/*.ts", "**/*.tsx"],

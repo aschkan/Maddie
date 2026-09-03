@@ -1,51 +1,62 @@
 # Maddie — working notes
 
-A women's safety-intelligence platform for the Netherlands. Read `README.md`
-first; this file is the short list of things that will bite you while editing.
+A map where you set a start and a destination and it draws the route. Read
+`README.md` first; this file is the short list of things that will bite you
+while editing.
 
-## The rule everything else serves
+## Shape of it
 
-A gap in what we could see is never reported as a statement about the place.
-Three states, never two: measured-and-fine, measured-and-not, and NOT MEASURED.
+- `src/lib/osrm.ts` — build the request, parse the reply. **Pure and tested.**
+- `src/lib/geocode.ts` — Nominatim search. Pure parser + a fetch wrapper.
+- `src/components/MapCanvas.tsx` — the Leaflet map. Browser only.
+- `src/components/RoutePlanner.tsx` — state, and the `ssr: false` import.
+- `src/components/PlaceSearch.tsx` — the debounced address box.
 
-- Model it with `Signal<T>` from `src/lib/signal.ts`. Never invent a neutral
-  default to stand in for a missing signal — a dimension with no evidence scores
-  `null` and lowers overall confidence.
-- Every "we could not look" note ends with "That is a gap in the data, not a
-  statement about the place." Use `gapNote()` so the wording stays identical.
-- An empty list is only ever returned alongside the coverage it was built from.
+There is no server-side code beyond rendering the page. Tiles, routing and
+search are all fetched by the BROWSER, which is what makes this simple: no API
+routes, no keys, no proxy.
+
+## Traps — each one has a test
+
+- **OSRM takes lon,lat. Leaflet takes lat,lng.** Swapping them still returns a
+  route, just one on the other side of the world. `routeUrl` and `parseRoute`
+  own that conversion; nothing else should do it by hand.
+- **OSRM reports failure in the body with an HTTP 200.** `response.ok` alone
+  never tells you whether there is a route — check `code`.
+- **Nominatim returns lat/lon as strings.** `Number("")` is `0`, and 0,0 is a
+  real place in the Gulf of Guinea. Unparseable hits are dropped, not defaulted.
+- **A missing distance must not render as `NaN km`** — that reads as a broken
+  app rather than a missing number.
+- The public OSRM demo server reliably serves only the **driving** profile;
+  foot and bike come and go. A 400 there is explained, not shown as a number.
 
 ## Toolchain constraints
 
 - `npm run check` = `tsc --noEmit && eslint . && node --test "test/**/*.test.ts"`.
-  It all runs offline.
-- Tests run on **Node's type stripping**, with no build step. That means:
-  **no TypeScript parameter properties** (`constructor(readonly x: number)`),
-  no `enum`, no `namespace`. Write the field and the assignment out.
-- For the same reason, relative imports inside `src/` carry the `.ts`
-  extension (`allowImportingTsExtensions`). Route handlers and components use
-  the `@/` alias, which Next resolves.
+  It all runs offline — nothing in the test suite touches the network.
+- Tests run on **Node's type stripping**, no build step. So: **no TypeScript
+  parameter properties** (`constructor(readonly x: number)`), no `enum`, no
+  `namespace`. Write the field and the assignment out.
+- For the same reason, relative imports inside `src/` carry the `.ts` extension
+  (`allowImportingTsExtensions`). Components use the `@/` alias, which Next
+  resolves and the test runner does not — so anything imported by a test must
+  use a relative path.
 - `eslint` is pinned to 9.x: `eslint-plugin-react` is not compatible with 10.
 - The React Compiler lint rejects a `setState` reached synchronously from an
-  effect body. Fetch-on-mount goes inside `void (async () => { await load(); })()`.
+  effect body. Everything goes inside `void (async () => { … })()`.
 
 ## Things that are load-bearing
 
-- **`src/lib/http/fetch.ts` is the only place an upstream is fetched.** Proxy
-  selection, failover and timeouts live there, once. Do not add a per-vendor
-  proxy setting.
-- Process-wide state (gates, cooldowns, the proxy pool, the cache, the store)
-  lives on `globalThis`. Next loads modules in several graphs; module-scope
-  state silently becomes several copies, and "concurrency 1" becomes three.
-- Overpass is concurrency 1 with per-mirror cooldowns and ONE deadline per
-  batch. Raise the concurrency only against a mirror you host.
-- StatLine columns are read from `DataProperties`, never hard-coded. Zero rows
-  is indistinguishable from zero crime, so any change here needs
-  `npm run verify:nl-crime -- <table>` against the live service.
-- Point data and area data are different measurements with different curves and
-  different confidence. Do not add a fudge factor to make them line up.
-
-## Full trap list
-
-`README.md`, "Traps — bugs already written once". Each one has a test; if you
-change the code it guards, keep the test.
+- **The map is imported with `ssr: false`, from a client component.** Leaflet
+  touches `window` at module scope, so it cannot be server-rendered, and
+  `next/dynamic` will not disable SSR from a server component.
+- **`.map` needs a real height.** A Leaflet container in an auto-height parent
+  collapses to nothing, and an invisible map looks like a broken one.
+- **Markers are `divIcon`s with inline SVG.** Leaflet's default marker points at
+  image files by relative path and every bundler rewrites those paths — that is
+  the "my markers are invisible" question.
+- **Leaflet's stylesheet loads after `globals.css`**, because it is imported
+  inside the dynamic map chunk. Overrides here need to out-specify it; a bare
+  `.leaflet-container` rule loses.
+- **A blank map says why.** `tileerror` surfaces a message: a background that
+  failed to load is not the same as a place with nothing in it.
