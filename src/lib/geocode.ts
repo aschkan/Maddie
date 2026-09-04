@@ -9,7 +9,16 @@
 
 import type { LatLng } from "./osrm.ts";
 
-export const DEFAULT_NOMINATIM = "https://nominatim.openstreetmap.org";
+/**
+ * Nominatim, or this server standing in front of it.
+ *
+ * Set `NEXT_PUBLIC_NOMINATIM_URL=/api/osm/nominatim` and the search goes out
+ * through the server instead of from the browser — which is the only thing
+ * that works on a network the browser cannot get out of. See
+ * `src/app/api/osm/[service]/[...path]/route.ts`.
+ */
+export const DEFAULT_NOMINATIM =
+  process.env.NEXT_PUBLIC_NOMINATIM_URL ?? "https://nominatim.openstreetmap.org";
 
 export interface Place {
   label: string;

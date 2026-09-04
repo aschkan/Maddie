@@ -24,7 +24,7 @@ npm run dev        # http://127.0.0.1:5007
 
 ```bash
 npm run build && npm run start
-npm run check      # typecheck, lint, and 110 tests — all offline
+npm run check      # typecheck, lint, and 146 tests — all offline
 ```
 
 ## The safety read
@@ -97,6 +97,74 @@ Where those reports live depends on `MONGO_URI`. Set, they are rows in the
 the browser that entered them. The panel prints which, because a report somebody
 believed they had filed, visible to nobody, is worse than not being able to file
 one.
+
+## When the browser cannot reach OpenStreetMap
+
+Tiles, routing, search and Overpass are normally fetched **by the browser**,
+which is why a proxy on the server does nothing for them. Set these and they go
+out through the server instead — no code changes, the base URL is just local:
+
+```bash
+NEXT_PUBLIC_TILE_URL=/api/osm/tile/{z}/{x}/{y}.png
+NEXT_PUBLIC_OSRM_URL=/api/osm/osrm
+NEXT_PUBLIC_NOMINATIM_URL=/api/osm/nominatim
+NEXT_PUBLIC_OVERPASS_URL=/api/osm/overpass
+```
+
+The upstream for each is fixed in a table in `src/lib/osm-forward.ts` and cannot
+be named by the request — a forwarder whose target comes from a query parameter
+is an open proxy.
+
+### Two proxies in a row
+
+For a server whose own internet is filtered, where one proxy is reachable and
+the proxies that can actually get out are only reachable *through* it:
+
+```
+browser → this server → OSM_PROXY_ENTRY → one of OSM_PROXY_LIST → OpenStreetMap
+```
+
+```bash
+OSM_PROXY_ENTRY=192.168.11.165:2000
+OSM_PROXY_LIST_FILE=proxies.json      # the default; a scraper's JSON is fine
+```
+
+The entry proxy is never the exit on its own — it is the way in to the second
+hop and nothing else. Both are plain HTTP proxies, so this is two `CONNECT`s
+stacked with TLS on top; `src/lib/proxy-chain.ts` has the detail and the tests
+stand up two real proxies on loopback to prove it.
+
+The list is probed in the background — the real chain, to a real upstream — and
+ranked working-first, fastest-first, with a failing hop resting for longer each
+consecutive time. Nothing trusts the list's own metadata: the 649-entry list
+this was built for claims `https: false` for every entry, which taken literally
+would mean not one can tunnel.
+
+```bash
+npm run proxies            # probe them all now and print what works
+npm run proxies -- --all   # including the dead ones and why
+```
+
+`GET /api/osm/status` says the same thing on the running app, and every
+forwarded reply carries `x-osm-via` (which exit answered) and `x-osm-attempts`.
+
+**If everything fails with `refused with 403`, the list is fine and the entry
+proxy is the problem.** A Squid-style proxy allows `CONNECT` to port 443 and
+nothing else out of the box, and these hops are on 8080, 999, 3128. Both
+`npm run proxies` and `/api/osm/status` call that case out by name.
+
+### On rotating exits and rate limits
+
+A request that comes back rate limited is retried from a different exit and a
+different mirror, because that is the only way to get an answer on a network
+that cannot reach the mirrors directly. It is deliberately not a way to take
+more from Overpass than they offer: `OSM_PROXY_ATTEMPTS` is 4, requests are
+serialised, and every one identifies itself with a real `User-Agent`.
+
+**The actual fix is to self-host Overpass** — a Netherlands extract is a
+`docker compose up` — which removes the rate limit and the reachability problem
+in one move, and is faster than any of this. Point
+`OSM_UPSTREAM_OVERPASS` at it and the chain has nothing left to do.
 
 ## Example data — `npm run seed`
 
@@ -175,7 +243,9 @@ Everything has a working default. These exist for when a default is not enough:
 | `NEXT_PUBLIC_TILE_URL` | OpenStreetMap | A different tile server, or one you host |
 | `NEXT_PUBLIC_OSRM_URL` | `https://router.project-osrm.org` | Your own OSRM |
 | `NEXT_PUBLIC_OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | Your own Overpass, or a mirror |
+| `NEXT_PUBLIC_NOMINATIM_URL` | `https://nominatim.openstreetmap.org` | Your own Nominatim, or this server's forwarder |
 | `MONGO_URI` | *unset* | Share reports across visitors instead of keeping them per-browser |
+| `OSM_PROXY_ENTRY` / `OSM_PROXY_LIST` | *unset* | Go out through two chained proxies — see above |
 
 ## About the free services
 

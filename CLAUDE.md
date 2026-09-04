@@ -20,20 +20,42 @@ short list of things that will bite you while editing.
 - `src/lib/db.ts` — MongoDB, when `MONGO_URI` is set. **Server only.**
 - `scripts/seed.ts` — `npm run seed`, which the proxy's reseed button runs.
 - `src/lib/ai.ts` — local model, Liara fallback. **Server only.**
+- `src/lib/proxy-chain.ts` — two HTTP proxies in a row. **Server only.**
+- `src/lib/proxy-pool.ts` — which of them work, and which to use next.
+- `src/lib/osm-forward.ts` — the fixed table of upstreams the forwarder allows.
+- `scripts/proxies.ts` — `npm run proxies`, the first thing to run on the box.
 - `src/app/api/assess/route.ts` — the model endpoint.
 - `src/app/api/reports/route.ts` — the crime layer's storage.
+- `src/app/api/osm/[service]/[[...path]]/route.ts` — OSM through this server.
 - `src/components/` — the map, the planner, the filters, the comparison, the
   search box, the safety panel.
 
-Tiles, routing, search and the OSM query are all fetched by the BROWSER. That
-is why a proxy configured on the server does nothing for them, and why a
-visitor on a network that cannot reach overpass-api.de sees "could not reach
-OpenStreetMap" however the server is configured.
+Tiles, routing, search and the OSM query are fetched by the BROWSER **by
+default**. That is why a proxy configured on the server does nothing for them
+unless the forwarder below is switched on.
 
-**Two API routes, each for a reason the browser cannot do itself:** the model
-cannot be called from the browser (the LAN box is unreachable from a phone, and
-the Liara key would be shipped to every visitor), and the reports need a
-connection string.
+**The API routes each exist for a reason the browser cannot do itself:** the
+model cannot be called from the browser (the LAN box is unreachable from a
+phone, and the Liara key would be shipped to every visitor), the reports need a
+connection string, and `/api/osm/*` is for the deployment whose network cannot
+reach OpenStreetMap at all.
+
+## The forwarder, and the two-proxy chain
+
+Set `NEXT_PUBLIC_OVERPASS_URL=/api/osm/overpass` (and the OSRM, Nominatim and
+tile equivalents) and the browser asks THIS server, which goes out through
+`OSM_PROXY_ENTRY` → one of `OSM_PROXY_LIST` → OpenStreetMap. Two plain HTTP
+proxies means two stacked `CONNECT`s with TLS on top; see the header of
+`proxy-chain.ts`.
+
+**The entry proxy is never the exit.** It is the way in to the second hop and
+nothing else — that was the requirement, and it is also what keeps this
+server's map queries out of the LAN proxy's logs. `test/proxy-chain.test.ts`
+asserts the ORDER of the two CONNECTs for exactly that reason.
+
+The upstream comes from a fixed table in `osm-forward.ts` and can never be
+named by the request. A forwarder whose target is a query parameter is an open
+proxy, and an open proxy on a public server is somebody's problem within a day.
 
 ## The split that matters
 
@@ -156,11 +178,39 @@ can act on by walking a different way), and is the same data OSRM routed on.
   nothing may launder an example point into a real one.
 - **A configured-but-unreachable database is a 503, not an empty list.** An
   empty crime layer is the one thing on this page that reads as reassurance.
+- **`agent: false` does NOT mean "no agent".** It builds a fresh default one,
+  so an `options.createConnection` alongside it is never consulted and the
+  request opens its own DIRECT connection instead of using the tunnel. On
+  loopback that succeeds, so it looks like it works. `requestThrough` passes an
+  explicit `http.Agent` whose `createConnection` hands over the socket.
+- **`new URL("http://1.2.3.4:80")` leaves `url.port` empty.** Reading the port
+  from there silently dropped 472 of the 649 proxies in the list — and left 177,
+  so it looked fine. `parseHop` takes the port from the text.
+- **An upstream saying no is not the proxy's fault.** A 403 or a 502 from
+  OpenStreetMap once marked every exit dead, so one unreachable destination
+  emptied the whole pool. `rotate` separates `hop` (transport failed — rest it),
+  `limit` (429, this IP — step aside a minute) and `upstream` (nothing to do
+  with the proxy).
+- **A rotate-worthy status is not any 4xx.** A 400 means the query is wrong;
+  asking every proxy in turn the same wrong question burns a slot on each of
+  them and still gets a 400.
+- **`[[...path]]`, two brackets.** A single-bracket catch-all does not match
+  `/api/osm/overpass` itself, and that bare path is where the client POSTs.
 
 ## Toolchain constraints
 
 - `npm run check` = `tsc --noEmit && eslint . && node --test "test/**/*.test.ts"`.
-  It all runs offline — nothing in the test suite touches the network.
+  It all runs offline. `test/proxy-chain.test.ts` is the one file that opens
+  sockets: it stands up two CONNECT proxies and a TLS server on LOOPBACK, on
+  ephemeral ports, and tears them down inside the run. Nothing leaves the
+  machine, and it is the only way to prove the double CONNECT actually works.
+  Its certificate is `test/fixtures/`, committed and worthless — see the README
+  there.
+- **A test server holding a CONNECT tunnel must be closed with
+  `closeAllConnections()`.** A tunnelled socket belongs to neither end's
+  `close()`, so the callback never fires, the test never finishes, and node
+  exits with the tests pending — which the runner reports as the tests failing,
+  not as a leak.
 - Tests run on **Node's type stripping**, no build step. So: **no TypeScript
   parameter properties** (`constructor(readonly x: number)`), no `enum`, no
   `namespace`. Write the field and the assignment out.
