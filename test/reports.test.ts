@@ -2,15 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  addReport, CRIME_CATEGORIES, loadReports, MAX_REPORTS, newReportId,
-  parseReports, removeReport, saveReports, STORAGE_KEY,
+  addReport, countExamples, CRIME_CATEGORIES, loadReports, MAX_REPORTS, newReportId,
+  parseReports, removeExamples, removeReport, saveReports, STORAGE_KEY, type Report,
 } from "../src/lib/reports.ts";
 
-const GOOD = {
+const GOOD: Report = {
   id: "r1",
   category: "harassment",
   point: { lat: 52.37, lng: 4.89 },
   at: "2026-01-02T03:04:05.000Z",
+  source: "community",
 };
 
 test("a well-formed report survives a round trip through storage", () => {
@@ -95,6 +96,34 @@ test("a browser that refuses storage costs the note, not the page", () => {
   assert.equal(saveReports(hostile, [GOOD]), false);
   assert.deepEqual(loadReports(null), []);
   assert.equal(saveReports(null, [GOOD]), true);
+});
+
+/* --------------------------- real vs. invented ---------------------------- */
+
+test("a report with no source is a community one, never an example", () => {
+  // The error that matters is the other direction: an invented point quietly
+  // promoted to a real report because a field went missing. A stored report
+  // from before the field existed is a real one.
+  const legacy = { id: "r1", category: "harassment", point: { lat: 52.37, lng: 4.89 }, at: GOOD.at };
+  assert.equal(parseReports([legacy])[0]?.source, "community");
+});
+
+test("only the exact string \"example\" marks a report as invented", () => {
+  for (const bad of ["Example", "seed", "", 1, null, true]) {
+    assert.equal(parseReports([{ ...GOOD, source: bad }])[0]?.source, "community");
+  }
+  assert.equal(parseReports([{ ...GOOD, source: "example" }])[0]?.source, "example");
+});
+
+test("clearing the example data leaves every real report behind", () => {
+  const list: Report[] = [
+    GOOD,
+    { ...GOOD, id: "s1", source: "example" },
+    { ...GOOD, id: "r2" },
+    { ...GOOD, id: "s2", source: "example" },
+  ];
+  assert.equal(countExamples(list), 2);
+  assert.deepEqual(removeExamples(list).map((report) => report.id), ["r1", "r2"]);
 });
 
 test("ids do not collide within the same millisecond", () => {

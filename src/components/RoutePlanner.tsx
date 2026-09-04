@@ -16,14 +16,13 @@ import FilterPanel from "@/components/FilterPanel";
 import PlaceSearch from "@/components/PlaceSearch";
 import RouteChoices from "@/components/RouteChoices";
 import SafetyPanel from "@/components/SafetyPanel";
+import { useReports } from "@/components/useReports";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import { compareRoutes } from "@/lib/compare";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, type BBox, type LayerData } from "@/lib/layers";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
-import {
-  addReport, CRIME_CATEGORIES, loadReports, newReportId, removeReport, saveReports, type Report,
-} from "@/lib/reports";
+import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
 import { assess } from "@/lib/score";
 import { formatDistance, formatDuration } from "@/lib/format";
 
@@ -80,7 +79,7 @@ export default function RoutePlanner() {
   const [crime, setCrime] = useState<string[]>(() => CRIME_CATEGORIES.map((c) => c.id));
   const [reportMode, setReportMode] = useState(false);
   const [reportCategory, setReportCategory] = useState<string>(CRIME_CATEGORIES[0]?.id ?? "other");
-  const [reports, setReports] = useState<Report[]>([]);
+  const { reports, backend, error: reportError, add, remove, clearExamples } = useReports();
 
   const [view, setView] = useState<{ bbox: BBox; zoom: number } | null>(null);
   const [layers, setLayers] = useState<LayerData>(EMPTY_LAYERS);
@@ -118,34 +117,15 @@ export default function RoutePlanner() {
     }
   }, [night]);
 
-  /* ── reports ────────────────────────────────────────────────────────────
-     Read once on mount: `localStorage` does not exist while this is being
-     server-rendered, and reading it during render would differ between the two
-     passes and be discarded by hydration anyway. */
-  useEffect(() => {
-    void (async () => {
-      setReports(loadReports(typeof window === "undefined" ? null : window.localStorage));
-    })();
-  }, []);
-
-  const record = useCallback((next: Report[]) => {
-    setReports(next);
-    saveReports(typeof window === "undefined" ? null : window.localStorage, next);
-  }, []);
-
   const dropReport = useCallback((point: LatLng) => {
-    const report: Report = {
+    add({
       id: newReportId(Date.now(), Math.random()),
       category: reportCategory,
       point,
       at: new Date().toISOString(),
-    };
-    setReports((current) => {
-      const next = addReport(current, report);
-      saveReports(typeof window === "undefined" ? null : window.localStorage, next);
-      return next;
+      source: "community",
     });
-  }, [reportCategory]);
+  }, [add, reportCategory]);
 
   /** A click drops A first, then B, then starts again from A. */
   const pick = useCallback((point: LatLng) => {
@@ -253,6 +233,7 @@ export default function RoutePlanner() {
     () => reports.filter((report) => crime.includes(report.category)),
     [reports, crime],
   );
+  const exampleCount = useMemo(() => countExamples(reports), [reports]);
 
   const usePlace = (which: "start" | "end") => (place: Place) => {
     if (which === "start") {
@@ -379,6 +360,10 @@ export default function RoutePlanner() {
           reportCategory={reportCategory} onReportCategory={setReportCategory}
           reportCount={visibleReports.length}
           hiddenReports={reports.length - visibleReports.length}
+          exampleCount={exampleCount}
+          onClearExamples={clearExamples}
+          backend={backend}
+          reportError={reportError}
           zoomedOut={zoomedOut}
           layerError={layerError}
           truncated={layers.truncated}
@@ -411,7 +396,7 @@ export default function RoutePlanner() {
           reports={visibleReports}
           reportMode={reportMode}
           onReport={dropReport}
-          onRemoveReport={(id) => record(removeReport(reports, id))}
+          onRemoveReport={remove}
           onPick={pick}
           onMoveStart={setStart}
           onMoveEnd={setEnd}

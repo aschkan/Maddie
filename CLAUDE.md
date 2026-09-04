@@ -15,16 +15,25 @@ short list of things that will bite you while editing.
   lamps, lit streets.
 - `src/lib/score.ts` — the verdict. **Deterministic. No model involved.**
 - `src/lib/compare.ts` — which route is preferred, and when to say none is.
-- `src/lib/reports.ts` — the crime layer. Entered here, stored here, never scored.
+- `src/lib/reports.ts` — the crime layer. Entered by people, never scored.
+- `src/lib/seed-data.ts` — the example data. **Read its header before touching it.**
+- `src/lib/db.ts` — MongoDB, when `MONGO_URI` is set. **Server only.**
+- `scripts/seed.ts` — `npm run seed`, which the proxy's reseed button runs.
 - `src/lib/ai.ts` — local model, Liara fallback. **Server only.**
-- `src/app/api/assess/route.ts` — the one endpoint.
+- `src/app/api/assess/route.ts` — the model endpoint.
+- `src/app/api/reports/route.ts` — the crime layer's storage.
 - `src/components/` — the map, the planner, the filters, the comparison, the
   search box, the safety panel.
 
-Tiles, routing, search and the OSM query are all fetched by the BROWSER.
-**There is exactly one API route, and it exists for one reason:** the model
-cannot be called from the browser — the LAN box is unreachable from a phone,
-and the Liara key would be shipped to every visitor.
+Tiles, routing, search and the OSM query are all fetched by the BROWSER. That
+is why a proxy configured on the server does nothing for them, and why a
+visitor on a network that cannot reach overpass-api.de sees "could not reach
+OpenStreetMap" however the server is configured.
+
+**Two API routes, each for a reason the browser cannot do itself:** the model
+cannot be called from the browser (the LAN box is unreachable from a phone, and
+the Liara key would be shipped to every visitor), and the reports need a
+connection string.
 
 ## The split that matters
 
@@ -59,12 +68,35 @@ invents a distinction the map cannot support.
 There is no open point-level dataset for harassment, catcalling, sexual assault
 or rape. Official figures are per neighbourhood per month — the same objection
 as below — and the categories that matter most are the least reported. So the
-purple layer holds **reports typed into this browser**, kept in `localStorage`,
-starting empty, and it never reaches `score.ts`.
+purple layer holds **reports people entered**, starting empty, and it never
+reaches `score.ts`.
+
+Two backends, and which one is in use is printed in the panel: rows in the
+`maddie` database when `MONGO_URI` is set, `localStorage` when it is not. A
+report somebody believed they had filed, visible to nobody, is worse than not
+being able to file one.
 
 If a real dataset is ever wired in, the empty-state sentence in `FilterPanel`
 has to change with it: right now it says an empty map means nobody wrote
 anything down, and that has to stay true.
+
+### Example data is a different object, everywhere
+
+`npm run seed` invents points so the filter can be demonstrated before the
+interviews exist. Every one carries `source: "example"`, and **three separate
+places in the UI key off that field**: a hollow dashed ring instead of a solid
+dot, `EXAMPLE DATA — NOT A REAL REPORT` as the first line of the popup, and the
+banner in `FilterPanel`. A fabricated point sits on a real street; those three
+are the only thing between it and being read as a record of a real event, so
+none of them is decoration and none of them may be quietly dropped.
+
+`parseReports` defaults an unmarked report to `community`, not `example`. That
+is the right way round: the failure that matters is an invented point being
+promoted to a real one, not the reverse.
+
+The seed writes visibly placeholder notes. Invented first-person testimony is
+exactly what the real interviews will supply, and a convincing fake of it in the
+same collection is how a fake ends up quoted as a finding.
 
 ## Why OpenStreetMap and not crime figures
 
@@ -113,6 +145,17 @@ can act on by walking a different way), and is the same data OSRM routed on.
 - **Routes are read one at a time.** Overpass gives out a couple of slots per
   IP; three parallel reads earn a 429 that also kills the layers on the map,
   and the whole page then looks broken.
+- **A stored point is GeoJSON: `[lng, lat]`, longitude first.** The same trap as
+  OSRM, and `2dsphere` indexes the wrong order perfectly happily — you get
+  results, for somewhere in the Gulf of Guinea. `toDoc`/`fromDoc` own it.
+- **A `MONGO_URI` with no path makes the driver pick `test`.** `databaseName()`
+  falls back to `maddie` instead: a silent write to the wrong database looks
+  exactly like a working one.
+- **`POST /api/reports` forces `source: "community"`.** It is a public endpoint;
+  nothing outside `npm run seed` may write a point marked as example data, and
+  nothing may launder an example point into a real one.
+- **A configured-but-unreachable database is a 503, not an empty list.** An
+  empty crime layer is the one thing on this page that reads as reassurance.
 
 ## Toolchain constraints
 

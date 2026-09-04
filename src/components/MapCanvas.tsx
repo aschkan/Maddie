@@ -82,6 +82,14 @@ function heartFor(glyph: string): L.DivIcon {
   return made;
 }
 
+/**
+ * A report someone entered: a solid purple dot.
+ *
+ * The example one below is deliberately NOT a colour variation. A fabricated
+ * point on a real street has to be obviously not the same object as a real
+ * report, at a glance, on a phone, in the dark — so it is hollow and dashed,
+ * which reads as "outline, not filled in" rather than as another category.
+ */
 function crimePin(): L.DivIcon {
   return L.divIcon({
     className: "",
@@ -89,6 +97,19 @@ function crimePin(): L.DivIcon {
       <svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
         <circle cx="10" cy="10" r="7.5" fill="${CRIME}" stroke="#1c0a2b" stroke-width="2"/>
         <path d="M10 5.6v5.2M10 13.6v.6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+      </svg>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
+
+function examplePin(): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: `
+      <svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="${CRIME}"
+                stroke-width="2" stroke-dasharray="3 2.6" opacity="0.85"/>
       </svg>`,
     iconSize: [20, 20],
     iconAnchor: [10, 10],
@@ -183,6 +204,7 @@ export default function MapCanvas({
   const startIcon = useMemo(() => pin("A", "#22c55e"), []);
   const endIcon = useMemo(() => pin("B", "#7c5cff"), []);
   const alert = useMemo(() => crimePin(), []);
+  const example = useMemo(() => examplePin(), []);
 
   // One report is enough: a blocked tile host fires this for every tile in view.
   const [reported, setReported] = useState(false);
@@ -297,20 +319,31 @@ export default function MapCanvas({
       ))}
 
       {/* ── reports ──────────────────────────────────────────────────────── */}
-      {reports.map((report) => (
-        <Marker key={report.id} position={[report.point.lat, report.point.lng]} icon={alert}>
-          <Popup>
-            <strong>{categoryLabel.get(report.category) ?? report.category}</strong>
-            <br />
-            {new Date(report.at).toLocaleString()}
-            {report.note && <><br />{report.note}</>}
-            <br />
-            <button type="button" className="link" onClick={() => onRemoveReport(report.id)}>
-              Remove this report
-            </button>
-          </Popup>
-        </Marker>
-      ))}
+      {reports.map((report) => {
+        const invented = report.source === "example";
+        return (
+          <Marker
+            key={report.id}
+            position={[report.point.lat, report.point.lng]}
+            icon={invented ? example : alert}
+          >
+            <Popup>
+              {/* First line, before the category: whatever else the reader
+                  takes from this popup, they take that this did not happen. */}
+              {invented && <><span className="example-tag">EXAMPLE DATA — NOT A REAL REPORT</span><br /></>}
+              <strong>{categoryLabel.get(report.category) ?? report.category}</strong>
+              <br />
+              {new Date(report.at).toLocaleString()}
+              {report.area && <><br />scattered in {report.area}</>}
+              {report.note && <><br />{report.note}</>}
+              <br />
+              <button type="button" className="link" onClick={() => onRemoveReport(report.id)}>
+                {invented ? "Remove this example" : "Remove this report"}
+              </button>
+            </Popup>
+          </Marker>
+        );
+      })}
 
       {start && (
         <Marker

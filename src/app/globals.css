@@ -325,3 +325,33 @@ select {
 [data-theme="dark"] .verdict.v-poor .v-label { color: #ef8f5b; }
 [data-theme="dark"] .verdict.v-unknown { border-left-color: #7c8798; }
 [data-theme="dark"] .verdict.v-unknown .v-label { color: #7c8798; }
+
+/* Example data from `npm run seed`. Loud on purpose: these points sit on real
+   streets, and the only thing keeping them from being read as records of real
+   events is that the screen says otherwise everywhere they appear. */
+.example-banner {
+  margin: .5rem 0;
+  padding: .55rem .65rem;
+  font-size: .76rem;
+  line-height: 1.45;
+  color: var(--text);
+  border: 1px dashed var(--crime);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--crime) 10%, transparent);
+}
+.example-banner button {
+  display: block;
+  margin-top: .45rem;
+  padding: .3rem .6rem;
+  font-size: .76rem;
+  border-color: var(--crime);
+  color: var(--crime);
+  background: transparent;
+}
+.example-tag {
+  display: inline-block;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--crime);
+}

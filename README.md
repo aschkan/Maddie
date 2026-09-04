@@ -24,7 +24,7 @@ npm run dev        # http://127.0.0.1:5007
 
 ```bash
 npm run build && npm run start
-npm run check      # typecheck, lint, and 93 tests — all offline
+npm run check      # typecheck, lint, and 110 tests — all offline
 ```
 
 ## The safety read
@@ -87,10 +87,46 @@ per month, which cannot tell one street from the next one over, and the
 categories that matter most here are the least likely to have been reported at
 all. Drawing purple dots from a national statistics table would make this layer
 look like it answers the question, so it does not: the layer holds **reports
-entered in this browser**, stored only there, starting empty. It never touches
-the route score. An empty map means nothing was written down — which is not the
-same as nothing having happened, and the panel says so rather than leaving the
-blank space to be read as reassurance.
+entered by the people using it**, starting empty. It never touches the route
+score. An empty map means nothing was written down — which is not the same as
+nothing having happened, and the panel says so rather than leaving the blank
+space to be read as reassurance.
+
+Where those reports live depends on `MONGO_URI`. Set, they are rows in the
+`maddie` database and everyone on the instance sees them; unset, they stay in
+the browser that entered them. The panel prints which, because a report somebody
+believed they had filed, visible to nobody, is worse than not being able to file
+one.
+
+## Example data — `npm run seed`
+
+```bash
+npm run seed                # replace the example reports, keep every real one
+npm run seed -- --force     # drop everything first, real reports included
+npm run seed -- --clear     # remove the example data, write nothing
+npm run seed -- --count=400 --seed=7
+```
+
+**What it writes did not happen.** It exists so the crime filter can be
+demonstrated before the interviews behind that layer exist. Everything it makes
+carries `source: "example"`, and the app treats that as a different kind of
+object everywhere it can appear:
+
+- a hollow dashed ring instead of a solid dot,
+- `EXAMPLE DATA — NOT A REAL REPORT` as the first line of the popup,
+- a banner in the panel, with a clear button, while any are loaded.
+
+A fabricated point sits on a real street, and the only thing keeping it from
+being read as a record of a real event is that the screen says otherwise
+everywhere it appears. The notes are visibly placeholder text for the same
+reason: invented first-person testimony is exactly the material the real
+interviews will supply, and a convincing fake of it in the same collection is
+how a fake ends up quoted as a finding.
+
+The generator is deterministic — same options, same points — so a reseed does
+not silently invent a different fictional city. `--force` is what the reverse
+proxy's "💣 Reseed DB" button runs, and it is the only path that deletes a
+report a person entered.
 
 ## What it is built on
 
@@ -139,6 +175,7 @@ Everything has a working default. These exist for when a default is not enough:
 | `NEXT_PUBLIC_TILE_URL` | OpenStreetMap | A different tile server, or one you host |
 | `NEXT_PUBLIC_OSRM_URL` | `https://router.project-osrm.org` | Your own OSRM |
 | `NEXT_PUBLIC_OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | Your own Overpass, or a mirror |
+| `MONGO_URI` | *unset* | Share reports across visitors instead of keeping them per-browser |
 
 ## About the free services
 
