@@ -1,19 +1,25 @@
 # Maddie — working notes
 
-A map where you set a start and a destination and it draws the route. Read
-`README.md` first; this file is the short list of things that will bite you
-while editing.
+A map where you set a start and a destination, compare the ways round, and see
+what OpenStreetMap records about each. Read `README.md` first; this file is the
+short list of things that will bite you while editing.
 
 ## Shape of it
 
 - `src/lib/osrm.ts` — build the route request, parse the reply. Pure, tested.
 - `src/lib/geocode.ts` — Nominatim search. Pure parser + a fetch wrapper.
 - `src/lib/geo.ts` — distance, sampling, bounding boxes. Pure, tested.
-- `src/lib/overpass.ts` — the one data source: what OSM says about the streets.
+- `src/lib/overpass.ts` — the one data source: what OSM says about the streets
+  a route runs along.
+- `src/lib/layers.ts` — the same source, over the visible map: safe spots,
+  lamps, lit streets.
 - `src/lib/score.ts` — the verdict. **Deterministic. No model involved.**
+- `src/lib/compare.ts` — which route is preferred, and when to say none is.
+- `src/lib/reports.ts` — the crime layer. Entered here, stored here, never scored.
 - `src/lib/ai.ts` — local model, Liara fallback. **Server only.**
 - `src/app/api/assess/route.ts` — the one endpoint.
-- `src/components/` — the map, the planner, the search box, the safety panel.
+- `src/components/` — the map, the planner, the filters, the comparison, the
+  search box, the safety panel.
 
 Tiles, routing, search and the OSM query are all fetched by the BROWSER.
 **There is exactly one API route, and it exists for one reason:** the model
@@ -35,6 +41,31 @@ nothing to explain but the gap, and a model asked to comment anyway produces a
 sentence that sounds like an answer. That was observed: a fluent "most of this
 walk is on lit streets" printed directly under "Not enough map data".
 
+## "Preferred", never "safe"
+
+The badge in `RouteChoices` says **Preferred**, and `compare.ts` spells out why
+in the sentence under it. What the data supports is "better lit and busier than
+the other one" — much smaller than a claim about safety, and the word has to
+match the claim. A rename here is a change to what the app promises, not a
+wording tweak.
+
+`compare.ts` also refuses to badge anything when the two best routes are within
+`MEANINGFUL_MARGIN` of each other. The score comes from sampled counts along a
+line and moves by several points on a handful of samples; badging a 63 over a 61
+invents a distinction the map cannot support.
+
+## The crime layer holds no crime data
+
+There is no open point-level dataset for harassment, catcalling, sexual assault
+or rape. Official figures are per neighbourhood per month — the same objection
+as below — and the categories that matter most are the least reported. So the
+purple layer holds **reports typed into this browser**, kept in `localStorage`,
+starting empty, and it never reaches `score.ts`.
+
+If a real dataset is ever wired in, the empty-state sentence in `FilterPanel`
+has to change with it: right now it says an empty map means nobody wrote
+anything down, and that has to stay true.
+
 ## Why OpenStreetMap and not crime figures
 
 Recorded crime is published per neighbourhood per month. A walking route usually
@@ -46,7 +77,7 @@ can act on by walking a different way), and is the same data OSRM routed on.
 ## Traps — each one has a test
 
 - **OSRM takes lon,lat. Leaflet takes lat,lng.** Swapping them still returns a
-  route, just one on the other side of the world. `routeUrl` and `parseRoute`
+  route, just one on the other side of the world. `routeUrl` and `parseRoutes`
   own that conversion; nothing else should do it by hand.
 - **OSRM reports failure in the body with an HTTP 200.** `response.ok` alone
   never tells you whether there is a route — check `code`.
@@ -68,6 +99,20 @@ can act on by walking a different way), and is the same data OSRM routed on.
 - **Both plural forms are passed to `plural()`**, because appending "s" to a
   phrase gives "0 shop or cafes" — under a safety verdict, that reads as a
   broken app.
+- **`opening_hours` is not parsed.** It is a small language (`Mo-Fr 09:00-18:00;
+  PH off`), and half-reading it gives a confident "open now" for a shop that
+  shut at six. `alwaysOpen()` recognises `24/7` and nothing else; everything
+  else is printed as written.
+- **A route the map says nothing about must not win a comparison by default,
+  nor lose by default.** `score: null` means no opinion, and `compare.ts`
+  treats it as no opinion in both directions.
+- **Layer ids reach Overpass as query text**, and Overpass QL has no escaping.
+  `layerQuery` filters the requested ids against `SAFE_SPOTS` rather than
+  interpolating them, so a stale id becomes nothing rather than a fragment of
+  query.
+- **Routes are read one at a time.** Overpass gives out a couple of slots per
+  IP; three parallel reads earn a 429 that also kills the layers on the map,
+  and the whole page then looks broken.
 
 ## Toolchain constraints
 
@@ -99,3 +144,14 @@ can act on by walking a different way), and is the same data OSRM routed on.
   `.leaflet-container` rule loses.
 - **A blank map says why.** `tileerror` surfaces a message: a background that
   failed to load is not the same as a place with nothing in it.
+- **The theme is set by an inline script in `layout.tsx`, before first paint.**
+  `localStorage` does not exist during the server render, so a React-only
+  version flashes white on every load — on a page people open at night.
+  `RoutePlanner` keeps `data-theme` in step afterwards; the two read the same
+  key, and changing one means changing the other.
+- **Night mode inverts the tiles in CSS** (`.tiles-night`) rather than loading a
+  dark basemap. A second tile host is a second thing that can be unreachable,
+  and a blank background is the worst failure this page can have.
+- **Marker icons are cached at module scope** (`HEARTS` in `MapCanvas`). Leaflet
+  compares icons by identity, so a fresh `divIcon` per render tears down and
+  rebuilds every marker on the map on every keystroke.

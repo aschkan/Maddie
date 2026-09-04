@@ -1,12 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { fetchRoute, parseRoute, routeUrl } from "../src/lib/osrm.ts";
+import { fetchRoutes, parseRoutes, routeUrl } from "../src/lib/osrm.ts";
 import { parsePlaces, searchPlaces } from "../src/lib/geocode.ts";
 import { formatDistance, formatDuration } from "../src/lib/format.ts";
 
 const AMSTERDAM = { lat: 52.3728, lng: 4.8936 };
 const DAM_SQUARE = { lat: 52.3731, lng: 4.8926 };
+
+/** The first route of a successful parse, or a failed assertion. */
+function only(result: ReturnType<typeof parseRoutes>) {
+  assert.ok(result.ok);
+  const first = result.routes[0];
+  assert.ok(first, "expected at least one route");
+  return first;
+}
 
 /* --------------------------------- the URL --------------------------------- */
 
@@ -27,6 +35,9 @@ test("the request asks for a full GeoJSON line", () => {
   // polyline this app does not decode.
   assert.match(url, /overview=full/);
   assert.match(url, /geometries=geojson/);
+  // Without this OSRM returns exactly one route and there is nothing to
+  // compare — the whole route-comparison panel goes blank.
+  assert.match(url, /alternatives=3/);
 });
 
 test("our profile names map to OSRM's", () => {
@@ -53,17 +64,43 @@ const OK_REPLY = {
 };
 
 test("a route comes back flipped into Leaflet's lat,lng order", () => {
-  const result = parseRoute(OK_REPLY);
-  assert.ok(result.ok);
-  assert.equal(result.route.path.length, 3);
+  const route = only(parseRoutes(OK_REPLY));
+  assert.equal(route.path.length, 3);
   // GeoJSON gave [4.8936, 52.3728]; Leaflet needs {lat: 52.37, lng: 4.89}.
-  assert.deepEqual(result.route.path[0], { lat: 52.3728, lng: 4.8936 });
-  assert.equal(result.route.metres, 1234.5);
-  assert.equal(result.route.seconds, 300.2);
+  assert.deepEqual(route.path[0], { lat: 52.3728, lng: 4.8936 });
+  assert.equal(route.metres, 1234.5);
+  assert.equal(route.seconds, 300.2);
+});
+
+test("every alternative OSRM offers is kept — that is what there is to compare", () => {
+  const result = parseRoutes({
+    code: "Ok",
+    routes: [
+      OK_REPLY.routes[0],
+      { distance: 1500, duration: 400, geometry: { coordinates: [[4.89, 52.37], [4.90, 52.38]] } },
+    ],
+  });
+  assert.ok(result.ok);
+  assert.equal(result.routes.length, 2);
+  assert.equal(result.routes[1]?.metres, 1500);
+});
+
+test("one unusable alternative does not take the usable ones down with it", () => {
+  // OSRM occasionally returns an alternative with a stub geometry. Dropping
+  // the whole reply for it would lose a route that was perfectly fine.
+  const result = parseRoutes({
+    code: "Ok",
+    routes: [
+      { distance: 5, duration: 5, geometry: { coordinates: [[4.89, 52.37]] } },
+      OK_REPLY.routes[0],
+    ],
+  });
+  assert.ok(result.ok);
+  assert.equal(result.routes.length, 1);
 });
 
 test("NoRoute is explained, not shown as a raw code", () => {
-  const result = parseRoute({ code: "NoRoute", message: "Impossible route" });
+  const result = parseRoutes({ code: "NoRoute", message: "Impossible route" });
   assert.ok(!result.ok);
   assert.match(result.error, /No route between those two points/);
 });
@@ -71,21 +108,21 @@ test("NoRoute is explained, not shown as a raw code", () => {
 test("a failure code with a 200 body is still a failure", () => {
   // OSRM reports errors in the body with an HTTP 200, so the status alone
   // never tells you whether there is a route.
-  const result = parseRoute({ code: "InvalidQuery", message: "Query string malformed" });
+  const result = parseRoutes({ code: "InvalidQuery", message: "Query string malformed" });
   assert.ok(!result.ok);
   assert.match(result.error, /malformed/);
 });
 
 test("nonsense in place of a reply is refused rather than crashing", () => {
   for (const bad of [null, undefined, 42, "Ok", [], {}, { code: "Ok", routes: [] }]) {
-    const result = parseRoute(bad);
+    const result = parseRoutes(bad);
     assert.ok(!result.ok, `should refuse: ${JSON.stringify(bad)}`);
     assert.ok(result.error.length > 0);
   }
 });
 
 test("a line of one point is refused — it cannot be drawn", () => {
-  const result = parseRoute({
+  const result = parseRoutes({
     code: "Ok",
     routes: [{ distance: 0, duration: 0, geometry: { coordinates: [[4.89, 52.37]] } }],
   });
@@ -93,7 +130,7 @@ test("a line of one point is refused — it cannot be drawn", () => {
 });
 
 test("malformed points are dropped, and the rest of the route survives", () => {
-  const result = parseRoute({
+  const result = parseRoutes({
     code: "Ok",
     routes: [{
       distance: 10,
@@ -110,20 +147,18 @@ test("malformed points are dropped, and the rest of the route survives", () => {
       },
     }],
   });
-  assert.ok(result.ok);
-  assert.equal(result.route.path.length, 2, "only the two usable points remain");
+  assert.equal(only(result).path.length, 2, "only the two usable points remain");
 });
 
 test("distance and duration missing from a valid route default to zero, not NaN", () => {
   // NaN renders as "NaN km" on the page, which looks like a bug in the map
   // rather than a gap in the answer.
-  const result = parseRoute({
+  const result = parseRoutes({
     code: "Ok",
     routes: [{ geometry: { coordinates: [[4.89, 52.37], [4.90, 52.38]] } }],
   });
-  assert.ok(result.ok);
-  assert.equal(result.route.metres, 0);
-  assert.equal(result.route.seconds, 0);
+  assert.equal(only(result).metres, 0);
+  assert.equal(only(result).seconds, 0);
 });
 
 /* -------------------------------- geocoding -------------------------------- */
@@ -188,14 +223,14 @@ test("a 400 on walk or cycle explains the demo server's limits, not just the num
   const original = globalThis.fetch;
   globalThis.fetch = (async () => new Response("", { status: 400 })) as typeof fetch;
   try {
-    const walk = await fetchRoute(AMSTERDAM, DAM_SQUARE, "walking");
+    const walk = await fetchRoutes(AMSTERDAM, DAM_SQUARE, "walking");
     assert.ok(!walk.ok);
     assert.match(walk.error, /walking route/);
     assert.match(walk.error, /OSRM_URL|own server/);
 
     // Driving is the profile it always serves, so a 400 there means something
     // else and must not be blamed on the profile.
-    const drive = await fetchRoute(AMSTERDAM, DAM_SQUARE, "driving");
+    const drive = await fetchRoutes(AMSTERDAM, DAM_SQUARE, "driving");
     assert.ok(!drive.ok);
     assert.doesNotMatch(drive.error, /profile/);
   } finally {
@@ -207,7 +242,7 @@ test("rate limiting says to wait, rather than showing a 429", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => new Response("", { status: 429 })) as typeof fetch;
   try {
-    const result = await fetchRoute(AMSTERDAM, DAM_SQUARE);
+    const result = await fetchRoutes(AMSTERDAM, DAM_SQUARE);
     assert.ok(!result.ok);
     assert.match(result.error, /rate limiting/);
   } finally {
@@ -221,7 +256,7 @@ test("an aborted request is not shown to the user as a failure", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => { throw new DOMException("aborted", "AbortError"); }) as typeof fetch;
   try {
-    const result = await fetchRoute(AMSTERDAM, DAM_SQUARE);
+    const result = await fetchRoutes(AMSTERDAM, DAM_SQUARE);
     assert.ok(!result.ok);
     assert.equal(result.error, "cancelled");
   } finally {
@@ -233,7 +268,7 @@ test("an unreachable routing service says so plainly", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
   try {
-    const result = await fetchRoute(AMSTERDAM, DAM_SQUARE);
+    const result = await fetchRoutes(AMSTERDAM, DAM_SQUARE);
     assert.ok(!result.ok);
     assert.match(result.error, /Could not reach the routing service/);
   } finally {

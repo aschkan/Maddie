@@ -1,11 +1,54 @@
+/*
+ * Two themes, one stylesheet.
+ *
+ * Every colour is a token on `:root`, and the dark set redefines the tokens
+ * rather than the rules. `data-theme` on <html> is written by an inline script
+ * before first paint (see layout.tsx) and then kept in step by RoutePlanner —
+ * so there is no flash of the wrong theme, and Leaflet's own controls, which
+ * never see a React prop, follow along too.
+ */
+
 :root {
+  --bg: #f4f5f8;
+  --panel: #ffffff;
+  --line: #dfe3ea;
+  --text: #171a21;
+  --muted: #5f6878;
+  --accent: #6d4aff;
+  --accent-soft: rgba(109, 74, 255, .16);
+  --button: #f0f2f6;
+  --button-hover: #e5e8ef;
+  --bad: #d13b4d;
+  --bad-bg: rgba(209, 59, 77, .09);
+  --bad-text: #8d1e2d;
+  --map-void: #e8ebf0;
+  --shadow: 0 12px 30px rgba(20, 25, 40, .14);
+
+  /* The three the brief names. */
+  --crime: #9333ea;
+  --safe: #ff5fa2;
+  --light: #d99b00;
+}
+
+[data-theme="dark"] {
   --bg: #0d0f15;
   --panel: #151922;
   --line: #262b36;
   --text: #e7e9ee;
   --muted: #9aa3b2;
   --accent: #7c5cff;
+  --accent-soft: rgba(124, 92, 255, .22);
+  --button: #1b2130;
+  --button-hover: #232c3e;
   --bad: #ef5b6b;
+  --bad-bg: rgba(239, 91, 107, .12);
+  --bad-text: #ffd7dc;
+  --map-void: #1a1f2b;
+  --shadow: 0 12px 30px rgba(0, 0, 0, .45);
+
+  --crime: #a855f7;
+  --safe: #ff5fa2;
+  --light: #f5c518;
 }
 
 * { box-sizing: border-box; }
@@ -18,14 +61,14 @@ html, body {
   font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
-a { color: #a78bfa; }
+a { color: var(--accent); }
 
 /* Two columns on a desktop, stacked on a phone. The map always gets a real
    height — a Leaflet container with an auto height collapses to nothing, which
-   is the other classic "my map is invisible". */
+   is the classic "my map is invisible". */
 .layout {
   display: grid;
-  grid-template-columns: minmax(320px, 380px) 1fr;
+  grid-template-columns: minmax(320px, 400px) 1fr;
   height: 100vh;
   height: 100dvh;
 }
@@ -43,11 +86,13 @@ a { color: #a78bfa; }
   gap: .9rem;
 }
 @media (max-width: 820px) {
-  .panel { border-right: none; border-bottom: 1px solid var(--line); max-height: 52vh; }
+  .panel { border-right: none; border-bottom: 1px solid var(--line); max-height: 55vh; }
 }
 
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .panel header h1 { margin: 0 0 .3rem; font-size: 1.15rem; letter-spacing: .2px; }
 .panel header p { margin: 0; color: var(--muted); font-size: .86rem; }
+.theme { font-size: .78rem; padding: .35rem .6rem; white-space: nowrap; }
 
 .field { position: relative; display: flex; flex-direction: column; gap: .35rem; }
 .field label { display: flex; align-items: center; gap: .45rem; font-size: .8rem; color: var(--muted); }
@@ -55,7 +100,7 @@ a { color: #a78bfa; }
 .badge {
   display: inline-grid; place-items: center;
   width: 19px; height: 19px; border-radius: 50%;
-  color: #0b0d12; font-weight: 700; font-size: .7rem;
+  color: #fff; font-weight: 700; font-size: .7rem;
 }
 
 .input-row { display: flex; gap: .4rem; }
@@ -66,16 +111,25 @@ input {
   border: 1px solid var(--line); border-radius: 9px;
   padding: .55rem .65rem; font: inherit;
 }
-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124, 92, 255, .2); }
+input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 button {
   font: inherit; cursor: pointer; color: var(--text);
-  background: #1b2130; border: 1px solid var(--line);
+  background: var(--button); border: 1px solid var(--line);
   border-radius: 9px; padding: .5rem .7rem;
 }
-button:hover:not(:disabled) { background: #232c3e; border-color: #46506a; }
+button:hover:not(:disabled) { background: var(--button-hover); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button.clear { padding: .5rem .6rem; color: var(--muted); }
+button.link {
+  background: none; border: none; padding: 0;
+  color: var(--bad); text-decoration: underline; font-size: .82rem;
+}
+
+select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: .4rem .5rem; font: inherit; font-size: .84rem; cursor: pointer;
+}
 
 .coords { margin: 0; font-size: .76rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
@@ -84,7 +138,7 @@ button.clear { padding: .5rem .6rem; color: var(--muted); }
   position: absolute; top: 100%; left: 0; right: 0; z-index: 1200;
   margin: .25rem 0 0; padding: .25rem; list-style: none;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 10px; box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+  border-radius: 10px; box-shadow: var(--shadow);
   max-height: 240px; overflow-y: auto;
 }
 .hits button {
@@ -92,7 +146,7 @@ button.clear { padding: .5rem .6rem; color: var(--muted); }
   background: none; border: none; border-radius: 7px;
   padding: .45rem .5rem; font-size: .82rem; line-height: 1.35;
 }
-.hits button:hover { background: #232c3e; }
+.hits button:hover { background: var(--button-hover); }
 
 .row { display: flex; gap: .5rem; align-items: center; }
 .profiles { display: flex; gap: .3rem; flex: 1; }
@@ -101,6 +155,10 @@ button.clear { padding: .5rem .6rem; color: var(--muted); }
 .ghost { background: transparent; }
 
 .hint { margin: 0; font-size: .84rem; color: var(--muted); }
+.report-on {
+  padding: .5rem .65rem; border-radius: 9px;
+  color: var(--crime); border: 1px solid var(--crime); background: color-mix(in srgb, var(--crime) 10%, transparent);
+}
 
 .summary { display: flex; gap: .6rem; }
 .summary div {
@@ -112,34 +170,122 @@ button.clear { padding: .5rem .6rem; color: var(--muted); }
 
 .error {
   margin: 0; padding: .6rem .7rem; font-size: .84rem;
-  color: #ffd7dc; background: rgba(239, 91, 107, .12);
-  border: 1px solid rgba(239, 91, 107, .35); border-radius: 10px;
+  color: var(--bad-text); background: var(--bad-bg);
+  border: 1px solid var(--bad); border-radius: 10px;
 }
 
 .panel footer { margin-top: auto; padding-top: .6rem; font-size: .74rem; color: var(--muted); }
 
 .map { position: relative; height: 100%; min-height: 0; }
+.map.reporting { cursor: crosshair; }
+.map.reporting .leaflet-container { cursor: crosshair; }
 .map-loading { display: grid; place-items: center; height: 100%; color: var(--muted); }
 
-/* Leaflet's own controls and attribution, matched to the dark page.
+/* Leaflet's own chrome, matched to the page.
    These selectors are deliberately more specific than Leaflet's: its stylesheet
    is imported inside the dynamically-loaded map chunk, so it lands AFTER this
    file and a bare `.leaflet-container` rule loses to its default grey. */
-.map .leaflet-container { background: #1a1f2b; }
+.map .leaflet-container { background: var(--map-void); }
 .leaflet-bar a, .leaflet-bar a:hover { background: var(--panel); color: var(--text); border-color: var(--line); }
 .leaflet-control-attribution {
-  background: rgba(13, 15, 21, .82) !important;
+  background: color-mix(in srgb, var(--panel) 85%, transparent) !important;
   color: var(--muted) !important;
 }
-.leaflet-control-attribution a { color: #a78bfa !important; }
+.leaflet-control-attribution a { color: var(--accent) !important; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--panel); color: var(--text); box-shadow: var(--shadow);
+}
 
-/* ── the safety read ───────────────────────────────────────────────────── */
+/* Night mode inverts the tiles rather than loading a dark basemap from a second
+   host. One provider is one thing that can be unreachable — and a blank
+   background is the worst possible failure on a page about walking after dark.
+   The double hue-rotate puts the greens and blues back the right way round. */
+.tiles-night {
+  filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.75);
+}
+
+/* ── layer markers ──────────────────────────────────────────────────────── */
+
+.spot-pin { position: relative; width: 26px; height: 24px; }
+.spot-glyph {
+  position: absolute; inset: 0 0 auto 0; top: 2px;
+  display: block; text-align: center; font-size: 11px; line-height: 13px;
+  /* The glyph sits on a pink heart in both themes, so it is not themed. */
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45));
+}
+
+/* ── the route comparison ───────────────────────────────────────────────── */
+
+.choices h2 { margin: 0 0 .45rem; font-size: .8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.choices h2 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.choices ul { margin: 0 0 .5rem; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .4rem; }
+
+.choice {
+  display: flex; flex-direction: column; gap: .15rem;
+  width: 100%; text-align: left; padding: .55rem .7rem;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 11px;
+}
+.choice.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.choice-head { display: flex; align-items: center; gap: .4rem; }
+.choice-name { font-weight: 600; font-size: .88rem; }
+.choice-figures { font-size: .82rem; color: var(--muted); }
+.choice-verdict { font-size: .78rem; color: var(--muted); }
+
+.tag {
+  font-size: .66rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: .1rem .38rem; border-radius: 999px; border: 1px solid;
+}
+.tag.preferred { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.tag.fastest { color: var(--muted); border-color: var(--line); }
+
+/* ── the filter panel ───────────────────────────────────────────────────── */
+
+.filters { display: flex; flex-direction: column; gap: .5rem; }
+
+.filter {
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: 11px;
+  background: var(--bg); padding: .5rem .7rem;
+}
+.filter > summary {
+  display: flex; align-items: center; gap: .45rem;
+  cursor: pointer; font-size: .88rem; font-weight: 600; list-style: none;
+}
+.filter > summary::-webkit-details-marker { display: none; }
+.filter > summary::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: .8rem; }
+.filter[open] > summary::after { content: "▴"; }
+.filter .count { margin-left: auto; padding-right: .1rem; font-size: .74rem; color: var(--muted); font-weight: 400; }
+
+.swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.filter.crime { border-left-color: var(--crime); }
+.filter.crime .swatch { background: var(--crime); }
+.filter.safe { border-left-color: var(--safe); }
+.filter.safe .swatch { background: var(--safe); border-radius: 50%; }
+.filter.light { border-left-color: var(--light); }
+.filter.light .swatch { background: var(--light); }
+
+.filter-note { margin: .5rem 0; font-size: .76rem; color: var(--muted); line-height: 1.45; }
+.filter-note code { font-size: .95em; }
+
+.check {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: center;
+  gap: .4rem; padding: .18rem 0; font-size: .84rem; cursor: pointer;
+}
+.check input { flex: none; width: auto; accent-color: var(--accent); }
+.check .glyph { font-size: .9rem; }
+.check small {
+  grid-column: 2 / -1; font-size: .72rem; color: var(--muted); line-height: 1.35;
+}
+/* A checkbox without a glyph still needs its label in the third column. */
+.check > input + :not(.glyph) { grid-column: 2 / -1; }
+
+.quick { display: flex; gap: .35rem; margin: .35rem 0; }
+.quick button { padding: .25rem .55rem; font-size: .76rem; }
+
+.report-add { margin-top: .5rem; display: flex; flex-direction: column; gap: .4rem; }
+
+/* ── the safety read ────────────────────────────────────────────────────── */
 
 .when { display: flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--muted); }
-.when select {
-  background: var(--bg); color: var(--text); border: 1px solid var(--line);
-  border-radius: 8px; padding: .4rem .5rem; font: inherit; font-size: .84rem; cursor: pointer;
-}
 
 .safety { display: flex; flex-direction: column; gap: .55rem; }
 
@@ -158,4 +304,24 @@ button.clear { padding: .5rem .6rem; color: var(--muted); }
 .findings li { font-size: .81rem; color: var(--muted); line-height: 1.45; }
 
 /* A search that could not run is not a search that found nothing. */
-.search-failed { margin: 0; font-size: .78rem; color: #ffc9b0; line-height: 1.4; }
+.search-failed { margin: 0; font-size: .78rem; color: var(--bad); line-height: 1.4; }
+
+/* Verdict colours, one pair per theme: the light-on-dark green that reads
+   nicely at night is invisible on white. */
+.verdict.v-good { border-left-color: #0f8a4d; }
+.verdict.v-good .v-label { color: #0f8a4d; }
+.verdict.v-fair { border-left-color: #9a7300; }
+.verdict.v-fair .v-label { color: #9a7300; }
+.verdict.v-poor { border-left-color: #c0491f; }
+.verdict.v-poor .v-label { color: #c0491f; }
+.verdict.v-unknown { border-left-color: #64708a; }
+.verdict.v-unknown .v-label { color: #64708a; }
+
+[data-theme="dark"] .verdict.v-good { border-left-color: #6ee7a8; }
+[data-theme="dark"] .verdict.v-good .v-label { color: #6ee7a8; }
+[data-theme="dark"] .verdict.v-fair { border-left-color: #e0c04c; }
+[data-theme="dark"] .verdict.v-fair .v-label { color: #e0c04c; }
+[data-theme="dark"] .verdict.v-poor { border-left-color: #ef8f5b; }
+[data-theme="dark"] .verdict.v-poor .v-label { color: #ef8f5b; }
+[data-theme="dark"] .verdict.v-unknown { border-left-color: #7c8798; }
+[data-theme="dark"] .verdict.v-unknown .v-label { color: #7c8798; }

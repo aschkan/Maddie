@@ -10,11 +10,20 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import {
+  CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import type { LatLng, Route } from "@/lib/osrm";
+import { alwaysOpen, type BBox, type LayerData } from "@/lib/layers";
+import { CRIME_CATEGORIES, type Report } from "@/lib/reports";
+
+/** The colours the brief names. Crime purple, safe spots pink, lighting yellow. */
+export const CRIME = "#a855f7";
+export const SAFE = "#ff5fa2";
+export const LIGHT = "#f5c518";
 
 /**
  * Pins drawn as inline SVG rather than Leaflet's own PNGs.
@@ -40,16 +49,74 @@ function pin(letter: string, colour: string): L.DivIcon {
   });
 }
 
+/** The pink heart the brief asks for, with the category's own glyph inside. */
+function heart(glyph: string): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: `
+      <div class="spot-pin">
+        <svg width="26" height="24" viewBox="0 0 26 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M13 22.5S1.5 15.4 1.5 8.3A6.3 6.3 0 0 1 13 4.6 6.3 6.3 0 0 1 24.5 8.3c0 7.1-11.5 14.2-11.5 14.2z"
+                fill="${SAFE}" stroke="#4a0f2a" stroke-width="1.4"/>
+        </svg>
+        <span class="spot-glyph">${glyph}</span>
+      </div>`,
+    iconSize: [26, 24],
+    iconAnchor: [13, 22],
+  });
+}
+
+/**
+ * One icon object per glyph, kept outside the component.
+ *
+ * Leaflet compares icons by identity, so building a new one each render makes
+ * it tear down and rebuild every marker on the map on every keystroke.
+ */
+const HEARTS = new Map<string, L.DivIcon>();
+
+function heartFor(glyph: string): L.DivIcon {
+  const existing = HEARTS.get(glyph);
+  if (existing) return existing;
+  const made = heart(glyph);
+  HEARTS.set(glyph, made);
+  return made;
+}
+
+function crimePin(): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: `
+      <svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="10" cy="10" r="7.5" fill="${CRIME}" stroke="#1c0a2b" stroke-width="2"/>
+        <path d="M10 5.6v5.2M10 13.6v.6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+      </svg>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
+
 export interface MapCanvasProps {
   start: LatLng | null;
   end: LatLng | null;
-  route: Route | null;
+  /** Every route OSRM offered. The selected one is drawn on top, in colour. */
+  routes: Route[];
+  selected: number;
+  onSelectRoute: (index: number) => void;
   centre: LatLng;
+  layers: LayerData;
+  reports: Report[];
+  /** Dropping a report instead of a route point. */
+  reportMode: boolean;
+  onReport: (point: LatLng) => void;
+  onRemoveReport: (id: string) => void;
   /** A map click sets whichever point is next. */
   onPick: (point: LatLng) => void;
   onMoveStart: (point: LatLng) => void;
   onMoveEnd: (point: LatLng) => void;
   onTileError: () => void;
+  /** Fires after panning or zooming settles, with the new visible box. */
+  onView: (view: { bbox: BBox; zoom: number }) => void;
+  night: boolean;
 }
 
 /** Turns a click anywhere on the map into a point. */
@@ -63,40 +130,87 @@ function ClickToPick({ onPick }: { onPick: (point: LatLng) => void }) {
 }
 
 /**
+ * Report the visible box, once things have stopped moving.
+ *
+ * Overpass hands out a couple of query slots per IP, so a query per frame of a
+ * pan is the fastest way to a 429 that then blocks every other layer too.
+ */
+function WatchView({ onView }: { onView: MapCanvasProps["onView"] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    function report() {
+      const bounds = map.getBounds();
+      onView({
+        bbox: {
+          south: bounds.getSouth(), west: bounds.getWest(),
+          north: bounds.getNorth(), east: bounds.getEast(),
+        },
+        zoom: map.getZoom(),
+      });
+    }
+    report();
+    map.on("moveend", report);
+    return () => { map.off("moveend", report); };
+  }, [map, onView]);
+
+  return null;
+}
+
+/**
  * Keep the whole route in view.
  *
- * Only when the route itself changes — refitting on every render would fight
- * the user for control of the map the moment they panned away from it.
+ * Keyed on the route's own shape, not on the array: re-fitting whenever the
+ * layer data came back would yank the map away from wherever it was panned to.
  */
-function FitToRoute({ route }: { route: Route | null }) {
+function FitToRoute({ route }: { route: Route | undefined }) {
   const map = useMap();
+  const key = route ? `${route.metres}:${route.path.length}` : "";
   useEffect(() => {
     if (!route || route.path.length < 2) return;
     const bounds = L.latLngBounds(route.path.map((p) => [p.lat, p.lng] as [number, number]));
     map.fitBounds(bounds, { padding: [48, 48] });
-  }, [map, route]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands in for the route's identity
+  }, [map, key]);
   return null;
 }
 
 export default function MapCanvas({
-  start, end, route, centre, onPick, onMoveStart, onMoveEnd, onTileError,
+  start, end, routes, selected, onSelectRoute, centre, layers, reports,
+  reportMode, onReport, onRemoveReport,
+  onPick, onMoveStart, onMoveEnd, onTileError, onView, night,
 }: MapCanvasProps) {
-  const startIcon = useMemo(() => pin("A", "#6ee7a8"), []);
-  const endIcon = useMemo(() => pin("B", "#c084fc"), []);
+  const startIcon = useMemo(() => pin("A", "#22c55e"), []);
+  const endIcon = useMemo(() => pin("B", "#7c5cff"), []);
+  const alert = useMemo(() => crimePin(), []);
 
   // One report is enough: a blocked tile host fires this for every tile in view.
   const [reported, setReported] = useState(false);
 
+  const categoryLabel = useMemo(
+    () => new Map(CRIME_CATEGORIES.map((c) => [c.id, c.label])),
+    [],
+  );
+
   return (
     <MapContainer
       center={[centre.lat, centre.lng]}
-      zoom={13}
+      zoom={14}
       scrollWheelZoom
+      // Hundreds of lamps and lit streets as SVG elements is hundreds of DOM
+      // nodes; on canvas it is one.
+      preferCanvas
       style={{ height: "100%", width: "100%" }}
     >
       <TileLayer
         // OpenStreetMap's own tiles. Free, no key, and their usage policy asks
         // that heavy users run their own — this is fine for a small app.
+        //
+        // Night mode inverts these in CSS rather than switching to a dark tile
+        // host. A second provider is a second thing that can be unreachable,
+        // and a map whose background silently fails to load is the worst
+        // possible way to render a page about walking somewhere after dark.
+        className={night ? "tiles-night" : ""}
         url={process.env.NEXT_PUBLIC_TILE_URL ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png"}
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         maxZoom={19}
@@ -109,8 +223,94 @@ export default function MapCanvas({
         }}
       />
 
-      <ClickToPick onPick={onPick} />
-      <FitToRoute route={route} />
+      <ClickToPick onPick={reportMode ? onReport : onPick} />
+      <WatchView onView={onView} />
+      <FitToRoute route={routes[selected]} />
+
+      {/* ── lighting ─────────────────────────────────────────────────────── */}
+      {layers.litWays.map((way) => (
+        <Polyline
+          key={way.id}
+          positions={way.path.map((p) => [p.lat, p.lng])}
+          color={LIGHT}
+          weight={4}
+          opacity={0.55}
+        />
+      ))}
+      {layers.lamps.map((lamp) => (
+        <CircleMarker
+          key={lamp.id}
+          center={[lamp.point.lat, lamp.point.lng]}
+          radius={2.5}
+          pathOptions={{ color: LIGHT, fillColor: LIGHT, fillOpacity: 0.9, weight: 0 }}
+        />
+      ))}
+
+      {/* ── the routes ───────────────────────────────────────────────────── */}
+      {routes.map((route, index) => {
+        if (index === selected) return null;
+        return (
+          <Polyline
+            key={`alt-${index}`}
+            positions={route.path.map((p) => [p.lat, p.lng])}
+            color="#8892a6"
+            weight={5}
+            opacity={0.6}
+            dashArray="1 9"
+            eventHandlers={{ click: () => onSelectRoute(index) }}
+          />
+        );
+      })}
+      {routes[selected] && (
+        <>
+          {/* A dark casing under the line, so it stays readable over any tile. */}
+          <Polyline
+            positions={routes[selected].path.map((p) => [p.lat, p.lng])}
+            color="#0b0d12" weight={9} opacity={0.5}
+          />
+          <Polyline
+            positions={routes[selected].path.map((p) => [p.lat, p.lng])}
+            color="#7c5cff" weight={5}
+          />
+        </>
+      )}
+
+      {/* ── safe spots ───────────────────────────────────────────────────── */}
+      {layers.spots.map((spot) => (
+        <Marker key={spot.id} position={[spot.point.lat, spot.point.lng]} icon={heartFor(spot.icon)}>
+          <Popup>
+            <strong>{spot.name ?? spot.label}</strong>
+            <br />
+            {spot.label}
+            {spot.openingHours && (
+              <>
+                <br />
+                {alwaysOpen(spot.openingHours)
+                  ? "Open 24/7"
+                  /* Shown as OSM wrote it. This app does not work out whether
+                     it is open right now — see `alwaysOpen`. */
+                  : <>Hours as mapped: {spot.openingHours}</>}
+              </>
+            )}
+          </Popup>
+        </Marker>
+      ))}
+
+      {/* ── reports ──────────────────────────────────────────────────────── */}
+      {reports.map((report) => (
+        <Marker key={report.id} position={[report.point.lat, report.point.lng]} icon={alert}>
+          <Popup>
+            <strong>{categoryLabel.get(report.category) ?? report.category}</strong>
+            <br />
+            {new Date(report.at).toLocaleString()}
+            {report.note && <><br />{report.note}</>}
+            <br />
+            <button type="button" className="link" onClick={() => onRemoveReport(report.id)}>
+              Remove this report
+            </button>
+          </Popup>
+        </Marker>
+      ))}
 
       {start && (
         <Marker
@@ -138,14 +338,6 @@ export default function MapCanvas({
             },
           }}
         />
-      )}
-
-      {route && (
-        <>
-          {/* A dark casing under the line, so it stays readable over any tile. */}
-          <Polyline positions={route.path.map((p) => [p.lat, p.lng])} color="#0b0d12" weight={9} opacity={0.55} />
-          <Polyline positions={route.path.map((p) => [p.lat, p.lng])} color="#7c5cff" weight={5} />
-        </>
       )}
     </MapContainer>
   );

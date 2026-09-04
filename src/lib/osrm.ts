@@ -64,7 +64,13 @@ export function routeUrl(
   base: string = DEFAULT_OSRM,
 ): string {
   const coords = `${from.lng},${from.lat};${to.lng},${to.lat}`;
-  const query = new URLSearchParams({ overview: "full", geometries: "geojson" });
+  const query = new URLSearchParams({
+    overview: "full",
+    geometries: "geojson",
+    // Ask for other ways round. There is nothing to compare otherwise, and
+    // OSRM often returns only one anyway — a straight road has no alternative.
+    alternatives: "3",
+  });
   return `${base.replace(/\/+$/, "")}/route/v1/${OSRM_PROFILE[profile]}/${coords}?${query}`;
 }
 
@@ -86,7 +92,7 @@ interface OsrmReply {
  * which matters because the demo server cannot be reached from every machine
  * this is developed on.
  */
-export function parseRoute(reply: unknown): { ok: true; route: Route } | { ok: false; error: string } {
+export function parseRoutes(reply: unknown): { ok: true; routes: Route[] } | { ok: false; error: string } {
   const body = reply as OsrmReply | null;
   if (!body || typeof body !== "object") return { ok: false, error: "The routing service sent something unreadable." };
 
@@ -99,30 +105,32 @@ export function parseRoute(reply: unknown): { ok: true; route: Route } | { ok: f
     return { ok: false, error: body.message ?? `The routing service said: ${body.code}` };
   }
 
-  const first = body.routes?.[0];
-  const coordinates = first?.geometry?.coordinates;
-  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+  const routes: Route[] = [];
+  for (const candidate of body.routes ?? []) {
+    const coordinates = candidate?.geometry?.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) continue;
+
+    const path: LatLng[] = [];
+    for (const pair of coordinates) {
+      if (!Array.isArray(pair) || pair.length < 2) continue;
+      const [lng, lat] = pair as [unknown, unknown];   // lon first: GeoJSON order
+      if (typeof lat !== "number" || typeof lng !== "number") continue;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      path.push({ lat, lng });
+    }
+    if (path.length < 2) continue;
+
+    routes.push({
+      path,
+      metres: typeof candidate?.distance === "number" ? candidate.distance : 0,
+      seconds: typeof candidate?.duration === "number" ? candidate.duration : 0,
+    });
+  }
+
+  if (routes.length === 0) {
     return { ok: false, error: "The routing service returned no line to draw." };
   }
-
-  const path: LatLng[] = [];
-  for (const pair of coordinates) {
-    if (!Array.isArray(pair) || pair.length < 2) continue;
-    const [lng, lat] = pair as [unknown, unknown];   // lon first: GeoJSON order
-    if (typeof lat !== "number" || typeof lng !== "number") continue;
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    path.push({ lat, lng });
-  }
-  if (path.length < 2) return { ok: false, error: "The route came back with too few points to draw." };
-
-  return {
-    ok: true,
-    route: {
-      path,
-      metres: typeof first?.distance === "number" ? first.distance : 0,
-      seconds: typeof first?.duration === "number" ? first.duration : 0,
-    },
-  };
+  return { ok: true, routes };
 }
 
 /**
@@ -144,12 +152,12 @@ function describeStatus(status: number, profile: Profile): string {
 }
 
 /** Fetch a route. Never throws — the caller gets a message it can show. */
-export async function fetchRoute(
+export async function fetchRoutes(
   from: LatLng,
   to: LatLng,
   profile: Profile = "driving",
   options: { base?: string; signal?: AbortSignal } = {},
-): Promise<{ ok: true; route: Route } | { ok: false; error: string }> {
+): Promise<{ ok: true; routes: Route[] } | { ok: false; error: string }> {
   const url = routeUrl(from, to, profile, options.base ?? DEFAULT_OSRM);
   let reply: unknown;
   try {
@@ -164,5 +172,5 @@ export async function fetchRoute(
     }
     return { ok: false, error: "Could not reach the routing service from this browser." };
   }
-  return parseRoute(reply);
+  return parseRoutes(reply);
 }
