@@ -122,6 +122,43 @@ The seed writes visibly placeholder notes. Invented first-person testimony is
 exactly what the real interviews will supply, and a convincing fake of it in the
 same collection is how a fake ends up quoted as a finding.
 
+## Secrets and SSL — owned by the reverse proxy
+
+Both are run from the [platform reverse proxy][proxy]'s panel, and its README is the
+spec for both: **§ "How secrets work"** and **§ "SSL — getting and renewing
+certificates"**. Read those before changing anything here that touches either.
+
+[proxy]: https://github.com/aschkan/platform-reverse-proxy#how-secrets-work
+
+- **This app's secrets are **none**.** They are declared in the `secrets` array
+  on this platform's entry in the proxy's `platforms.json`, NOT guessed by the
+  proxy. That list used to be hardcoded there — `JWT_SECRET`, `JWT_ADMIN_SECRET`,
+  `ENCRYPTION_KEY` for every platform — which generated variables most apps here
+  never read while reporting success. **Adding a secret to this app means adding
+  it to that declaration too**, or 🔑 Fix secrets will not know about it.
+- **It does not serve the operator API**, so it takes no `OPERATOR_KEY`. The
+  panel refuses to write one rather than leaving a key nothing reads — which
+  previously looked like the problem was solved.
+- **Fill in, never rotate.** A secret already set is kept. Regenerating a signing
+  key signs every user out; regenerating an encryption key makes stored data
+  permanently unreadable.
+- **Secrets arrive from `env/<name>.env` on the proxy**, merged over `process.env`
+  when the app is spawned. `dotenv` here will not override an already-set variable,
+  so that file wins — a value in this checkout's `.env` is the fallback, not the
+  source of truth.
+- **`"secrets": []` is Maddie's declaration, and it is an answer.** No signing
+  key, no session, no login, nothing encrypted at rest. `MONGO_URI` is
+  configuration, not a generated secret. Declaring none is deliberately
+  different from having no declaration at all — do not delete the empty array.
+
+- **TLS is not this app's job.** It listens on plain HTTP on loopback; the proxy
+  terminates TLS in front of it. The certificate for `maddie.arsaces.ir` and `*.maddie.arsaces.ir` is
+  issued by the panel's 🔒 SSL button — Let's Encrypt over DNS-01, with the TXT
+  records added by hand (expect **two** under one `_acme-challenge.maddie.arsaces.ir` name),
+  through an HTTP proxy because this box cannot resolve the ACME API. Manual-DNS
+  certificates do not auto-renew: 90 days, renew inside the last 30, and the card
+  shows the countdown.
+
 ## Seeding — a contract this repo does not get to reinvent
 
 `npm run seed` is what the reverse proxy's **💣 Reseed DB** button runs, and the

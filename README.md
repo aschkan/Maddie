@@ -219,6 +219,81 @@ how a fake ends up quoted as a finding.
 The generator is deterministic — same options, same points — so a reseed does
 not silently invent a different fictional city.
 
+## Secrets
+
+Maddie is run behind the [platform reverse proxy][proxy], and its card there has a
+**🔑 Fix secrets** button that generates any of these that are missing and restarts
+the app.
+
+[proxy]: https://github.com/aschkan/platform-reverse-proxy#how-secrets-work
+
+| Variable | Shape | Why it matters |
+| --- | --- | --- |
+| — | — | This app needs no secrets. |
+
+Maddie has **no** signing key, no session, no login and nothing encrypted at rest.
+`MONGO_URI` is configuration, not a secret this button generates, and it is optional
+— without it reports live in each visitor's browser.
+
+Its entry in the proxy's `platforms.json` therefore declares `"secrets": []`. That
+is an answer, and it is deliberately different from having no `secrets` key at all:
+the first means "needs none", the second means "nobody has said". The panel treats
+them differently, and 🔑 Fix secrets on Maddie correctly does nothing.
+
+### The proxy does not guess these names — this repo declares them
+
+The button used to generate the same three variables for every platform on the box
+(`JWT_SECRET`, `JWT_ADMIN_SECRET`, `ENCRYPTION_KEY`) because that list was hardcoded
+in the proxy. That is only correct for Shoppix and Nooshin. Everywhere else it wrote
+variables the app never reads, reported success, and left the real problem in place.
+
+So the names above live in **this platform's `secrets` array in the proxy's
+`platforms.json`**. If a secret is added to this app, add it there too, or the
+button will not know about it. The full contract is in the
+[reverse proxy's README][proxy].
+
+This app does **not** serve the operator API (`/api/operator/*`), so it takes no
+`OPERATOR_KEY`. The panel will refuse to write one and say why — a key nothing
+reads is worse than no key, because it looks like the problem is solved.
+
+### Fill in, never rotate
+
+A secret that is already set is **left exactly as it is** and reported as kept.
+That is not timidity: regenerating a signing key signs every user out, and
+regenerating an encryption key makes everything already encrypted permanently
+unreadable. Rotation is a separate, deliberate action.
+
+Secrets are written to `env/<name>.env` on the proxy — the orchestrator override,
+which is the file that actually reaches this process. `dotenv` here will not
+override a variable that is already set in the environment, so that file wins.
+
+## SSL
+
+The certificate for `maddie.arsaces.ir` (and `*.maddie.arsaces.ir`) is issued through the platform
+reverse proxy's **🔒 SSL** button — Let's Encrypt, with the DNS TXT records added
+by hand. The button shows the days left and renews with the same flow.
+
+The short version of [the full contract][ssl]:
+
+[ssl]: https://github.com/aschkan/platform-reverse-proxy#ssl--getting-and-renewing-certificates
+
+- **A wildcard is required** (tenants/subdomains), and Let's Encrypt only issues
+  wildcards over the **DNS-01** challenge — so a person publishes a TXT record and
+  the flow waits for them. Expect **two** records under the same
+  `_acme-challenge.maddie.arsaces.ir` name: the apex and the wildcard are two authorisations.
+- **The server cannot reach Let's Encrypt directly.** It cannot resolve
+  `acme-v02.api.letsencrypt.org`, so certbot is given an HTTP proxy — a field on the
+  button's form. By hand this is `sudo env http_proxy=… https_proxy=… certbot …`,
+  and the `env` matters because `sudo` strips those variables.
+- **Certificates land in** `/etc/letsencrypt/live/maddie.arsaces.ir/{fullchain,privkey}.pem`,
+  which is where the proxy's `certPath`/`keyPath` for this platform already point.
+  The proxy reloads them by mtime — nothing here restarts.
+- **Manual-DNS certificates do not auto-renew.** They last 90 days; renew inside the
+  last 30. The contact email on the form is where the only expiry warning goes.
+
+Nothing in this repo serves TLS itself — this app listens on plain HTTP on loopback
+and the proxy terminates TLS in front of it.
+
 ## What it is built on
 
 | Piece | Service | Key needed |
