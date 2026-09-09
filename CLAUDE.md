@@ -19,6 +19,8 @@ short list of things that will bite you while editing.
 - `src/lib/seed-data.ts` — the example data. **Read its header before touching it.**
 - `src/lib/db.ts` — MongoDB, when `MONGO_URI` is set. **Server only.**
 - `scripts/seed.ts` — `npm run seed`, which the proxy's reseed button runs.
+  **Destructive by default. Read the seed section below.**
+- `src/lib/seed-flags.ts` — the flag contract, pure and tested.
 - `src/lib/ai.ts` — local model, Liara fallback. **Server only.**
 - `src/lib/proxy-chain.ts` — two HTTP proxies in a row. **Server only.**
 - `src/lib/proxy-pool.ts` — which of them work, and which to use next.
@@ -120,6 +122,43 @@ The seed writes visibly placeholder notes. Invented first-person testimony is
 exactly what the real interviews will supply, and a convincing fake of it in the
 same collection is how a fake ends up quoted as a finding.
 
+## Seeding — a contract this repo does not get to reinvent
+
+`npm run seed` is what the reverse proxy's **💣 Reseed DB** button runs, and the
+rules it follows are written down once for every platform on that box, in the
+[reverse proxy's README][seed-contract] under *The seed contract*. **Read that
+before changing `scripts/seed.ts`.**
+
+[seed-contract]: https://github.com/aschkan/platform-reverse-proxy#the-seed-contract--what-a-platforms-npm-run-seed-must-do
+
+- **It wipes by default, and here that means real material.** `dropDatabase()`,
+  not a `deleteMany({ source: "example" })` — the collection holds reports
+  people typed about being followed, harassed or assaulted, and there is no
+  other copy. That is the cost of the standard default, and it is why `--keep`
+  exists and is named in the header, the README and the summary.
+- **`--force` beats every keep/skip flag and every `SEED_*` env var.** The
+  button's whole point is that an operator wanting a known-good database
+  presses one thing. `resolveSeedFlags` is pure and `test/seed-flags.test.ts`
+  pins the rule — which matters more here than anywhere: proving it the other
+  way means running a destructive script against a live collection.
+- **The example reports are built BEFORE anything is deleted.** A bad `--count`
+  or a throwing generator after the wipe leaves an empty collection and takes
+  the real reports with it. A seed that declines to run costs nothing.
+- **The indexes go with the drop, so they are rebuilt.** `reportsCollection()`
+  owns them (unique `id`, 2dsphere on `loc`, `source`, `atMs`); asking for the
+  collection again is what puts them back. A 2dsphere that quietly did not come
+  back is a geo query that returns nothing on a map that looks fine.
+- **No `MONGO_URI` is not a failure.** This deployment keeps reports in the
+  browser; the seed says so and exits 0. Do not make it an error.
+- **`--clear` still works** as an alias for `--no-demo`. It is in the README and
+  in every shipped version of the script's header.
+- **There is no Redis and there will not be one.** Nothing in the seed, the
+  build or the boot may depend on a cache server — that is the rule across every
+  platform on the box.
+- **The summary block at the end is plain `console.log`**, like every other
+  platform's. Maddie has no accounts, so what goes there instead of logins is
+  what the map will now show and how much of it is invented.
+
 ## Why OpenStreetMap and not crime figures
 
 Recorded crime is published per neighbourhood per month. A walking route usually
@@ -167,6 +206,10 @@ can act on by walking a different way), and is the same data OSRM routed on.
 - **Routes are read one at a time.** Overpass gives out a couple of slots per
   IP; three parallel reads earn a 429 that also kills the layers on the map,
   and the whole page then looks broken.
+- **A bare `npm run seed` now wipes the whole database**, community reports
+  included. It used to keep them and replace only the example ones; that is
+  `--keep` now. The change was to make one button mean one thing on every
+  platform — see the seeding section above.
 - **A stored point is GeoJSON: `[lng, lat]`, longitude first.** The same trap as
   OSRM, and `2dsphere` indexes the wrong order perfectly happily — you get
   results, for somewhere in the Gulf of Guinea. `toDoc`/`fromDoc` own it.

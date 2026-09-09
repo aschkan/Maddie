@@ -169,11 +169,36 @@ in one move, and is faster than any of this. Point
 ## Example data — `npm run seed`
 
 ```bash
-npm run seed                # replace the example reports, keep every real one
-npm run seed -- --force     # drop everything first, real reports included
-npm run seed -- --clear     # remove the example data, write nothing
-npm run seed -- --count=400 --seed=7
+npm run seed                # WIPE the database, then write the example reports
+npm run seed -- --force     # the panel's button: wipe and rewrite, no switch honoured
+npm run seed -- --keep      # keep every report a person typed; replace only the examples
+npm run seed -- --no-demo   # wipe and write nothing (`--clear` still works)
+npm run seed -- --count=400 --days=90 --seed=7
 ```
+
+**It is destructive by default, and on this app that has a specific cost.** The
+reports collection holds things people typed about being followed, harassed or
+assaulted, and there is no other copy of them. `--keep` is the switch that
+spares them — reach for it on anything that is not a fresh box.
+
+That default is not a local choice. Every platform behind the reverse proxy
+answers the same `npm run seed -- --force` from the same 💣 Reseed DB button,
+and the contract they all keep is written down in that repo's README under
+[The seed contract](https://github.com/aschkan/platform-reverse-proxy#the-seed-contract--what-a-platforms-npm-run-seed-must-do).
+`--force` beats `--keep`, `--no-demo` and every `SEED_*` an env file might be
+carrying, because an operator who presses that button should not have to reason
+about a file they have never read — `src/lib/seed-flags.ts` is that rule as one
+pure function, and `test/seed-flags.test.ts` pins it without touching a database.
+
+The wipe is `dropDatabase()`, with an inventory of what was there logged before
+it goes; the indexes `reportsCollection()` owns are rebuilt straight afterwards.
+The example reports are generated **before** anything is deleted, so a bad
+`--count` or a generator that throws costs nothing instead of leaving an empty
+collection.
+
+There are no accounts here and so no logins to print, but the seed ends with the
+same plain-text summary block every other platform ends with: what the map will
+now show, how much of it is invented, and how to clear it.
 
 **What it writes did not happen.** It exists so the crime filter can be
 demonstrated before the interviews behind that layer exist. Everything it makes
@@ -192,9 +217,7 @@ interviews will supply, and a convincing fake of it in the same collection is
 how a fake ends up quoted as a finding.
 
 The generator is deterministic — same options, same points — so a reseed does
-not silently invent a different fictional city. `--force` is what the reverse
-proxy's "💣 Reseed DB" button runs, and it is the only path that deletes a
-report a person entered.
+not silently invent a different fictional city.
 
 ## What it is built on
 
