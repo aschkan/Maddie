@@ -285,9 +285,14 @@ The short version of [the full contract][ssl]:
   `acme-v02.api.letsencrypt.org`, so certbot is given an HTTP proxy — a field on the
   button's form. By hand this is `sudo env http_proxy=… https_proxy=… certbot …`,
   and the `env` matters because `sudo` strips those variables.
-- **Certificates land in** `/etc/letsencrypt/live/maddie.arsaces.ir/{fullchain,privkey}.pem`,
-  which is where the proxy's `certPath`/`keyPath` for this platform already point.
-  The proxy reloads them by mtime — nothing here restarts.
+- **Where certificates land is configured on the proxy, not fixed.** By default
+  `/etc/letsencrypt/live/maddie.arsaces.ir/{fullchain,privkey}.pem` — where this
+  platform's `certPath`/`keyPath` already point. But the proxy does not run as
+  root (it reads the keys through a group), so certbot cannot write there
+  unless `ACME_SUDO=true`; the alternative, `ACME_CONFIG_DIR`, puts them
+  somewhere else entirely. The SSL panel prints the real path before issuing
+  and offers to update this platform's `certPath`/`keyPath` when the two
+  differ. The proxy reloads them by mtime — nothing here restarts.
 - **Manual-DNS certificates do not auto-renew.** They last 90 days; renew inside the
   last 30. The contact email on the form is where the only expiry warning goes.
 
