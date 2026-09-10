@@ -142,10 +142,13 @@ certificates"**. Read those before changing anything here that touches either.
 - **Fill in, never rotate.** A secret already set is kept. Regenerating a signing
   key signs every user out; regenerating an encryption key makes stored data
   permanently unreadable.
-- **Secrets arrive from `env/<name>.env` on the proxy**, merged over `process.env`
-  when the app is spawned. `dotenv` here will not override an already-set variable,
-  so that file wins — a value in this checkout's `.env` is the fallback, not the
-  source of truth.
+- **Secrets live in this app's own `.env`, in this checkout**, and that is the
+  only env file involved. The proxy writes into it and spawns the app with it.
+  It used to write to an "orchestrator override" at `env/<name>.env` and merge
+  that on top instead, so every shared secret had two homes and a value set in
+  one and not the other meant the app and the proxy disagreed — an
+  `OPERATOR_KEY` that disagrees answers 401 on every call, which then gets
+  blamed on the key. One file, no merge, nothing to keep in step.
 - **`"secrets": []` is Maddie's declaration, and it is an answer.** No signing
   key, no session, no login, nothing encrypted at rest. `MONGO_URI` is
   configuration, not a generated secret. Declaring none is deliberately

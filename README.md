@@ -263,9 +263,14 @@ That is not timidity: regenerating a signing key signs every user out, and
 regenerating an encryption key makes everything already encrypted permanently
 unreadable. Rotation is a separate, deliberate action.
 
-Secrets are written to `env/<name>.env` on the proxy — the orchestrator override,
-which is the file that actually reaches this process. `dotenv` here will not
-override a variable that is already set in the environment, so that file wins.
+Secrets are written to **this app's own `.env`**, in this checkout, which is the
+one file the proxy spawns it with. There is no second env file: the proxy used
+to keep an "orchestrator override" at `env/<name>.env` and merge it on top,
+which made every shared secret a two-place edit — a value written to one and not
+the other left the app and the proxy disagreeing, and an `OPERATOR_KEY` that
+disagrees answers 401 on every call. If you are upgrading a box from that
+layout, `node scripts/merge-env.js --write` on the proxy folds the override in
+once.
 
 ## SSL
 
