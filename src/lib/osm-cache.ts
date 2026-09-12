@@ -122,12 +122,14 @@ export class ResponseCache {
   }
 }
 
-function envNumber(name: string, fallback: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
+/**
+ * How much of it to keep, in bytes. Hardcoded like the rest of this system.
+ *
+ * 64 MB is a few thousand tiles and every Overpass answer the page has asked
+ * for, on a box that is already running Next. The ceiling is what stops this
+ * being a memory leak with a nice name; the number itself is not delicate.
+ */
+export const MAX_CACHE_BYTES = 64 * 1024 * 1024;
 
 /*
  * One cache for the process, on `globalThis`.
@@ -139,9 +141,7 @@ const globalCache = globalThis as unknown as { __maddieOsmCache?: ResponseCache 
 
 export function osmCache(): ResponseCache {
   if (!globalCache.__maddieOsmCache) {
-    globalCache.__maddieOsmCache = new ResponseCache(
-      envNumber("OSM_CACHE_MAX_BYTES", 64 * 1024 * 1024),
-    );
+    globalCache.__maddieOsmCache = new ResponseCache(MAX_CACHE_BYTES);
   }
   return globalCache.__maddieOsmCache;
 }

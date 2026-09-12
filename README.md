@@ -69,8 +69,8 @@ route was planned on.
 
 **The score is computed in code; the model writes the sentence.** Lit and unlit
 samples, street lamps, frontage, parkland, tunnels — counted from the map, in
-`src/lib/score.ts`, where anyone can check them. A small local model asked to
-invent a safety number would produce a confident one with nothing behind it.
+`src/lib/score.ts`, where anyone can check them. A model asked to invent a
+safety number would produce a confident one with nothing behind it.
 
 **"Unknown" is never "fine".** Most streets in most of the world carry no `lit`
 tag, and an unlit street and an unmapped one look identical in the data. When
@@ -186,25 +186,22 @@ A **502 from `/api/osm/*` is this server** saying nothing it tried got out —
 not OpenStreetMap being down. The page says so in those words, and
 `/api/osm/status` says which routes were tried and what they answered.
 
-To go back to fetching from the browser, set `NEXT_PUBLIC_OSM_DIRECT=1`. To
-point one service at your own server — which is the right answer for a real
-deployment, and removes the rate limit and the reachability problem together —
-set `NEXT_PUBLIC_OSRM_URL`, `NEXT_PUBLIC_OVERPASS_URL`,
-`NEXT_PUBLIC_NOMINATIM_URL` or `NEXT_PUBLIC_TILE_URL`; a named upstream beats
-both defaults.
+**None of this is configurable at run time, and that is on purpose.** Where the
+browser asks is decided in `src/lib/endpoints.ts`, the upstreams behind it in
+`src/lib/osm-forward.ts`, and both are constants. They used to be
+`NEXT_PUBLIC_*` variables, which are inlined at *build* time — so a value set on
+one of the two machines and not the other, or set after the build, is a value
+that silently does nothing. Pointing a service at your own OSRM or Overpass —
+the right answer for a real deployment, and the one that removes the rate limit
+and the reachability problem together — is a one-line edit in `endpoints.ts`
+and a rebuild.
 
 ## When the browser cannot reach OpenStreetMap
 
 Tiles, routing, search and Overpass are normally fetched **by the browser**,
-which is why a proxy on the server does nothing for them. Set these and they go
-out through the server instead — no code changes, the base URL is just local:
-
-```bash
-NEXT_PUBLIC_TILE_URL=/api/osm/tile/{z}/{x}/{y}.png
-NEXT_PUBLIC_OSRM_URL=/api/osm/osrm
-NEXT_PUBLIC_NOMINATIM_URL=/api/osm/nominatim
-NEXT_PUBLIC_OVERPASS_URL=/api/osm/overpass
-```
+which is why a proxy on the server does nothing for them. This app sends them
+through the server instead, at `/api/osm/*`, and that is the shipped default —
+there is nothing to switch on.
 
 The upstream for each is fixed in a table in `src/lib/osm-forward.ts` and cannot
 be named by the request — a forwarder whose target comes from a query parameter
@@ -219,16 +216,14 @@ machine that can does not send every tile through somebody else's box. When
 direct does not work, it goes through a proxy:
 
 ```
-browser → this server → a proxy from OSM_PROXY_LIST → OpenStreetMap
+browser → this server → a proxy from the pool → OpenStreetMap
 ```
 
-`proxies.json` ships with one proxy that works from every network this is
-deployed on, so there is nothing to configure. To use your own:
-
-```bash
-OSM_PROXY_LIST=176.111.37.5:39811              # comma-separated, or JSON
-OSM_PROXY_LIST_FILE=./proxies.json             # the default
-```
+`proxies.json` in the repo is the starting list and there is nothing to
+configure: the server probes it, throws out what does not work, and goes and
+finds more when it is short. To pin a specific proxy, put it in `proxies.json`
+— there is no environment variable for it, and the dials that used to be
+`OSM_PROXY_*` are constants at the top of `src/lib/proxy-pool.ts`.
 
 That file used to hold 649 scraped proxies. A full sweep put every one of them
 at dead, and probing them cost a few minutes of every boot to learn it again,
@@ -261,8 +256,8 @@ What the proxies are then for: when a request *does* go out and comes back
 429, that limit belongs to the exit IP it went out through, so it is retried
 from another one. The durable fix for a deployment that needs more than the
 public service offers is to host Overpass yourself — that removes the limit
-and the reachability problem in one go, and `OSM_UPSTREAM_OVERPASS` points at
-it.
+and the reachability problem in one go — the `overpass` entry in
+`src/lib/osm-forward.ts` points at it.
 
 #### The server keeps its own list, and tops it up by itself
 
@@ -273,12 +268,19 @@ is gitignored and per checkout, and is read first on the next boot — so a
 restart is not a cold start, and neither server overwrites the other's
 findings.
 
-When a machine is short of working exits *and* cannot reach OpenStreetMap by
-itself, it goes and looks: it downloads the public lists, probes a couple of
-hundred fresh addresses against Overpass, keeps the ones that answered and
-writes them down. That happens in the background, at most once an hour, and
-not at all on a server that does not need a proxy. If the box cannot reach
-GitHub either, the lists are fetched through an exit that already works.
+When a machine is short of working exits it goes and looks: it downloads the
+public lists — GitHub-hosted, listed in `src/lib/proxy-sources.ts` — probes a
+few hundred fresh addresses against Overpass sixty at a time, keeps the ones
+that answered and writes them down. That happens in the background, at most
+once an hour. If the box cannot reach GitHub either, the lists are fetched
+through an exit that already works.
+
+It used to skip this entirely on a server that could reach OpenStreetMap by
+itself, on the reasoning that such a machine needs no proxy. That was true
+while the proxies were only about *reachability*. They are also how a rate
+limit is got around now, and a rate limit lands on precisely the machine that
+can reach OpenStreetMap — its own IP is the one that has used up its share. So
+both boxes keep a pool.
 
 You can still do it by hand, which is worth doing once on a new box to see
 what happens:
@@ -293,10 +295,11 @@ Only for a network where the proxies in the list are themselves reachable
 solely *through* one other proxy:
 
 ```
-browser → this server → OSM_PROXY_ENTRY → one of OSM_PROXY_LIST → OpenStreetMap
+browser → this server → the entry proxy → one of the pool → OpenStreetMap
 ```
 
-Leave `OSM_PROXY_ENTRY` unset unless that is your situation. Both are plain
+Leave `ENTRY_PROXY` in `src/lib/proxy-pool.ts` at `null` unless that is your
+situation — which is what ships. Both are plain
 HTTP proxies, so this is two `CONNECT`s stacked with TLS on top;
 `src/lib/proxy-chain.ts` has the detail and the tests stand up two real proxies
 on loopback to prove it.
@@ -324,8 +327,8 @@ nothing else out of the box, and these hops are on 8080, 999, 3128. Both
 
 ### When the entry proxy is the thing that is down
 
-Everything goes out through `OSM_PROXY_ENTRY`, so if that one machine is not
-reachable, every proxy in the list fails with the same message. That used to
+Everything goes out through the entry proxy when one is set, so if that one
+machine is not reachable, every proxy in the list fails with the same message. That used to
 read as "the whole list is dead" — `total: 649, working: 0, resting: 536` —
 when in truth not one of them had been contacted.
 
@@ -344,18 +347,77 @@ exits are assumed to be reachable only through it, and when it is gone that
 assumption is worth testing rather than enforcing. If they cannot be reached
 directly either, those attempts fail as they would have done anyway.
 
-### On rotating exits and rate limits
+### A route read is several queries, going out at once
+
+A route read used to be one Overpass query over the whole corridor, sent on its
+own because parallel queries are what earn a 429. That holds only while every
+query leaves from the same IP. It stopped being true once the forwarder had a
+pool of exits, so a route is now cut into **up to four pieces that go out
+simultaneously, each through a different exit**:
+
+```
+                    ┌─ piece 1 ─→ exit A ─┐
+route ─ chunkPath ─ ├─ piece 2 ─→ exit B ─┤ ─ merge ─→ one set of counts
+                    ├─ piece 3 ─→ exit C ─┤
+                    └─ piece 4 ─→ exit D ─┘
+```
+
+Overpass's limit is per IP, so four quarters through four exits are one query
+each rather than four from one address — and the read finishes in the time the
+slowest quarter takes rather than the sum. Nothing here asks for a particular
+proxy: the pool skips a hop that is already carrying a request, so the pieces
+are handed distinct exits on their own, and the pool keeps at least eight
+working ones so there are enough to go round. When there are not, two pieces
+share one, which is no worse than the single query this replaced.
+
+Three rules make the split safe to have:
+
+* **The pieces share their boundary vertex**, so the corridors join with no gap.
+  A gap would leave an unqueried notch in the middle of the route with no ways
+  under it — reported as "nobody has mapped this" and drawn grey, which is a
+  claim about OpenStreetMap that would be false.
+* **What comes back is deduplicated and counted once**, over the whole path, by
+  the same `readRoute` as before. Two corridors both return the ways around the
+  vertex they share; counting a lamp twice because the route happened to be cut
+  beside it would make the score depend on where the cut fell.
+* **One missing piece fails the whole read.** Answering for three quarters of a
+  walk and silently reporting the fourth as unmapped is worse than a retry.
+
+Short routes — under 1.5 km — are not cut at all. Four queries to answer what
+one answers as fast is four slots spent for nothing.
+
+Routes are still read **one at a time** relative to each other. Three routes
+in parallel would be twelve requests in the air and would need twelve working
+exits to stay under the limit.
+
+### When the rate limit is reached, the page says so
 
 A request that comes back rate limited is retried from a different exit and a
 different mirror, because that is the only way to get an answer on a network
-that cannot reach the mirrors directly. It is deliberately not a way to take
-more from Overpass than they offer: `OSM_PROXY_ATTEMPTS` is 4, requests are
-serialised, and every one identifies itself with a real `User-Agent`.
+that cannot reach the mirrors directly. Four attempts, no more.
+
+**When all four are refused, the page says that in words rather than failing
+vaguely.** The server answers `429` — not the `502` it uses for "nothing got
+out", which is a different failure and names this server as the broken thing —
+and includes how many exits it spent. The page turns that into:
+
+> We have reached OpenStreetMap's rate limit for the map data. We tried 4
+> different exits and each was refused. Wait about a minute and try again.
+
+That is a statement of fact by the time it is read: the retrying has already
+happened, quietly, and has already failed. There is nothing left to try, so
+saying "still loading" would be a lie and saying "could not reach
+OpenStreetMap" would send whoever is debugging at a proxy list that just did
+its job four times.
+
+None of this is a way to take more from Overpass than they offer. The cache
+below is the lever that actually reduces the asking; the exits only spread what
+is left, and every request identifies itself with a real `User-Agent`.
 
 **The actual fix is to self-host Overpass** — a Netherlands extract is a
 `docker compose up` — which removes the rate limit and the reachability problem
-in one move, and is faster than any of this. Point
-`OSM_UPSTREAM_OVERPASS` at it and the chain has nothing left to do.
+in one move, and is faster than any of this. Point the `overpass` entry in
+`src/lib/osm-forward.ts` at it and the chain has nothing left to do.
 
 ## Example data — `npm run seed`
 
@@ -520,48 +582,62 @@ always acts on the machine serving it.
 | Routing | [OSRM](https://project-osrm.org) — the engine behind OSM's own directions | no |
 | Address search | [Nominatim](https://nominatim.org) | no |
 | Street data | [Overpass](https://overpass-api.de) over OpenStreetMap | no |
-| The sentence | a local OpenAI-compatible model, Liara as fallback | local: no |
+| The sentence | the Liara gateway, OpenAI-compatible | yes, and it is in the source |
 
-The first four are fetched **by the browser**. There is exactly one API route,
-and it exists for one reason: the model cannot be called from the browser — the
-LAN box is unreachable from a phone, and the hosted key would be shipped to
-every visitor.
+The first four are fetched **by the browser** — through this server, but the
+browser asks. There is exactly one API route for the model, and it exists for
+one reason: the key cannot be shipped to every visitor.
 
 ## The model
 
-Local first, hosted fallback:
+**One model, configured in `src/lib/ai.ts`, with nothing to set.** The gateway
+is Liara's OpenAI-compatible endpoint; the base URL, the key and the model name
+are constants in that file.
 
-```bash
-LOCAL_AI_HOST=192.168.11.165     # LM Studio on :1234, no key needed
-LOCAL_AI_MODEL=gemma-3-4b-it
+There used to be two tiers — a local LM Studio box on the LAN, with Liara behind
+it — and there is now one. The LAN box is not part of this deployment, and a
+tier that exists only when a variable is set is a configuration the two servers
+can differ on.
 
-LIARA_AI_URL=                    # both, or the tier is skipped entirely
-LIARA_AI_KEY=
-```
+The model is a **chat** model. Liara's own sample snippet calls
+`openai/text-embedding-3-large`, which returns vectors rather than sentences and
+would refuse every request this app makes; `test/safety.test.ts` pins that the
+configured model is not an embedding one.
 
-Local first because it is free per call, private — this app is told where
-someone is walking and at what hour — and cannot be rate-limited or cut off for
-a billing failure. Liara only when the LAN box is off.
+⚠ **The API key is in the repository.** That was asked for explicitly, and the
+cost is real: anyone who can read this repo can spend it. If it leaks, rotate it
+in Liara's dashboard and change the constant — there is nowhere else it lives.
+It never reaches the browser: `src/lib/ai.ts` is imported only by
+`/api/assess`.
 
-Both values are needed for the fallback: a URL with no key 401s on every call,
-turning "the LAN box is off" into a confusing error instead of a quiet
-degradation.
-
-**If neither answers, the page still works.** You get the score and the
-findings; only the sentence is missing.
+**If the model does not answer, the page still works.** You get the score and
+the findings; only the sentence is missing. The score never came from the model
+in the first place — see *The split that matters*.
 
 ## Configuration
 
-Everything has a working default. These exist for when a default is not enough:
+There is one environment variable left, and everything else is a constant in
+the source:
 
 | Variable | Default | Why you would set it |
 |---|---|---|
-| `NEXT_PUBLIC_TILE_URL` | OpenStreetMap | A different tile server, or one you host |
-| `NEXT_PUBLIC_OSRM_URL` | `https://router.project-osrm.org` | Your own OSRM |
-| `NEXT_PUBLIC_OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | Your own Overpass, or a mirror |
-| `NEXT_PUBLIC_NOMINATIM_URL` | `https://nominatim.openstreetmap.org` | Your own Nominatim, or this server's forwarder |
 | `MONGO_URI` | *unset* | Share reports across visitors instead of keeping them per-browser |
-| `OSM_PROXY_ENTRY` / `OSM_PROXY_LIST` | *unset* | Go out through two chained proxies — see above |
+
+| Constant | Where | What it decides |
+|---|---|---|
+| `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | `src/lib/ai.ts` | The model that writes the sentence |
+| `FORWARD` / `PUBLIC` / `EXPLICIT` | `src/lib/endpoints.ts` | Where the browser asks for the map |
+| `SERVICES` | `src/lib/osm-forward.ts` | The upstreams, their mirrors and how long replies are cached |
+| `ENTRY_PROXY`, `MAX_ATTEMPTS`, `MIN_WORKING`, … | `src/lib/proxy-pool.ts` | Every dial on the proxy system |
+| `PROXY_SOURCES` | `src/lib/proxy-sources.ts` | Which GitHub lists are scraped for exits |
+| `MAX_CHUNKS` / `CHUNK_MIN_M` | `src/lib/overpass.ts` | How a route read is split across exits |
+
+Why constants and not variables: this app is built once and deployed to two
+machines, so a per-machine setting is a thing the two boxes can disagree about
+with no answer in the repository — and pm2 replays a saved environment on
+restart that dotenv will not override, which has left this deployment running a
+value that existed nowhere but an old commit, three times. A constant cannot go
+stale in a pm2 dump.
 
 ## About the free services
 
@@ -577,18 +653,23 @@ docker run -t -i -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend \
   osrm-routed --algorithm mld /data/netherlands-latest.osrm
 ```
 
-then set `NEXT_PUBLIC_OSRM_URL=http://localhost:5000`.
+then point the `osrm` entry in `src/lib/osm-forward.ts` at
+`http://localhost:5000` and rebuild.
 
 **Nominatim asks for no more than one request per second.** The address box
 debounces and keeps one request in flight; do not remove that.
 
 **OpenStreetMap's tile policy** asks heavy users to run their own tiles. A small
-app is fine; a popular one should set `NEXT_PUBLIC_TILE_URL`.
+app is fine; a popular one should point the `tile` entry in
+`src/lib/osm-forward.ts` at its own.
 
-**Overpass hands out a couple of query slots per IP.** Routes are read one after
-another rather than in parallel, and the layer query waits for the map to stop
-moving — a 429 earned by panning would take out the route read as well, and the
-whole page then looks broken because it asked for too much at once.
+**Overpass hands out a couple of query slots per IP.** Two things follow, and
+they only look contradictory. Candidate routes are read one after another rather
+than all at once, and the layer query waits for the map to stop moving — a 429
+earned by panning would take out the route read as well, and the whole page then
+looks broken. But a *single* route read is split into pieces that go out
+simultaneously through *different exit IPs*, which is not the same as taking
+more slots from one address; see *A route read is several queries*.
 
 Night mode inverts the tiles in CSS rather than loading a dark basemap from a
 second host. One provider is one thing that can be unreachable, and a blank

@@ -80,9 +80,18 @@ test("no SOCKS list is fetched — this speaks HTTP CONNECT and refuses SOCKS", 
   for (const url of PROXY_SOURCES) assert.doesNotMatch(url, /socks/i);
 });
 
-test("the source list can be replaced from the environment", () => {
-  assert.deepEqual(sources({ OSM_PROXY_SOURCES: "https://a/x.txt, https://b/y.txt" }),
-    ["https://a/x.txt", "https://b/y.txt"]);
-  assert.deepEqual(sources({ OSM_PROXY_SOURCES: "   " }), PROXY_SOURCES);
-  assert.deepEqual(sources({}), PROXY_SOURCES);
+test("the source list is the shipped one, with nothing to set", () => {
+  // It used to be replaceable through OSM_PROXY_SOURCES. Nothing in the proxy
+  // system reads the environment any more — two machines, one build, one
+  // answer — so what ships is what runs.
+  assert.deepEqual(sources(), PROXY_SOURCES);
+});
+
+test("the sources are GitHub-hosted lists, which is where these are published", () => {
+  // The requirement is "fetch http proxies from github". jsDelivr serves the
+  // same repositories over a CDN and is kept for the boxes that reach it when
+  // raw.githubusercontent.com is slow.
+  for (const url of PROXY_SOURCES) {
+    assert.match(url, /githubusercontent\.com|jsdelivr\.net\/gh\//, `${url} is not a GitHub list`);
+  }
 });

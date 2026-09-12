@@ -7,7 +7,7 @@
  * where a tag is only a proxy for what was asked for, the note says so.
  */
 
-import { endpoint, forwarderFailure, unreachableMessage } from "./endpoints.ts";
+import { endpoint, forwarderFailure, rateLimitMessage, unreachableMessage } from "./endpoints.ts";
 import type { LatLng } from "./osrm.ts";
 
 export interface SpotKind {
@@ -325,7 +325,10 @@ export async function fetchLayers(
       return { ok: false, error: "The map query timed out. Zoom in, or switch off a layer or two." };
     }
     if (response.status === 429) {
-      return { ok: false, error: "OpenStreetMap is rate limiting us. Wait a moment, then pan again." };
+      // The same sentence the route read gives, from the same helper: by the
+      // time a 429 arrives the server has already tried every exit it has, so
+      // this is a statement of fact rather than a suggestion to retry.
+      return { ok: false, error: `${await rateLimitMessage(response, "the map layers")} The layers are not loaded.` };
     }
     const ours = forwarderFailure("overpass", response.status);
     if (ours) return { ok: false, error: ours };

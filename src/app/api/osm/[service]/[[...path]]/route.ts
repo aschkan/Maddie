@@ -12,8 +12,15 @@
  * that works and through the entry proxy and the fastest live exit where it
  * does not, which makes both machines behave the same from the browser's side.
  *
- * `NEXT_PUBLIC_OSM_DIRECT=1` sends the browser straight out again, and a
- * per-service `NEXT_PUBLIC_*_URL` still names a self-hosted upstream.
+ * Two things it now does that are worth knowing before reading the code:
+ *
+ *   * a route read arrives here as SEVERAL simultaneous requests, one per piece
+ *     of the route (`chunkPath` in `overpass.ts`). The pool hands each of them a
+ *     different exit, because `rank()` skips a hop already carrying a request —
+ *     which is what makes them count as one query per IP rather than four.
+ *   * when every exit is rate limited it answers **429**, not 502. Those are
+ *     different failures and only one of them is this server's fault; the client
+ *     turns the first into "we have reached OpenStreetMap's rate limit".
  *
  * ⚠ This app's OWN API is not served from here and must never be. `/api/assess`
  * and `/api/reports` are same-origin calls to the box that served the page;
@@ -163,6 +170,34 @@ async function forward(request: Request, service: Service, name: string, parts: 
   if (result.ok) {
     keep(result.value.status, result.value.headers, result.value.body);
     return reply(result.value.status, result.value.headers, result.value.body, service, result.via, result.attempts);
+  }
+
+  /*
+   * Every exit refused with a rate limit — say THAT, not "nothing got out".
+   *
+   * This is the honest end of the rotation. The request has been through as
+   * many different exit IPs as the pool could give it and every one of them
+   * came back 429, so there is nothing left to try quietly and the page should
+   * stop spinning and tell the person what happened. A 502 here would be a lie
+   * with a cost: it names this server as the broken thing and sends whoever is
+   * debugging at the proxy list, which just did its job four times.
+   *
+   * `exitsTried` is what turns the client's sentence from "we are being rate
+   * limited" into "we tried four exits and each was refused", which is the
+   * difference between a suggestion and an explanation.
+   */
+  if (result.limited) {
+    return NextResponse.json(
+      {
+        error: "OpenStreetMap is rate limiting us, from every exit we tried.",
+        exitsTried: result.tried.length,
+        tried: result.tried,
+        reasons: result.reasons.slice(0, 6),
+      },
+      // Never cached: storing a refusal for the service's TTL turns one minute
+      // of rate limiting into ten. `keep()` is deliberately not called here.
+      { status: 429, headers: { "cache-control": "no-store", "x-osm-attempts": String(result.tried.length) } },
+    );
   }
 
   if (ALLOW_DIRECT) {

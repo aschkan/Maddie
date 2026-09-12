@@ -27,7 +27,7 @@ import type { Assessment, When } from "@/lib/score";
 import type { Segment } from "@/lib/segments";
 import { VERDICT_CLASS, VERDICT_COLOUR, VERDICT_LABEL } from "@/lib/verdict";
 
-type Result = Assessment & { narration: string | null; narratedBy: "local" | "liara" | null };
+type Result = Assessment & { narration: string | null; narratedBy: "liara" | null };
 
 const LIGHT_WORD: Record<Light, string> = {
   day: "daylight",

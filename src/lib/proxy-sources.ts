@@ -30,12 +30,15 @@ export const PROXY_SOURCES: string[] = [
   "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
 ];
 
-/** `OSM_PROXY_SOURCES`, comma or newline separated, replaces the list above. */
-export function sources(env: Record<string, string | undefined> = process.env): string[] {
-  const raw = env.OSM_PROXY_SOURCES?.trim();
-  if (!raw) return PROXY_SOURCES;
-  const list = raw.split(/[\s,]+/).map((entry) => entry.trim()).filter(Boolean);
-  return list.length > 0 ? list : PROXY_SOURCES;
+/**
+ * The lists to fetch. Hardcoded, like everything else in the proxy system.
+ *
+ * A function rather than the constant itself so callers keep one name to
+ * import if the selection ever grows a rule — and so a test can assert the
+ * shipped list without reaching for an environment that no longer exists.
+ */
+export function sources(): string[] {
+  return PROXY_SOURCES;
 }
 
 /** `1.2.3.4:8080`, with an optional scheme and optional trailing junk. */

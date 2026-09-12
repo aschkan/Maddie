@@ -26,7 +26,7 @@ short list of things that will bite you while editing.
 - `scripts/seed.ts` — `npm run seed`, which the proxy's reseed button runs.
   **Destructive by default. Read the seed section below.**
 - `src/lib/seed-flags.ts` — the flag contract, pure and tested.
-- `src/lib/ai.ts` — local model, Liara fallback. **Server only.**
+- `src/lib/ai.ts` — the one model: Liara, hardcoded, key and all. **Server only.**
 - `src/lib/proxy-chain.ts` — two HTTP proxies in a row. **Server only.**
 - `src/lib/proxy-pool.ts` — which of them work, and which to use next.
 - `src/lib/osm-forward.ts` — the fixed table of upstreams the forwarder allows.
@@ -47,10 +47,40 @@ Tiles, routing, search and the OSM query are asked for by the browser but go
 reach them at all.
 
 **The API routes each exist for a reason the browser cannot do itself:** the
-model cannot be called from the browser (the LAN box is unreachable from a
-phone, and the Liara key would be shipped to every visitor), the reports need a
-connection string, and `/api/osm/*` is for the deployment whose network cannot
-reach OpenStreetMap at all.
+model cannot be called from the browser (the Liara key would be shipped to every
+visitor), the reports need a connection string, and `/api/osm/*` is for the
+deployment whose network cannot reach OpenStreetMap at all — and is where a rate
+limit is noticed, rotated around, and finally reported.
+
+## There is no environment variable in the proxy system or the model
+
+**`README.md` § "Configuration" is the spec.** Everything that used to be
+`OSM_PROXY_*`, `OSM_UPSTREAM_*`, `OSM_CACHE_*`, `NEXT_PUBLIC_*`, `LOCAL_AI_*` and
+`LIARA_AI_*` is a constant in the source now. `MONGO_URI` is the only variable
+left in this app.
+
+- **Do not reintroduce one.** Two reasons, both already paid for here: this app
+  is built once and deployed to TWO machines, so a per-machine setting is
+  something the boxes can disagree about with nothing in the repository to say
+  which is right; and pm2 replays a saved environment on restart that dotenv
+  will not override, so an edited `.env` and a running process can disagree
+  indefinitely — it has done, three times, once on `OSM_PROXY_ENTRY`.
+- **`NEXT_PUBLIC_*` was worse than the rest**, because it is inlined at BUILD
+  time. A value set on a box after the build is a value that silently does
+  nothing, which reads as the setting being ignored rather than as a rebuild
+  being needed.
+- **The seam a test needs is a PARAMETER, not an environment variable.**
+  `loadHops({ learned, seed })` takes its files as arguments with hardcoded
+  defaults, and `ProxyPool.stateFile` is a field. That is why `resolve()` in
+  `endpoints.ts` was already written that way and is worth copying.
+- **The AI key is in `src/lib/ai.ts` on purpose and it is a real cost.** Anyone
+  who can read the repo can spend it; if it leaks, rotate it in Liara and change
+  the constant. Never move it into an env file "for safety" without being asked
+  — that is the arrangement this replaced.
+- **The model is a CHAT model.** Liara's sample snippet calls
+  `openai/text-embedding-3-large`; an embedding model returns vectors and would
+  refuse `/chat/completions` on every request, losing the sentence on every read
+  while looking configured. `test/safety.test.ts` pins it.
 
 ## Everything except this app's own API goes through this server
 
@@ -75,15 +105,11 @@ the browser's side.
   `SERVICES` in `osm-forward.ts` is a fixed table holding neither of them, so
   `/api/osm/assess` is a 404; `OWN_API` in `endpoints.ts` says it from the other
   side, and `test/endpoints.test.ts` pins that the two never overlap.
-- **`NEXT_PUBLIC_*` must be written out STATICALLY.** `process.env.NEXT_PUBLIC_X`
-  is substituted textually at build time; `process.env[name]` is not rewritten
-  and arrives in the browser as `undefined`. That is why `endpoints.ts` lists
-  the four by hand into a record rather than looking them up by service name —
-  a lookup would silently disable every override.
-- **`resolve()` is pure and the module-level reads are the only impure part.**
-  Order: an explicit `NEXT_PUBLIC_<SERVICE>_URL` (point at your own OSRM), then
-  `NEXT_PUBLIC_OSM_DIRECT=1` (browser goes straight out, the old behaviour),
-  then the forwarder.
+- **`resolve()` is pure, and now the WHOLE file is.** Order: an explicit URL for
+  the service (point at your own OSRM), then the direct escape hatch (browser
+  goes straight out, the old behaviour), then the forwarder. `EXPLICIT` and
+  `DIRECT` are constants; they were `NEXT_PUBLIC_*` reads, which are inlined at
+  build time and so silently ignore anything set afterwards on the box.
 - **A 502 from `/api/osm/*` is THIS SERVER, not OpenStreetMap.** It means
   nothing it tried got out. `forwarderFailure()` turns it into a sentence that
   names the right machine and points at `/api/osm/status`; reporting it as
@@ -98,11 +124,11 @@ the browser's side.
 
 ## The forwarder, and the two-proxy chain
 
-Set `NEXT_PUBLIC_OVERPASS_URL=/api/osm/overpass` (and the OSRM, Nominatim and
-tile equivalents) and the browser asks THIS server, which goes out through
-`OSM_PROXY_ENTRY` → one of `OSM_PROXY_LIST` → OpenStreetMap. Two plain HTTP
-proxies means two stacked `CONNECT`s with TLS on top; see the header of
-`proxy-chain.ts`.
+The browser asks THIS server, always — that is `FORWARD` in `endpoints.ts` and
+it is the shipped default. The server goes out directly where that works, and
+otherwise through `ENTRY_PROXY` (null by default) → one of the pool →
+OpenStreetMap. Two plain HTTP proxies means two stacked `CONNECT`s with TLS on
+top; see the header of `proxy-chain.ts`.
 
 **The entry proxy is never the exit.** It is the way in to the second hop and
 nothing else — that was the requirement, and it is also what keeps this
@@ -114,19 +140,30 @@ servers with different egress — that is the whole reason any of this exists �
 so a proxy proven from one is not evidence about the other. `proxies.json` is
 a committed SEED, the same file on both; `.data/proxies.json` is what this
 machine learned, gitignored and per checkout. `loadHops()` reads the learned
-list first and the seed after, and an explicit `OSM_PROXY_LIST` beats both.
-Never write findings back into the committed file: the two servers would
-overwrite each other's answers, and the one that can reach the internet would
-teach the one that cannot.
+list first and the seed after. Never write findings back into the committed
+file: the two servers would overwrite each other's answers, and the one that can
+reach the internet would teach the one that cannot.
 
-**The server scrapes on its own, and only when it needs to.** `refill()` is
-`npm run proxies -- --scrape --save` run by the server itself, from `sweep()`,
-and it is gated three ways: not when `directWorks` (that machine needs no
-proxy at all), not above `OSM_PROXY_MIN_WORKING`, and not more than once an
+**The server scrapes on its own, from the GitHub lists in `proxy-sources.ts`.**
+`refill()` is `npm run proxies -- --scrape --save` run by the server itself, from
+`sweep()`, gated two ways: not above `MIN_WORKING`, and not more than once an
 hour. Only the exits that answered are kept — a list of thousands costs a
 timeout apiece on every boot to rediscover that they are dead, which is what
 the 649-entry file was doing. When this box cannot reach GitHub either, the
 sources are fetched THROUGH an exit that already works.
+
+- **The `directWorks` gate is GONE, and putting it back breaks the rate-limit
+  path.** It used to skip the scrape entirely on a machine that could reach
+  OpenStreetMap by itself. That was right while the proxies were only about
+  reachability; they are also how a rate limit is got around now, and a rate
+  limit lands on precisely the machine that CAN reach OpenStreetMap — its own IP
+  is the one that has used up its share.
+- **`start()` runs on an empty list too.** It used to return early there, which
+  made "no proxies yet" permanent on a fresh checkout: nothing swept, so nothing
+  scraped, so the list stayed empty.
+- **`MIN_WORKING` is 8 because a route read is split into 4 parallel pieces**
+  and each wants its own exit. Lowering it re-creates the sharing the split
+  exists to avoid.
 
 **A rate limit going out DIRECTLY must rotate, not be returned.** The
 direct-first path returned whatever came back, a 429 included — so on the
@@ -169,14 +206,14 @@ A probe that has not run yet counts as "no", for the second reason.
 It held 649 scraped entries; a full sweep put every one at dead, and probing
 them cost minutes of each boot to learn it again — while the status page
 reported `total: 649` as though that were reassuring. `npm run proxies`
-re-probes; `OSM_PROXY_LIST` overrides the file entirely.
+re-probes.
 
-**`OSM_PROXY_ENTRY` is rarely needed and is not the normal arrangement.** It is
-only for a network where the proxies in the list are reachable solely through
-another one. Do not write a specific LAN address into this repo as though it
-were the default — it was, and when that machine went away every example, the
-scraper's help text and the failure message pointed at a box that no longer
-existed.
+**`ENTRY_PROXY` is null, is rarely needed, and is not the normal arrangement.**
+It is only for a network where the proxies in the list are reachable solely
+through another one. Do not write a specific LAN address into this repo as
+though it were the default — it was, and when that machine went away every
+example, the scraper's help text and the failure message pointed at a box that
+no longer existed.
 
 **A dead ENTRY must not condemn the list.** Everything goes through the entry
 when one is configured, so an unreachable entry fails every hop with the same
@@ -204,23 +241,89 @@ been tried. The rules now:
 - **`summary().problem` is one sentence** naming the machine that is actually
   unreachable and what to check. Working it out from `working: 0` was left to
   the reader, and the reader concluded the proxy list was broken.
-- **`OSM_PROXY_BUDGET_MS` caps ONE request across all its attempts** (45s).
-  Four attempts at a 25-second timeout is a hundred seconds, and a page that
-  hangs for a hundred seconds has already failed.
+- **`BUDGET_MS` caps ONE request across all its attempts** (45s). Four attempts
+  at a 25-second timeout is a hundred seconds, and a page that hangs for a
+  hundred seconds has already failed.
 
 The upstream comes from a fixed table in `osm-forward.ts` and can never be
 named by the request. A forwarder whose target is a query parameter is an open
 proxy, and an open proxy on a public server is somebody's problem within a day.
 
+## A route read is four queries at once, through four different exits
+
+**`README.md` § "A route read is several queries, going out at once" is the
+spec.** `chunkPath` in `overpass.ts` cuts the route; `fetchFacts` fires the
+pieces with `Promise.all`; `rank()` in `proxy-pool.ts` is what hands each piece
+a different exit, by skipping a hop that is already in flight.
+
+It used to be one query, deliberately, because parallel queries earn a 429.
+That reasoning holds only while every query leaves from the same IP — and it
+stopped being true when the forwarder grew a pool. Four quarters through four
+exits are one query per IP, not four.
+
+The rules that will be undone by accident:
+
+- **The pieces SHARE their boundary vertex.** `around:` matches within a radius
+  of the polyline, so two corridors that share an endpoint join with no gap.
+  Trimming that "duplicate" point leaves an unqueried notch in the middle of the
+  route: no ways under it, every sample reads `lit: "unknown"`, and the map
+  draws it grey with "nobody has mapped this" — a claim about OpenStreetMap that
+  would be false. `test/overpass-parallel.test.ts` reassembles the pieces and
+  asserts they are the original path.
+- **The replies are DEDUPLICATED by `type/id`.** The shared vertex means two
+  pieces return the same ways and lamps. Counting one twice makes the score
+  depend on where the cut fell, which is an implementation detail and must not
+  be visible in the answer.
+- **`readRoute` still runs ONCE, over the whole path.** The split is about how
+  the elements are fetched, never about how they are counted — a per-piece count
+  summed afterwards would be a second implementation of the scoring, and
+  `test/overpass-parallel.test.ts` pins that a split read equals an unsplit one.
+- **One missing piece fails the WHOLE read.** Answering for three quarters and
+  reporting the fourth as unmapped is the grey-notch failure again, arrived at
+  from the other direction.
+- **Under `CHUNK_MIN_M` (1.5 km) there is no split.** Four queries to answer
+  what one answers as fast is four slots spent for nothing.
+- **`MAX_CHUNKS` is 4 and is bounded by `MIN_WORKING` (8), not by taste.** Every
+  piece wants its own exit; more pieces than exits is the sharing the split
+  exists to avoid.
+- **Routes are still read one at a time.** Parallel WITHIN a route, sequential
+  BETWEEN them: three routes at once would be twelve requests in the air.
+
+## A rate limit is said out loud, after the rotating has failed
+
+**`README.md` § "When the rate limit is reached, the page says so" is the spec.**
+
+- **The forwarder answers 429, never 502, when every exit was rate limited.**
+  `rotate()` returns `limited: true` for it. They are different failures: 502
+  says this server could not get out and sends whoever is debugging at the proxy
+  list, which just did its job four times.
+- **The 429 body carries `exitsTried`**, and `rateLimitMessage()` in
+  `endpoints.ts` turns it into the sentence the page shows. "We are being rate
+  limited" is a guess; "we tried 4 different exits and each was refused" is an
+  explanation, and it is the difference between the reader waiting and the
+  reader understanding.
+- **Rotate first, then say it.** Both halves are load-bearing. Saying it without
+  rotating makes the pool pointless; rotating without saying it leaves the page
+  spinning with nothing left to try.
+- **A rate limit outranks any other failure in the batch.** It is the temporary
+  one, the one that is nobody's fault, and the only one with an action attached.
+  Reporting a neighbouring chunk's 502 instead sends the reader to check a
+  server that is fine.
+- **The 429 is NEVER cached.** `keep()` is deliberately not called on that path,
+  and `osm-cache.ts` refuses a non-200 anyway — storing a refusal for the
+  service's TTL turns one minute of rate limiting into ten.
+
 ## The split that matters
 
 **Code computes the score. The model writes the sentence.**
 
-A 4B model asked to invent a safety number produces a confident number with
+A model asked to invent a safety number produces a confident number with
 nothing behind it, and this is not a subject to be confidently wrong about. So
 `score.ts` turns counts into a verdict, and the model is handed those numbers
-and asked to explain them. If no model answers, the page still shows the score
-and the findings — only the prose is lost.
+and asked to explain them. If the model does not answer, the page still shows
+the score and the findings — only the prose is lost. There is no second tier to
+fall back to any more, which makes that degradation the whole error path rather
+than an unlikely one: it has to stay quiet and complete.
 
 When the verdict is `unknown` the model is **not called at all**. There is
 nothing to explain but the gap, and a model asked to comment anyway produces a
@@ -455,9 +558,12 @@ There is **one env file** and it is this app's own. There used to be a second
 "orchestrator override" merged on top at spawn time, which meant every shared
 value had two homes and a value set in one and not the other put the app and the
 proxy into permanent disagreement. Do not reintroduce a second layer.
-- **`NEXT_PUBLIC_*` is inlined at BUILD time.** Changing one of those in the env
-  editor and restarting does nothing — it needs a rebuild, which is what the
-  panel's Update button does. The order is always env → build → run.
+- **The env file is now nearly empty, and `MONGO_URI` is the only thing in it
+  this app reads.** The proxy system, the map upstreams and the model are
+  constants in the source — see § "There is no environment variable" above. So
+  changing any of those is a code edit and a **rebuild** (the panel's Update
+  button), not an env-editor save and a restart. The order is always
+  edit → build → run.
 
 ### The buttons, and exactly what each one runs here
 
@@ -657,9 +763,11 @@ can act on by walking a different way), and is the same data OSRM routed on.
   `layerQuery` filters the requested ids against `SAFE_SPOTS` rather than
   interpolating them, so a stale id becomes nothing rather than a fragment of
   query.
-- **Routes are read one at a time.** Overpass gives out a couple of slots per
-  IP; three parallel reads earn a 429 that also kills the layers on the map,
-  and the whole page then looks broken.
+- **Routes are read one at a time — but ONE route is read in four parallel
+  pieces.** Those are not in tension: Overpass's limit is per IP, so four pieces
+  through four different exits are one query each, while three whole routes at
+  once would be twelve requests needing twelve exits. Parallel within, serial
+  between.
 - **The sun's elevation is not the clock's opinion.** `hour >= 20` called a June
   evening in Amsterdam dark and a December evening in Tehran light, and lighting
   is most of the night score. `test/daylight.test.ts` pins both against the
@@ -738,6 +846,20 @@ can act on by walking a different way), and is the same data OSRM routed on.
   proxies passed an `api.ipify.org` test had 3 that could fetch Overpass, and
   two of the failures were proxies intercepting TLS — which an ipify check
   over the same intercepted connection is perfectly happy with.
+- **Chunks that do not share their boundary vertex leave a grey notch.** The gap
+  has no ways under it, so it reads as unmapped rather than as unasked. The two
+  statements are not the same and only one of them is about the street.
+- **Deduplicate the merged elements, or the score moves with the cut.** Adjacent
+  corridors overlap; a lamp beside a boundary is returned twice.
+- **A 429 that every exit gave is a 429 to the client, not a 502.** And it says
+  how many exits were spent. Anything vaguer leaves the reader debugging a proxy
+  list that is working.
+- **An embedding model cannot write the sentence.** `openai/text-embedding-3-large`
+  is what Liara's sample snippet uses and it would 400 on `/chat/completions`
+  every time, so the page would silently lose its prose while looking configured.
+- **There is no environment variable to add.** The proxy system, the upstreams
+  and the model are constants; `MONGO_URI` is the only one left. A test that
+  needs to vary one takes a parameter.
 
 ## Toolchain constraints
 

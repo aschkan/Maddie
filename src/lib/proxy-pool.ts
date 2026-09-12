@@ -84,9 +84,22 @@ export function cooldownMs(failures: number): number {
  * Never-probed comes before known-bad but after known-good, which is what makes
  * a cold start usable — the first request does not have to wait for the sweep
  * to finish, it just tries unproven hops after the proven ones.
+ *
+ * A hop already carrying another request is skipped, which is what hands the
+ * parallel chunks of one route read a DIFFERENT exit each — the whole point of
+ * splitting them, since the limit being worked around is per exit IP.
+ * `includeInFlight` relaxes that, and `rotate` uses it only as a last resort:
+ * with more chunks in the air than working exits, sharing one is worse than a
+ * chunk that fails outright for want of a proxy to try.
  */
-export function rank(states: readonly HopState[], now: number): HopState[] {
-  const available = states.filter((state) => !state.inFlight && state.restingUntil <= now);
+export function rank(
+  states: readonly HopState[],
+  now: number,
+  options: { includeInFlight?: boolean } = {},
+): HopState[] {
+  const available = states.filter(
+    (state) => (options.includeInFlight === true || !state.inFlight) && state.restingUntil <= now,
+  );
   const tier = (state: HopState): number => (state.ok === true ? 0 : state.ok === null ? 1 : 2);
   return [...available].sort((a, b) => {
     const byTier = tier(a) - tier(b);
@@ -98,17 +111,129 @@ export function rank(states: readonly HopState[], now: number): HopState[] {
   });
 }
 
-function envNumber(name: string, fallback: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+/* ───────────────────────── the dials, hardcoded ─────────────────────────────
+ *
+ * There is not one `process.env` read left in this file, and that is the point.
+ * This app answers from TWO machines with different egress, and every one of
+ * these numbers used to be settable per box — so "why is the other server
+ * slower" had eleven possible answers, none of them in the repository. pm2
+ * replays a saved environment on top of that (see CLAUDE.md), so a variable
+ * edited in `.env` and a variable the process is actually running can disagree
+ * indefinitely. One file, read the same way on both boxes, is the whole fix.
+ *
+ * Change a number here and both servers change together, on the next build.
+ */
+
+/**
+ * A first proxy that every hop is reached THROUGH, or null for none.
+ *
+ * Null is the normal arrangement and always was. An entry proxy is only for a
+ * network where the exits are reachable solely through another box, and naming
+ * a specific LAN address here as though it were the default is how every
+ * example, the scraper's help text and the failure message came to point at a
+ * machine that no longer existed. The machinery below still handles one — set
+ * this to `"10.0.0.1:3128"` and the chain becomes two CONNECTs again.
+ */
+export const ENTRY_PROXY: string | null = null;
+
+/**
+ * What a probe fetches.
+ *
+ * An upstream this app actually depends on, not a neutral connectivity check: a
+ * proxy that reaches `api.ipify.org` and not Overpass is useless here, and two
+ * of the failures in a real list were proxies intercepting TLS — which an ipify
+ * check over the same intercepted connection is perfectly happy with.
+ * `/api/status` is the cheapest thing Overpass serves.
+ */
+export const PROBE_URL = "https://overpass-api.de/api/status";
+
+/** A real request through the chain. */
+export const REQUEST_TIMEOUT_MS = 25_000;
+/** Shorter: a probe exists to find dead entries fast. */
+export const PROBE_TIMEOUT_MS = 9_000;
+/** Shorter still: the entry is one hop away and answers at once or is not there. */
+export const ENTRY_TIMEOUT_MS = 4_000;
+/** Shortest: a scraped candidate is dead until proven otherwise, and there are hundreds. */
+export const SCRAPE_PROBE_TIMEOUT_MS = 6_000;
+
+/** How many exits ONE request may try before giving up. */
+export const MAX_ATTEMPTS = 4;
+
+/**
+ * A ceiling on ONE request, across all its attempts.
+ *
+ * Four attempts at a 25s timeout is a hundred seconds, and a page that hangs
+ * for a hundred seconds has already failed — the browser shows a pending
+ * request and the person reloads. Better to give up and say why.
+ */
+export const BUDGET_MS = 45_000;
+
+/**
+ * Below this many working exits, go and look for more.
+ *
+ * Eight rather than three, because a route read is now split into chunks that
+ * go out in PARALLEL, one exit each — see `chunkPath` in `overpass.ts`. Fewer
+ * working exits than chunks means two chunks share an IP, which is the rate
+ * limit the split exists to get under.
+ */
+export const MIN_WORKING = 8;
+
+/** Not more than once an hour: these lists refresh on the order of hours. */
+export const SCRAPE_INTERVAL_MS = 3_600_000;
+/** How many fresh addresses to try per round. */
+export const SCRAPE_MAX = 400;
+/** A ceiling on the states held in memory. */
+export const MAX_STATES = 400;
+
+/** How many probes at once during a normal sweep. */
+export const PROBE_CONCURRENCY = 24;
+/**
+ * How many at once when probing a freshly scraped batch.
+ *
+ * Higher than a sweep on purpose: these are hundreds of addresses that are
+ * almost all dead, each costing a full timeout to establish that, and they are
+ * hundreds of DIFFERENT hosts rather than a queue at one entry proxy. Doing
+ * them twenty-four at a time took minutes; this is the "scan them fast" half
+ * of the requirement.
+ */
+export const SCRAPE_CONCURRENCY = 60;
+
+/** How often the background sweep re-probes everything. */
+export const SWEEP_INTERVAL_MS = 600_000;
+
+/**
+ * The committed seed list, shared by both servers.
+ *
+ * Joined from a literal below rather than from a variable: Next traces
+ * filesystem access statically, and a `path.join` whose tail it cannot see
+ * makes it bundle the whole project — every source file and the public folder —
+ * into the server output.
+ */
+export function seedFile(): string {
+  return path.join(process.cwd(), "proxies.json");
 }
 
-function envFlag(name: string): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
-}
+/**
+ * Whether a request may go out with NO proxy after every exit has failed.
+ *
+ * False, and it earns that. The forwarder already tries direct FIRST when
+ * `directWorks`, so on the machine that can reach OpenStreetMap this would be
+ * a second attempt at something that just failed — and when it failed with a
+ * 429 it is this server's own IP that is over the limit, which is precisely
+ * what the exits are for. On the machine that cannot reach OpenStreetMap at
+ * all it is a guaranteed timeout on the end of every failed request.
+ */
+export const ALLOW_DIRECT = false;
+
+/**
+ * Identify the app to the services it queries.
+ *
+ * Both Overpass and Nominatim ask for this, and Nominatim blocks a
+ * default-User-Agent client outright. Going out through a rotating exit makes
+ * this more important rather than less: it is the only thing that says these
+ * requests are one small app rather than an anonymous scraper.
+ */
+export const USER_AGENT = "Maddie/1.0 (route safety map; https://github.com/aschkan/Maddie)";
 
 /**
  * Where THIS machine keeps the proxies it has found to work.
@@ -120,8 +245,6 @@ function envFlag(name: string): boolean {
  * each other's findings. `.data/` is gitignored and per checkout.
  */
 export function learnedFile(): string {
-  const named = process.env.OSM_PROXY_STATE_FILE?.trim();
-  if (named) return path.isAbsolute(named) ? named : path.join(process.cwd(), named);
   return path.join(process.cwd(), ".data", "proxies.json");
 }
 
@@ -137,17 +260,17 @@ function readList(file: string): Hop[] {
  * The list to start from: what this machine learned, then the committed seed.
  *
  * Learned first, because it has been proven here and the seed has only been
- * proven somewhere. Duplicates collapse in `parseHopList`, and an explicit
- * `OSM_PROXY_LIST` replaces both — if you named a proxy, you meant it.
+ * proven somewhere. Duplicates collapse on the label.
+ *
+ * The two files are parameters rather than variables so this stays testable
+ * without an environment — that is the seam the env reads used to provide, and
+ * a pure function is a better one.
  */
-export function loadHops(): Hop[] {
-  const inline = process.env.OSM_PROXY_LIST?.trim();
-  if (inline) return parseHopList(inline);
+export function loadHops(files: { learned?: string; seed?: string } = {}): Hop[] {
+  const learned = files.learned ?? learnedFile();
+  const seed = files.seed ?? seedFile();
 
-  const seedName = process.env.OSM_PROXY_LIST_FILE?.trim() || "proxies.json";
-  const seed = path.isAbsolute(seedName) ? seedName : path.join(process.cwd(), seedName);
-
-  const merged = [...readList(learnedFile()), ...readList(seed)];
+  const merged = [...readList(learned), ...readList(seed)];
   const seen = new Set<string>();
   return merged.filter((hop) => (seen.has(hop.label) ? false : (seen.add(hop.label), true)));
 }
@@ -164,6 +287,11 @@ export interface EntryState {
 export class ProxyPool {
   entry: Hop | null;
   entryState: EntryState;
+  /**
+   * Where `save()` writes what worked. A field rather than a lookup so a test
+   * can point it at a temporary directory without an environment variable.
+   */
+  stateFile: string;
   /**
    * Whether this server can reach OpenStreetMap with no proxy at all.
    *
@@ -197,47 +325,32 @@ export class ProxyPool {
   private timer: NodeJS.Timeout | null;
 
   constructor() {
-    this.entry = parseHop(process.env.OSM_PROXY_ENTRY ?? "");
+    this.entry = parseHop(ENTRY_PROXY ?? "");
+    this.stateFile = learnedFile();
     this.entryState = { ok: null, lastError: null, lastCheck: 0, latencyMs: null };
     this.directState = { ok: null, lastError: null, lastCheck: 0, latencyMs: null };
     this.states = loadHops().map((hop) => ({
       hop, ok: null, latencyMs: null, lastProbe: 0, lastError: null,
       failures: 0, restingUntil: 0, inFlight: false, successes: 0,
     }));
-    // The probe hits an upstream this app actually depends on, not a neutral
-    // connectivity endpoint: a proxy that reaches one and not the other is
-    // useless here, and `/api/status` is the cheapest thing Overpass serves.
-    this.probeUrl = process.env.OSM_PROXY_PROBE_URL?.trim() || "https://overpass-api.de/api/status";
-    this.timeoutMs = envNumber("OSM_PROXY_TIMEOUT_MS", 25_000);
-    // Shorter than a real request: a probe exists to find dead entries fast.
-    this.probeTimeoutMs = envNumber("OSM_PROXY_PROBE_TIMEOUT_MS", 9_000);
-    // The entry is a LAN address: it answers at once or it is not there.
-    this.entryTimeoutMs = envNumber("OSM_PROXY_ENTRY_TIMEOUT_MS", 4_000);
-    this.maxAttempts = Math.max(1, envNumber("OSM_PROXY_ATTEMPTS", 4));
-    /*
-     * A ceiling on ONE request, across all its attempts.
-     *
-     * Four attempts at a 25s timeout is a hundred seconds, and a page that
-     * hangs for a hundred seconds has already failed — the browser shows a
-     * pending request and the person reloads. Better to give up and say why.
-     */
-    this.budgetMs = envNumber("OSM_PROXY_BUDGET_MS", 45_000);
+    // Every one of these is a constant at the top of this file. See the block
+    // there for why none of them is settable per machine any more.
+    this.probeUrl = PROBE_URL;
+    this.timeoutMs = REQUEST_TIMEOUT_MS;
+    this.probeTimeoutMs = PROBE_TIMEOUT_MS;
+    this.entryTimeoutMs = ENTRY_TIMEOUT_MS;
+    this.maxAttempts = MAX_ATTEMPTS;
+    this.budgetMs = BUDGET_MS;
 
     this.scraping = false;
     this.lastScrape = 0;
     this.lastScrapeError = null;
     this.lastScrapeAdded = 0;
-    /** Below this many working exits, go and look for more. */
-    this.minWorking = envNumber("OSM_PROXY_MIN_WORKING", 3);
-    this.scrapeIntervalMs = envNumber("OSM_PROXY_SCRAPE_INTERVAL_MS", 3_600_000);
-    /** How many fresh addresses to try per round. The lists run to thousands
-     *  and almost all of them are dead; a bounded bite keeps the background
-     *  work to a couple of minutes. */
-    this.scrapeMax = envNumber("OSM_PROXY_SCRAPE_MAX", 200);
-    /** Shorter than a real probe: a scraped candidate is dead until proven
-     *  otherwise, and there are two hundred of them. */
-    this.scrapeProbeTimeoutMs = envNumber("OSM_PROXY_SCRAPE_TIMEOUT_MS", 6_000);
-    this.maxStates = envNumber("OSM_PROXY_MAX_STATES", 400);
+    this.minWorking = MIN_WORKING;
+    this.scrapeIntervalMs = SCRAPE_INTERVAL_MS;
+    this.scrapeMax = SCRAPE_MAX;
+    this.scrapeProbeTimeoutMs = SCRAPE_PROBE_TIMEOUT_MS;
+    this.maxStates = MAX_STATES;
     this.sweeping = false;
     this.swept = 0;
     this.lastSweep = 0;
@@ -421,8 +534,8 @@ export class ProxyPool {
    * simultaneous CONNECTs is a denial of service against the thing this whole
    * chain depends on.
    */
-  async sweep(concurrency = envNumber("OSM_PROXY_PROBE_CONCURRENCY", 12)): Promise<void> {
-    if (this.sweeping || this.states.length === 0) return;
+  async sweep(concurrency = PROBE_CONCURRENCY): Promise<void> {
+    if (this.sweeping) return;
     this.sweeping = true;
     this.swept = 0;
 
@@ -464,20 +577,21 @@ export class ProxyPool {
     this.save();
 
     /*
-     * Top up, if this machine actually needs proxies and is short of them.
+     * Top up whenever this machine is short of working exits.
      *
-     * Not when it can reach OpenStreetMap by itself — that server needs none
-     * of this — and not more than once an hour, because these lists are
-     * refreshed on the order of hours and probing two hundred dead addresses
-     * is not free.
+     * It used to skip this entirely when `directWorks` — the reasoning being
+     * that a server which can reach OpenStreetMap needs no proxy. That was
+     * true while the proxies were only about REACHABILITY. They are now also
+     * how a rate limit is got around, and a rate limit lands on precisely the
+     * machine that can reach OpenStreetMap: its own IP is the one that has
+     * used up its share. So both boxes keep a pool now.
+     *
+     * Still not more than once an hour — these lists refresh on the order of
+     * hours, and probing hundreds of dead addresses is not free.
      */
     const working = this.states.filter((state) => state.ok === true).length;
-    if (
-      !this.directWorks &&
-      working < this.minWorking &&
-      Date.now() - this.lastScrape > this.scrapeIntervalMs
-    ) {
-      await this.refill(concurrency);
+    if (working < this.minWorking && Date.now() - this.lastScrape > this.scrapeIntervalMs) {
+      await this.refill();
     }
   }
 
@@ -536,7 +650,7 @@ export class ProxyPool {
    * die. Only the ones that answered are kept: a list of thousands costs a
    * timeout apiece on every boot to rediscover that they are dead.
    */
-  async refill(concurrency = envNumber("OSM_PROXY_PROBE_CONCURRENCY", 12)): Promise<number> {
+  async refill(concurrency = SCRAPE_CONCURRENCY): Promise<number> {
     if (this.scraping) return 0;
     this.scraping = true;
     this.lastScrape = Date.now();
@@ -596,7 +710,7 @@ export class ProxyPool {
     const working = rank(this.states, Date.now()).filter((state) => state.ok === true);
     if (working.length === 0) return;
     try {
-      const file = learnedFile();
+      const file = this.stateFile;
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const records = toRecords(
         working.map((state) => state.hop.label),
@@ -608,11 +722,19 @@ export class ProxyPool {
     }
   }
 
-  /** Start the background sweeps. Safe to call repeatedly. */
+  /**
+   * Start the background sweeps. Safe to call repeatedly.
+   *
+   * It runs even with an empty list. It used to return early there, which made
+   * "no proxies yet" a permanent condition on a fresh checkout: nothing swept,
+   * so nothing scraped, so the list stayed empty. The first sweep on an empty
+   * list does nothing but probe direct and then go looking, which is exactly
+   * what that box needs.
+   */
   start(): void {
-    if (this.timer || this.states.length === 0) return;
+    if (this.timer) return;
     void this.sweep();
-    const interval = envNumber("OSM_PROXY_PROBE_INTERVAL_MS", 600_000);
+    const interval = SWEEP_INTERVAL_MS;
     this.timer = setInterval(() => { void this.sweep(); }, interval);
     // Never hold the process open for a probe timer.
     this.timer.unref?.();
@@ -628,9 +750,23 @@ export class ProxyPool {
    */
   async rotate<T>(
     attempt: (state: HopState) => Promise<Attempt<T>>,
-  ): Promise<{ ok: true; value: T; via: string; attempts: number } | { ok: false; tried: string[]; reasons: string[] }> {
+  ): Promise<
+    | { ok: true; value: T; via: string; attempts: number }
+    | { ok: false; tried: string[]; reasons: string[]; limited: boolean }
+  > {
     const tried: string[] = [];
     const reasons: string[] = [];
+    /*
+     * Did the upstream rate limit us, as opposed to nothing getting through?
+     *
+     * The caller turns this into what the person reading the map is told, and
+     * the two are genuinely different situations: "we have asked
+     * OpenStreetMap too much and it is holding us off" is temporary and their
+     * doing nothing wrong, while "no route out worked" is this server being
+     * broken. Reporting the first as the second sends whoever is debugging at
+     * the proxy list when the proxy list is fine.
+     */
+    let limited = false;
     // Hops already used for THIS request. An upstream that says no through one
     // exit will say no through it again; that is not a reason to think less of
     // the exit.
@@ -642,7 +778,20 @@ export class ProxyPool {
         reasons.push(`gave up after ${this.budgetMs}ms`);
         break;
       }
-      const state = rank(this.states, Date.now()).find((candidate) => !used.has(candidate.hop.label));
+      /*
+       * A free exit if there is one, and a busy one only if there is not.
+       *
+       * Free first is what gives the parallel chunks of a route read an exit
+       * each. The fallback matters on a machine that has found only two or
+       * three working proxies: without it the later chunks would find every
+       * good exit in flight, get nothing at all, and fail the read for want of
+       * a proxy while three perfectly good ones were mid-request.
+       */
+      const pick = (includeInFlight: boolean): HopState | undefined =>
+        rank(this.states, Date.now(), { includeInFlight }).find(
+          (candidate) => !used.has(candidate.hop.label),
+        );
+      const state = pick(false) ?? pick(true);
       if (!state) break;
 
       used.add(state.hop.label);
@@ -665,7 +814,7 @@ export class ProxyPool {
          * because the destination was down.
          */
         if (outcome.fault === "hop") this.failed(state, outcome.reason);
-        else if (outcome.fault === "limit") this.limited(state, outcome.reason);
+        else if (outcome.fault === "limit") { this.limited(state, outcome.reason); limited = true; }
         reasons.push(`${state.hop.label}: ${outcome.reason}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : "failed";
@@ -690,7 +839,7 @@ export class ProxyPool {
       }
     }
 
-    return { ok: false, tried, reasons };
+    return { ok: false, tried, reasons, limited };
   }
 
   /**
@@ -785,20 +934,6 @@ export class ProxyPool {
     };
   }
 }
-
-/**
- * Identify the app to the services it queries.
- *
- * Both Overpass and Nominatim ask for this, and Nominatim blocks a
- * default-User-Agent client outright. Going out through a rotating exit makes
- * this more important rather than less: it is the only thing that says these
- * requests are one small app rather than an anonymous scraper.
- */
-export const USER_AGENT =
-  process.env.OSM_USER_AGENT?.trim() ||
-  "Maddie/1.0 (route safety map; https://github.com/aschkan/Maddie)";
-
-export const ALLOW_DIRECT = envFlag("OSM_PROXY_ALLOW_DIRECT");
 
 /**
  * One pool per server process, cached across Next's module reloads — a fresh

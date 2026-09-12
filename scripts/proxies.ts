@@ -82,8 +82,8 @@ async function main(): Promise<number> {
 
   if (!proxies.entry) {
     console.log("entry proxy : none — hops are reached directly, which is the usual case.");
-    console.log("              Set OSM_PROXY_ENTRY only when the proxies in the list are");
-    console.log("              themselves reachable solely through another one.");
+    console.log("              Set ENTRY_PROXY in src/lib/proxy-pool.ts only when the");
+    console.log("              proxies in the list are reachable solely through another one.");
   } else {
     console.log(`entry proxy : ${proxies.entry.label}`);
   }
@@ -95,8 +95,8 @@ async function main(): Promise<number> {
   console.log(`proxies     : ${proxies.states.length}`);
   if (proxies.states.length === 0) {
     console.log("");
-    console.log("No proxies loaded. Set OSM_PROXY_LIST, or point OSM_PROXY_LIST_FILE at a");
-    console.log("JSON or comma-separated list (the default is ./proxies.json).");
+    console.log("No proxies loaded. Run `npm run proxies -- --scrape --save` to go and");
+    console.log("find some, or put a JSON list in ./proxies.json by hand.");
     return 1;
   }
   console.log("");
@@ -141,9 +141,11 @@ async function main(): Promise<number> {
     console.log("");
     console.log("Nothing answered. Check that the entry proxy is reachable from this box:");
     console.log(`  curl -x http://${proxies.entry?.label ?? "ENTRY"} -sI ${proxies.probeUrl}`);
+    console.log("With no entry proxy set, that is this box's own route out being blocked.");
   } else {
-    console.log("Put nothing else in the env: the server probes on its own schedule and");
-    console.log("keeps this ranking in memory. See /api/osm/status on the running app.");
+    console.log("There is nothing to put in the env — there is no env. The server probes");
+    console.log("and scrapes on its own schedule and keeps this ranking in memory. See");
+    console.log("/api/osm/status on the running app.");
   }
 
   /*

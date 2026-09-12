@@ -363,32 +363,21 @@ test("what this machine learned is loaded before the committed seed", () => {
   fs.writeFileSync(learned, JSON.stringify([{ proxy: "http://10.0.0.1:8080" }]));
   fs.writeFileSync(seed, JSON.stringify([{ proxy: "http://10.0.0.2:8080" }, { proxy: "http://10.0.0.1:8080" }]));
 
-  const before = { ...process.env };
   try {
-    delete process.env.OSM_PROXY_LIST;
-    process.env.OSM_PROXY_STATE_FILE = learned;
-    process.env.OSM_PROXY_LIST_FILE = seed;
-
-    const hops = loadHops().map((hop) => hop.label);
+    // Arguments, not environment variables. There is no OSM_PROXY_STATE_FILE
+    // any more — nothing in the proxy system reads the environment — so the
+    // seam a test needs is a parameter with a hardcoded default.
+    const hops = loadHops({ learned, seed }).map((hop) => hop.label);
     assert.deepEqual(hops, ["10.0.0.1:8080", "10.0.0.2:8080"], "learned first, and no duplicate");
   } finally {
-    Object.assign(process.env, before);
-    delete process.env.OSM_PROXY_STATE_FILE;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("a named OSM_PROXY_LIST still beats both files", () => {
-  const before = { ...process.env };
-  try {
-    process.env.OSM_PROXY_LIST = "10.9.9.9:1234";
-    process.env.OSM_PROXY_STATE_FILE = "/nonexistent/learned.json";
-    assert.deepEqual(loadHops().map((hop) => hop.label), ["10.9.9.9:1234"]);
-  } finally {
-    Object.assign(process.env, before);
-    delete process.env.OSM_PROXY_LIST;
-    delete process.env.OSM_PROXY_STATE_FILE;
-  }
+test("a missing file on either side is empty, not a crash", () => {
+  // A fresh checkout has no `.data/`, and a box can be handed a seed that was
+  // never committed. Both are ordinary states, not errors.
+  assert.deepEqual(loadHops({ learned: "/nonexistent/a.json", seed: "/nonexistent/b.json" }), []);
 });
 
 test("only the proxies that answered are written down", () => {
@@ -396,10 +385,9 @@ test("only the proxies that answered are written down", () => {
   // every boot to rediscover that they are dead.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maddie-save-"));
   const file = path.join(dir, "learned.json");
-  const before = { ...process.env };
   try {
-    process.env.OSM_PROXY_STATE_FILE = file;
     const pool = new ProxyPool();
+    pool.stateFile = file;
     pool.states = [
       state("1.1.1.1:8080", { ok: true, latencyMs: 210 }),
       state("2.2.2.2:8080", { ok: false, lastError: "dead" }),
@@ -410,8 +398,6 @@ test("only the proxies that answered are written down", () => {
     const written = JSON.parse(fs.readFileSync(file, "utf8")) as { proxy: string }[];
     assert.deepEqual(written.map((row) => row.proxy), ["http://1.1.1.1:8080"]);
   } finally {
-    Object.assign(process.env, before);
-    delete process.env.OSM_PROXY_STATE_FILE;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -420,17 +406,95 @@ test("nothing working means the last known-good file is left alone", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maddie-save2-"));
   const file = path.join(dir, "learned.json");
   fs.writeFileSync(file, JSON.stringify([{ proxy: "http://8.8.8.8:8080" }]));
-  const before = { ...process.env };
   try {
-    process.env.OSM_PROXY_STATE_FILE = file;
     const pool = new ProxyPool();
+    pool.stateFile = file;
     pool.states = [state("1.1.1.1:8080", { ok: false })];
     pool.save();
     // Emptying it on a bad day would turn one outage into a cold start.
     assert.match(fs.readFileSync(file, "utf8"), /8\.8\.8\.8/);
   } finally {
-    Object.assign(process.env, before);
-    delete process.env.OSM_PROXY_STATE_FILE;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/* ------------------- parallel chunks, one exit each --------------------- */
+
+test("requests in flight at the same time are given DIFFERENT exits", async () => {
+  // This is what makes splitting a route read worth doing. The limit Overpass
+  // applies is per exit IP, so four pieces down one proxy is four requests from
+  // one IP — exactly the thing being worked around — while four pieces down
+  // four proxies is one apiece.
+  const proxies = new ProxyPool();
+  proxies.states = [
+    state("a:1", { ok: true, latencyMs: 10 }),
+    state("b:2", { ok: true, latencyMs: 20 }),
+    state("c:3", { ok: true, latencyMs: 30 }),
+    state("d:4", { ok: true, latencyMs: 40 }),
+  ];
+
+  const used: string[] = [];
+  const release: (() => void)[] = [];
+  const chunks = [0, 1, 2, 3].map(() =>
+    proxies.rotate(async (s) => {
+      used.push(s.hop.label);
+      // Hold the exit while the other pieces pick theirs, which is what being
+      // genuinely in flight together means.
+      await new Promise<void>((resolve) => release.push(resolve));
+      return { done: true as const, value: s.hop.label };
+    }),
+  );
+
+  // Let every piece reach its attempt before any of them finishes.
+  while (release.length < 4) await new Promise((resolve) => setImmediate(resolve));
+  for (const done of release) done();
+  await Promise.all(chunks);
+
+  assert.equal(new Set(used).size, 4, `four pieces shared exits: ${used.join(", ")}`);
+});
+
+test("more pieces than exits share one rather than failing for want of a proxy", async () => {
+  // The fallback in `rotate`. A machine that has found two working proxies
+  // still has to answer: a piece that finds every good exit busy and gives up
+  // fails the whole read, which is worse than two pieces sharing an IP.
+  const proxies = new ProxyPool();
+  proxies.states = [state("a:1", { ok: true, latencyMs: 10 })];
+
+  const release: (() => void)[] = [];
+  const both = [0, 1].map(() =>
+    proxies.rotate(async (s) => {
+      await new Promise<void>((resolve) => release.push(resolve));
+      return { done: true as const, value: s.hop.label };
+    }),
+  );
+
+  while (release.length < 2) await new Promise((resolve) => setImmediate(resolve));
+  for (const done of release) done();
+  const results = await Promise.all(both);
+
+  for (const result of results) assert.equal(result.ok, true, "a piece was left with no exit to try");
+});
+
+test("a rotation that ends in rate limits says so, and one that does not says nothing", async () => {
+  // The flag the forwarder turns into a 429 instead of a 502. They are
+  // different failures: one is temporary and nobody's fault, the other names
+  // this server as broken and sends whoever is debugging at the proxy list.
+  const proxies = new ProxyPool();
+  proxies.maxAttempts = 2;
+  proxies.states = [
+    state("a:1", { ok: true, latencyMs: 10 }),
+    state("b:2", { ok: true, latencyMs: 20 }),
+  ];
+
+  const limited = await proxies.rotate(async () =>
+    ({ done: false as const, reason: "upstream answered 429", fault: "limit" as const }));
+  assert.equal(limited.ok, false);
+  assert.equal(limited.ok === false && limited.limited, true);
+
+  const dead = new ProxyPool();
+  dead.maxAttempts = 2;
+  dead.states = [state("c:3", { ok: true }), state("d:4", { ok: true })];
+  const broken = await dead.rotate(async () => { throw new Error("no TCP connection"); });
+  assert.equal(broken.ok, false);
+  assert.equal(broken.ok === false && broken.limited, false, "a dead tunnel is not a rate limit");
 });

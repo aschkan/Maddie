@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { assess } from "../src/lib/score.ts";
 import { computeFacts, overpassQuery } from "../src/lib/overpass.ts";
-import { tiers } from "../src/lib/ai.ts";
+import { AI_API_KEY, AI_BASE_URL, AI_MODEL, narrate, prompt } from "../src/lib/ai.ts";
 import { boundsAround, distanceM, distanceToSegmentM, pathLengthM, samplePath } from "../src/lib/geo.ts";
 import type { RouteFacts } from "../src/lib/overpass.ts";
 
@@ -241,48 +241,67 @@ test("an hour with no place to stand falls back to the clock, and says so", () =
   assert.equal(assess(facts(), 13).light, "day");
 });
 
-/* ------------------------------- the AI tiers ------------------------------- */
+/* -------------------------------- the model -------------------------------- */
 
-test("local comes first, and needs no key", () => {
-  const list = tiers({ LOCAL_AI_HOST: "192.168.11.165" });
-  assert.equal(list.length, 1);
-  assert.equal(list[0]?.name, "local");
-  assert.equal(list[0]?.baseUrl, "http://192.168.11.165:1234/v1");
-  assert.equal(list[0]?.apiKey, undefined);
+test("the model is configured in the source, with nothing to set", () => {
+  // Hardcoded on purpose — see the header of ai.ts. What is pinned here is that
+  // it stays a complete, usable configuration rather than half of one: a base
+  // URL with no key 401s on every call, which reads as "the model is down".
+  assert.match(AI_BASE_URL, /^https:\/\/ai\.liara\.ir\/api\/[a-z0-9]+\/v1$/);
+  assert.ok(!AI_BASE_URL.endsWith("/v1/"), "a trailing slash would double up the path");
+  assert.ok(AI_API_KEY.length > 40, "the key is not a placeholder");
 });
 
-test("Liara is the fallback, after local", () => {
-  const list = tiers({
-    LOCAL_AI_HOST: "192.168.11.165",
-    LIARA_AI_URL: "https://ai.liara.ir/api/v1/x",
-    LIARA_AI_KEY: "secret",
-  });
-  assert.deepEqual(list.map((t) => t.name), ["local", "liara"]);
+test("the model is a CHAT model, not an embedding one", () => {
+  // Liara's own sample snippet calls text-embedding-3-large. An embedding model
+  // returns vectors and refuses /chat/completions, so wiring it here would lose
+  // the sentence on every single request while looking configured.
+  assert.doesNotMatch(AI_MODEL, /embedding/);
 });
 
-test("a half-configured Liara is left out entirely", () => {
-  // A fallback with a URL and no key 401s on every call, turning "the LAN box
-  // is off" into a confusing error instead of a quiet degradation.
-  const noKey = tiers({ LOCAL_AI_HOST: "h", LIARA_AI_URL: "https://ai.liara.ir/v1" });
-  assert.deepEqual(noKey.map((t) => t.name), ["local"]);
-  const noUrl = tiers({ LOCAL_AI_HOST: "h", LIARA_AI_KEY: "secret" });
-  assert.deepEqual(noUrl.map((t) => t.name), ["local"]);
+test("the prompt carries the counts and never asks for a score", () => {
+  const assessment = assess(facts({ litSamples: 30, unknownLitSamples: 10 }), 22);
+  const text = prompt(facts({ litSamples: 30, unknownLitSamples: 10 }), assessment);
+  assert.match(text, /30 points on streets mapped lit/);
+  assert.match(text, /10 with no lighting information/);
+  // The score is shown separately and the model is told not to state one; it is
+  // never handed the number, so it cannot repeat it back slightly wrong.
+  assert.doesNotMatch(text, new RegExp(`\\b${assessment.score}\\b`));
 });
 
-test("LOCAL_AI_URL=off disables the local tier without removing Liara", () => {
-  const list = tiers({
-    LOCAL_AI_URL: "off",
-    LIARA_AI_URL: "https://ai.liara.ir/v1",
-    LIARA_AI_KEY: "secret",
-  });
-  assert.deepEqual(list.map((t) => t.name), ["liara"]);
+test("a model that cannot be reached costs the sentence and nothing else", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = (async () => { throw new Error("getaddrinfo ENOTFOUND ai.liara.ir"); }) as typeof fetch;
+
+  const result = await narrate(facts(), assess(facts(), 22), { timeoutMs: 50 });
+  assert.equal(result.text, null);
+  assert.equal(result.source, null);
+  assert.match(result.note ?? "", /ENOTFOUND/);
 });
 
-test("no configuration at all is an empty list, not a crash", () => {
-  assert.deepEqual(tiers({}), []);
+test("an empty reply is a failure, not an empty sentence", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: "   " } }] }), {
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+
+  const result = await narrate(facts(), assess(facts(), 22));
+  assert.equal(result.text, null);
+  assert.equal(result.source, null);
 });
 
-test("a trailing slash on a base URL does not double up", () => {
-  const list = tiers({ LOCAL_AI_URL: "http://box:1234/v1/" });
-  assert.equal(list[0]?.baseUrl, "http://box:1234/v1");
+test("an answer is attributed, so the panel can say where it came from", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: "Most of this walk is mapped lit." } }] }), {
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+
+  const result = await narrate(facts(), assess(facts(), 22));
+  assert.equal(result.text, "Most of this walk is mapped lit.");
+  assert.equal(result.source, "liara");
 });

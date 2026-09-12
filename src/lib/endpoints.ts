@@ -29,8 +29,12 @@
  * The cost, stated plainly: every tile now passes through this server. Tiles
  * are cached for a week by the forwarder, the page is one map rather than a
  * tile-serving business, and a blank basemap is the worst failure this page
- * has. `NEXT_PUBLIC_OSM_DIRECT=1` returns to the old behaviour for a
- * deployment that would rather the browser went out on its own.
+ * has.
+ *
+ * There is no environment variable here any more, and none anywhere else in the
+ * proxy system either. `PUBLIC` below is still the old direct behaviour and
+ * `resolve()` still selects it — but the selection is a constant in this file,
+ * not something a box can be left in the wrong state for.
  */
 
 /** The four services the browser needs, and nothing else. */
@@ -82,21 +86,33 @@ export function resolve(
 }
 
 /*
- * Read statically, one member expression per variable.
+ * Where each service is actually pointed, in this build.
  *
- * `process.env.NEXT_PUBLIC_FOO` is substituted TEXTUALLY at build time, so it
- * has to be written out in full. A lookup — `process.env[name]` — is not
- * rewritten and arrives in the browser as undefined, which would silently take
- * every override below with it.
+ * These were `process.env.NEXT_PUBLIC_*` reads. They are constants now, with
+ * the rest of the proxy system, and the reason is the same: this app is built
+ * once and deployed to two machines, `NEXT_PUBLIC_*` is inlined at BUILD time
+ * rather than read at boot, and a variable that only takes effect on a rebuild
+ * is a variable that will one day be set on a box and quietly ignored.
+ *
+ * `resolve()` above still takes both as arguments and is still the rule, so
+ * pointing this at a self-hosted OSRM or Overpass is a one-line edit here.
  */
 const EXPLICIT: Record<MapService, string | undefined> = {
-  overpass: process.env.NEXT_PUBLIC_OVERPASS_URL,
-  osrm: process.env.NEXT_PUBLIC_OSRM_URL,
-  nominatim: process.env.NEXT_PUBLIC_NOMINATIM_URL,
-  tile: process.env.NEXT_PUBLIC_TILE_URL,
+  overpass: undefined,
+  osrm: undefined,
+  nominatim: undefined,
+  tile: undefined,
 };
 
-const DIRECT = process.env.NEXT_PUBLIC_OSM_DIRECT;
+/**
+ * Whether the browser goes straight out instead of through this server.
+ *
+ * Undefined, meaning no. The forwarder is the whole point: it is what lets one
+ * machine reach OpenStreetMap through a rotating pool of exits while the other
+ * cannot reach it at all, and it is where a rate limit is noticed and worked
+ * around. A browser going direct gets none of that.
+ */
+const DIRECT: string | undefined = undefined;
 
 /** Where this browser should ask for `service`. */
 export function endpoint(service: MapService): string {
@@ -120,6 +136,32 @@ export function isForwarded(service: MapService): boolean {
 export function forwarderFailure(service: MapService, status: number): string | null {
   if (status !== 502 || !isForwarded(service)) return null;
   return "This server could not reach OpenStreetMap — no route out worked. Check /api/osm/status.";
+}
+
+/**
+ * A 429 from `/api/osm/*`, turned into a sentence for the person on the map.
+ *
+ * Said plainly and never hidden. The server rotates a rate-limited request
+ * through a different exit and only answers 429 once every exit it has has
+ * been refused too — so by the time this is read, retrying quietly has already
+ * been tried and has already failed, and the honest thing left is to say so.
+ * Swallowing it into "could not reach OpenStreetMap" sends whoever is looking
+ * at the proxy list, which is working.
+ *
+ * The body carries how many exits were spent, when the server sent one. It is
+ * optional on purpose: a 429 straight from an upstream this app is talking to
+ * directly has no such body, and the sentence has to work without it.
+ */
+export async function rateLimitMessage(response: Response, what: string): Promise<string> {
+  let tried = 0;
+  try {
+    const body = (await response.clone().json()) as { exitsTried?: unknown };
+    if (typeof body?.exitsTried === "number" && body.exitsTried > 1) tried = body.exitsTried;
+  } catch {
+    // No JSON body, or not ours. The sentence below stands on its own.
+  }
+  const spent = tried > 0 ? ` We tried ${tried} different exits and each was refused.` : "";
+  return `We have reached OpenStreetMap's rate limit for ${what}.${spent} Wait about a minute and try again.`;
 }
 
 /** The same thing, for a request that never got an answer at all. */

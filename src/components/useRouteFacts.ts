@@ -3,10 +3,15 @@
 /**
  * Read every candidate route from OpenStreetMap, one after another.
  *
- * One at a time on purpose. Overpass hands out a couple of query slots per IP
- * and answers 429 when you take more, and a rate limit hit while comparing
- * three routes takes out the layers on the map as well — the whole page then
- * looks broken because it asked too much at once.
+ * One ROUTE at a time, still on purpose. Each route read is itself split into
+ * pieces that go out simultaneously through different exits (`chunkPath` in
+ * `overpass.ts`), which is how the per-IP limit is got under — but three routes
+ * in parallel would be three times that many requests in the air at once and
+ * would need three times as many working exits to stay under it. The pool
+ * rarely has them, and a rate limit hit while comparing routes takes out the
+ * layers on the map as well, so the whole page looks broken.
+ *
+ * So: parallel within a route, sequential between them.
  *
  * The facts are fetched here; turning them into a score is `score.ts`, and it
  * happens in a `useMemo` in the caller, so changing the hour re-judges the
