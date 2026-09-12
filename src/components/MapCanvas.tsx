@@ -9,7 +9,7 @@
  * error look unrelated to the map.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents,
 } from "react-leaflet";
@@ -134,6 +134,13 @@ export interface MapCanvasProps {
   segments: Segment[];
   /** The stretch worth warning about, if there is one. Drawn with a halo. */
   highlight: Segment | null;
+  /**
+   * How far open the panel is.
+   *
+   * Only used to re-fit the route when it changes: the sheet covers the bottom
+   * of the map, so how much of the map there is depends on it.
+   */
+  sheetSnap: string;
   onSelectRoute: (index: number) => void;
   centre: LatLng;
   layers: LayerData;
@@ -191,29 +198,66 @@ function WatchView({ onView }: { onView: MapCanvasProps["onView"] }) {
 }
 
 /**
- * Keep the whole route in view.
+ * Keep the whole route in view — in the part of the map you can actually see.
+ *
+ * The trip card floats over the top of the map and the sheet covers the bottom,
+ * so fitting into the whole viewport puts both ends of the route underneath
+ * furniture. The space left over is measured from the two elements themselves
+ * rather than recomputed from their snap points: the DOM is the one place that
+ * already knows, and a second copy of those numbers is a second thing to keep
+ * in step when either changes size.
  *
  * Keyed on the route's own shape, not on the array: re-fitting whenever the
  * layer data came back would yank the map away from wherever it was panned to.
+ * `token` is bumped by the ⤢ button, and `sheet` changes when the panel is
+ * dragged — both are re-fits that a key alone would not notice.
  */
-function FitToRoute({ route }: { route: Route | undefined }) {
+function FitToRoute({ route, token, sheet }: { route: Route | undefined; token: number; sheet: string }) {
   const map = useMap();
   const key = route ? `${route.metres}:${route.path.length}` : "";
+
   useEffect(() => {
     if (!route || route.path.length < 2) return;
     const bounds = L.latLngBounds(route.path.map((p) => [p.lat, p.lng] as [number, number]));
-    map.fitBounds(bounds, { padding: [48, 48] });
+
+    /* The sheet takes 220ms to settle, and measuring it mid-slide fits the
+       route into a box that no longer exists a moment later. */
+    const timer = setTimeout(() => {
+      const height = (selector: string) =>
+        Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? 0);
+
+      // From 900px the panel is a sidebar beside the map rather than over it,
+      // so nothing is covering anything and the margins are just margins.
+      const narrow = window.innerWidth < 900;
+      const top = narrow ? height(".trip") : 0;
+      const bottom = narrow ? height(".sheet") : 0;
+
+      /* 52px of slack on top of whatever is covering the map: a pin is
+         anchored at its tip and stands 41px above it, so fitting the LINE to
+         the edge cuts the head off the pin at either end. */
+      map.fitBounds(bounds, {
+        paddingTopLeft: [26, top + 52],
+        paddingBottomRight: [26, bottom + 52],
+      });
+    }, 260);
+
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands in for the route's identity
-  }, [map, key]);
+  }, [map, key, token, sheet]);
+
   return null;
 }
 
 export default function MapCanvas({
-  start, end, routes, selected, segments, highlight, onSelectRoute, centre, layers, reports,
+  start, end, routes, selected, segments, highlight, sheetSnap, onSelectRoute, centre, layers, reports,
   reportMode, onReport, onRemoveReport,
   onPick, onMoveStart, onMoveEnd, onTileError, onView, night,
 }: MapCanvasProps) {
-  const startIcon = useMemo(() => pin("A", "#22c55e"), []);
+  const [map, setMap] = useState<L.Map | null>(null);
+  const [fitToken, setFitToken] = useState(0);
+  const refit = useCallback(() => setFitToken((n) => n + 1), []);
+
+  const startIcon = useMemo(() => pin("A", "#16a34a"), []);
   const endIcon = useMemo(() => pin("B", "#7c5cff"), []);
   const alert = useMemo(() => crimePin(), []);
   const example = useMemo(() => examplePin(), []);
@@ -227,10 +271,16 @@ export default function MapCanvas({
   );
 
   return (
+    <>
     <MapContainer
       center={[centre.lat, centre.lng]}
       zoom={14}
       scrollWheelZoom
+      // Leaflet's own zoom buttons are top-left, which on a phone is the corner
+      // the hand holding it cannot reach — and it is under the trip card. They
+      // are replaced by the cluster below, bottom-right, above the sheet.
+      zoomControl={false}
+      ref={setMap}
       // Hundreds of lamps and lit streets as SVG elements is hundreds of DOM
       // nodes; on canvas it is one.
       preferCanvas
@@ -259,7 +309,7 @@ export default function MapCanvas({
 
       <ClickToPick onPick={reportMode ? onReport : onPick} />
       <WatchView onView={onView} />
-      <FitToRoute route={routes[selected]} />
+      <FitToRoute route={routes[selected]} token={fitToken} sheet={sheetSnap} />
 
       {/* ── lighting ─────────────────────────────────────────────────────── */}
       {layers.litWays.map((way) => (
@@ -411,5 +461,22 @@ export default function MapCanvas({
         />
       )}
     </MapContainer>
+
+    {/* One cluster, bottom-right, clear of the sheet — 44px each, where a thumb
+        already is. */}
+    <div className="map-tools">
+      <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => map?.zoomIn()}>+</button>
+      <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => map?.zoomOut()}>−</button>
+      <button
+        type="button"
+        aria-label="Fit the route on screen"
+        title="Fit the route on screen"
+        disabled={!routes[selected]}
+        onClick={refit}
+      >
+        ⤢
+      </button>
+    </div>
+    </>
   );
 }

@@ -25,18 +25,9 @@ import { formatDistance } from "@/lib/format";
 import type { RouteFacts } from "@/lib/overpass";
 import type { Assessment, When } from "@/lib/score";
 import type { Segment } from "@/lib/segments";
-import { VERDICT_COLOUR, VERDICT_LABEL } from "@/lib/verdict";
+import { VERDICT_CLASS, VERDICT_COLOUR, VERDICT_LABEL } from "@/lib/verdict";
 
 type Result = Assessment & { narration: string | null; narratedBy: "local" | "liara" | null };
-
-/* A class rather than a hex, so the two themes can each pick a colour that is
-   actually readable against their own background. */
-const VERDICT_CLASS: Record<Assessment["verdict"], string> = {
-  good: "v-good",
-  fair: "v-fair",
-  poor: "v-poor",
-  unknown: "v-unknown",
-};
 
 const LIGHT_WORD: Record<Light, string> = {
   day: "daylight",

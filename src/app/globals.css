@@ -1,5 +1,11 @@
 /*
- * Two themes, one stylesheet.
+ * Two themes, one stylesheet — and it is written for a PHONE FIRST.
+ *
+ * Every rule below starts at 360px and is widened with `min-width` queries.
+ * There is no `max-width` block in this file, and a new one is a sign the rule
+ * above it was written for a desktop and patched afterwards. That is what this
+ * page was: a two-column sheet with one `max-width: 820px` patch under it,
+ * on an app people open one-handed, outside, at night.
  *
  * Every colour is a token on `:root`, and the dark set redefines the tokens
  * rather than the rules. `data-theme` on <html> is written by an inline script
@@ -9,42 +15,66 @@
  */
 
 :root {
-  --bg: #f4f5f8;
+  --bg: #eef0f5;
   --panel: #ffffff;
-  --line: #dfe3ea;
-  --text: #171a21;
-  --muted: #5f6878;
-  --accent: #6d4aff;
-  --accent-soft: rgba(109, 74, 255, .16);
-  --button: #f0f2f6;
-  --button-hover: #e5e8ef;
+  --raised: #f6f7fa;
+  --line: #dde1ea;
+  --text: #14171e;
+  --muted: #5c6575;
+  --accent: #5b3df5;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(91, 61, 245, .12);
+  --button: #eef0f6;
+  --button-hover: #e3e7f0;
   --bad: #d13b4d;
   --bad-bg: rgba(209, 59, 77, .09);
   --bad-text: #8d1e2d;
   --map-void: #e8ebf0;
-  --shadow: 0 12px 30px rgba(20, 25, 40, .14);
+
+  --shadow-1: 0 1px 2px rgba(18, 24, 40, .06), 0 2px 8px rgba(18, 24, 40, .06);
+  --shadow-2: 0 2px 6px rgba(18, 24, 40, .08), 0 12px 32px rgba(18, 24, 40, .16);
 
   /* The three the brief names. */
   --crime: #9333ea;
   --safe: #ff5fa2;
   --light: #d99b00;
+
+  /* One radius scale, so nothing is rounded by accident. */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+
+  /* Nothing interactive is ever smaller than this. A 30px button is a button
+     you miss, and on this page the one you hit instead might be Report. */
+  --tap: 44px;
+
+  /* The sheet's three stops. `--peek` is what stays on screen collapsed; the
+     other two are percentages of the viewport, kept as bare numbers so that
+     BottomSheet can read the same values rather than keeping its own copy. */
+  --peek: 148px;
+  --snap-half: 54;
+  --snap-full: 92;
 }
 
 [data-theme="dark"] {
-  --bg: #0d0f15;
-  --panel: #151922;
-  --line: #262b36;
-  --text: #e7e9ee;
-  --muted: #9aa3b2;
-  --accent: #7c5cff;
-  --accent-soft: rgba(124, 92, 255, .22);
-  --button: #1b2130;
-  --button-hover: #232c3e;
+  --bg: #0b0d13;
+  --panel: #141821;
+  --raised: #1b2029;
+  --line: #272d3a;
+  --text: #e8eaf0;
+  --muted: #99a2b2;
+  --accent: #8b6dff;
+  --accent-text: #0b0d13;
+  --accent-soft: rgba(139, 109, 255, .18);
+  --button: #1c222e;
+  --button-hover: #252c3b;
   --bad: #ef5b6b;
   --bad-bg: rgba(239, 91, 107, .12);
   --bad-text: #ffd7dc;
-  --map-void: #1a1f2b;
-  --shadow: 0 12px 30px rgba(0, 0, 0, .45);
+  --map-void: #171c26;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .3);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, .5), 0 14px 36px rgba(0, 0, 0, .55);
 
   --crime: #a855f7;
   --safe: #ff5fa2;
@@ -58,150 +88,563 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
 }
+
+/* Long values — addresses, street names, cert paths — WRAP. They never widen
+   the page: a map you have to scroll sideways to read is a broken map. */
+body { overflow-wrap: anywhere; }
 
 a { color: var(--accent); }
 
-/* Two columns on a desktop, stacked on a phone. The map always gets a real
-   height — a Leaflet container with an auto height collapses to nothing, which
-   is the classic "my map is invisible". */
-.layout {
-  display: grid;
-  grid-template-columns: minmax(320px, 400px) 1fr;
-  height: 100vh;
-  height: 100dvh;
-}
-@media (max-width: 820px) {
-  .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+:where(button, a, input, select, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-.panel {
-  padding: 1.1rem 1.15rem;
-  border-right: 1px solid var(--line);
-  background: var(--panel);
-  overflow-y: auto;
+/* ────────────────────────────────────────────────────────────────────────────
+   The frame: the map IS the page, and everything else floats over it.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.app {
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  gap: .9rem;
-}
-@media (max-width: 820px) {
-  .panel { border-right: none; border-bottom: 1px solid var(--line); max-height: 55vh; }
 }
 
-.title-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-.panel header h1 { margin: 0 0 .3rem; font-size: 1.15rem; letter-spacing: .2px; }
-.panel header p { margin: 0; color: var(--muted); font-size: .86rem; }
-.theme { font-size: .78rem; padding: .35rem .6rem; white-space: nowrap; }
+.map {
+  position: absolute;
+  inset: 0;
+  /* A Leaflet container in an auto-height parent collapses to nothing, and an
+     invisible map looks exactly like a broken one. */
+  height: 100%;
+}
+.map.reporting, .map.reporting .leaflet-container { cursor: crosshair; }
+.map-loading { display: grid; place-items: center; height: 100%; color: var(--muted); }
 
-.field { position: relative; display: flex; flex-direction: column; gap: .35rem; }
-.field label { display: flex; align-items: center; gap: .45rem; font-size: .8rem; color: var(--muted); }
+/* ── the trip card ─────────────────────────────────────────────────────────
+   Floating at the top, over the map. It collapses to one line once both ends
+   are set, because after that it is a thing you glance at, not a thing you
+   use — and on a phone it was eating a third of the map. */
+
+.trip {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 1000;
+  padding: calc(env(safe-area-inset-top) + .5rem) calc(env(safe-area-inset-right) + .6rem)
+           .5rem calc(env(safe-area-inset-left) + .6rem);
+}
+
+.trip-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  padding: .5rem;
+}
+
+.brand {
+  display: flex; align-items: center; gap: .5rem;
+  padding: 0 .3rem .35rem;
+}
+.brand h1 { margin: 0; font-size: 1.02rem; font-weight: 680; letter-spacing: -.01em; }
+.brand .tagline { font-size: .76rem; color: var(--muted); margin-left: auto; }
+
+/* The collapsed state: A → B on one line, the whole row a button. */
+.trip-summary {
+  display: flex; align-items: center; gap: .55rem;
+  width: 100%; min-height: var(--tap);
+  padding: .4rem .5rem;
+  text-align: left;
+  background: none; border: none; border-radius: var(--r-md);
+}
+.trip-summary:hover { background: var(--raised); }
+.trip-ends { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+.trip-end {
+  display: flex; align-items: center; gap: .45rem;
+  font-size: .88rem; line-height: 1.3;
+}
+.trip-end span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.trip-edit { font-size: .78rem; color: var(--accent); white-space: nowrap; }
+
+.trip-fields { display: flex; flex-direction: column; gap: .5rem; padding: .1rem; }
+
+/* ── the search fields ─────────────────────────────────────────────────── */
+
+.field { position: relative; display: flex; flex-direction: column; gap: .3rem; }
+.field-label {
+  display: flex; align-items: center; gap: .45rem;
+  font-size: .76rem; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .05em;
+}
 
 .badge {
   display: inline-grid; place-items: center;
-  width: 19px; height: 19px; border-radius: 50%;
-  color: #fff; font-weight: 700; font-size: .7rem;
+  width: 20px; height: 20px; border-radius: 50%;
+  color: #fff; font-weight: 700; font-size: .72rem;
+  flex: none;
 }
 
-.input-row { display: flex; gap: .4rem; }
+.input-row { display: flex; gap: .4rem; align-items: stretch; }
 
-input {
-  flex: 1; min-width: 0;
-  background: var(--bg); color: var(--text);
-  border: 1px solid var(--line); border-radius: 9px;
-  padding: .55rem .65rem; font: inherit;
+input, select, textarea {
+  background: var(--raised); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: .6rem .7rem;
+  font: inherit;
+  /* 16px minimum, always. Anything under it makes iOS Safari zoom the page on
+     focus — and it never zooms back. */
+  font-size: 16px;
+  min-height: var(--tap);
 }
-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input { flex: 1; min-width: 0; }
+input::placeholder { color: var(--muted); }
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+}
+select { cursor: pointer; }
 
 button {
-  font: inherit; cursor: pointer; color: var(--text);
+  font: inherit; font-size: .92rem; cursor: pointer; color: var(--text);
   background: var(--button); border: 1px solid var(--line);
-  border-radius: 9px; padding: .5rem .7rem;
+  border-radius: var(--r-md);
+  min-height: var(--tap);
+  padding: .5rem .85rem;
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  transition: background .12s ease;
 }
 button:hover:not(:disabled) { background: var(--button-hover); }
+button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: .45; cursor: not-allowed; }
-button.clear { padding: .5rem .6rem; color: var(--muted); }
+
+button.icon { width: var(--tap); padding: 0; flex: none; }
+button.ghost { background: transparent; }
+button.primary {
+  background: var(--accent); border-color: transparent; color: var(--accent-text); font-weight: 620;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
 button.link {
-  background: none; border: none; padding: 0;
-  color: var(--bad); text-decoration: underline; font-size: .82rem;
+  background: none; border: none; padding: 0 .2rem; min-height: 2.2rem;
+  color: var(--bad); text-decoration: underline; font-size: .86rem;
 }
 
-select {
-  background: var(--bg); color: var(--text); border: 1px solid var(--line);
-  border-radius: 8px; padding: .4rem .5rem; font: inherit; font-size: .84rem; cursor: pointer;
+.coords {
+  margin: 0; font-size: .74rem; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-
-.coords { margin: 0; font-size: .76rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* Suggestions sit above the map, which Leaflet gives a high stacking order. */
 .hits {
   position: absolute; top: 100%; left: 0; right: 0; z-index: 1200;
-  margin: .25rem 0 0; padding: .25rem; list-style: none;
+  margin: .3rem 0 0; padding: .25rem; list-style: none;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 10px; box-shadow: var(--shadow);
-  max-height: 240px; overflow-y: auto;
+  border-radius: var(--r-md); box-shadow: var(--shadow-2);
+  max-height: 46vh; overflow-y: auto;
 }
 .hits button {
-  display: block; width: 100%; text-align: left;
-  background: none; border: none; border-radius: 7px;
-  padding: .45rem .5rem; font-size: .82rem; line-height: 1.35;
+  display: block; width: 100%; text-align: left; justify-content: flex-start;
+  background: none; border: none; border-radius: var(--r-sm);
+  padding: .6rem .55rem; font-size: .86rem; line-height: 1.35;
+  min-height: var(--tap);
 }
-.hits button:hover { background: var(--button-hover); }
+.hits button:hover { background: var(--raised); }
 
-.row { display: flex; gap: .5rem; align-items: center; }
-.profiles { display: flex; gap: .3rem; flex: 1; }
-.profiles button { flex: 1; padding: .45rem .3rem; font-size: .84rem; }
-.profiles button.on { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
-.ghost { background: transparent; }
+/* ── the buttons floating on the map ───────────────────────────────────── */
 
-.hint { margin: 0; font-size: .84rem; color: var(--muted); }
-.report-on {
-  padding: .5rem .65rem; border-radius: 9px;
-  color: var(--crime); border: 1px solid var(--crime); background: color-mix(in srgb, var(--crime) 10%, transparent);
+.map-tools {
+  position: absolute;
+  right: calc(env(safe-area-inset-right) + .6rem);
+  bottom: calc(var(--peek) + .7rem);
+  z-index: 1000;
+  display: flex; flex-direction: column; gap: .5rem;
+  transition: bottom .22s cubic-bezier(.32, .72, 0, 1);
+}
+/* They ride on top of the sheet rather than under it — a zoom button you
+   cannot reach because the panel is open is a zoom button that does not work.
+   At the top stop the panel covers the map, so they go away instead. */
+.app[data-snap="half"] .map-tools { bottom: calc(var(--snap-half) * 1dvh + .7rem); }
+.app[data-snap="full"] .map-tools { display: none; }
+.map-tools button {
+  width: var(--tap); height: var(--tap); padding: 0;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: var(--shadow-2);
+  font-size: 1.05rem;
 }
 
-.summary { display: flex; gap: .6rem; }
+.reporting-banner {
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--peek) + .7rem);
+  transition: bottom .22s cubic-bezier(.32, .72, 0, 1);
+  z-index: 1000;
+  max-width: min(92vw, 30rem);
+  margin: 0; padding: .55rem .8rem;
+  font-size: .84rem; line-height: 1.4; text-align: center;
+  color: #fff; background: var(--crime);
+  border-radius: 999px; box-shadow: var(--shadow-2);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   The sheet. On a phone it is dragged up from the bottom; from 900px it is a
+   plain sidebar and the handle is gone.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.sheet {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 1100;
+  display: flex; flex-direction: column;
+  height: var(--sheet-live, var(--sheet-h, var(--peek)));
+  max-height: 92dvh;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: var(--shadow-2);
+  transition: height .22s cubic-bezier(.32, .72, 0, 1);
+}
+.sheet.snap-half { --sheet-h: calc(var(--snap-half) * 1dvh); }
+.sheet.snap-full { --sheet-h: calc(var(--snap-full) * 1dvh); }
+/* While a finger is on it, it follows the finger — no easing in the way. */
+.sheet.dragging { transition: none; }
+
+/* The grab handle. A full-width 44px target around a 4px bar: the bar is the
+   affordance, the rest is what a thumb actually lands on. */
+.grab {
+  flex: none;
+  width: 100%; min-height: var(--tap); padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: var(--r-lg) var(--r-lg) 0 0;
+  /* Without this the browser claims the vertical drag for page scrolling and
+     the sheet never moves. */
+  touch-action: none;
+}
+.grab::before {
+  content: ""; display: block;
+  width: 44px; height: 4px; border-radius: 2px;
+  background: var(--line);
+}
+.grab:hover::before { background: var(--muted); }
+
+/* Always on screen, however far down the sheet is pushed. */
+.sheet-peek {
+  flex: none;
+  padding: 0 .85rem .45rem;
+  display: flex; align-items: center; gap: .6rem;
+  min-height: 38px;
+}
+
+.sheet-body {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: .25rem .85rem 1rem;
+  display: flex; flex-direction: column; gap: .8rem;
+}
+
+/* The tabs are at the BOTTOM, because the top of a phone screen is the hardest
+   place to reach with the hand that is holding it. */
+.tabs {
+  flex: none;
+  display: flex;
+  gap: .25rem;
+  padding: .3rem .5rem calc(env(safe-area-inset-bottom) + .3rem);
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.tabs button {
+  flex: 1;
+  flex-direction: column; gap: .12rem;
+  min-height: var(--tap);
+  padding: .3rem .2rem;
+  background: none; border: none; border-radius: var(--r-md);
+  color: var(--muted); font-size: .72rem; font-weight: 600;
+}
+.tabs button .tab-glyph { font-size: 1.05rem; line-height: 1.1; }
+.tabs button.on { color: var(--accent); background: var(--accent-soft); }
+.tabs button:active:not(:disabled) { transform: none; }
+
+/* ── the peek row ──────────────────────────────────────────────────────── */
+
+.peek-verdict {
+  display: inline-flex; align-items: baseline; gap: .35rem;
+  padding: .2rem .55rem;
+  border-radius: 999px;
+  font-size: .82rem; font-weight: 650;
+  border: 1px solid;
+}
+.peek-figures { font-size: .84rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+.peek-hint { font-size: .86rem; color: var(--muted); }
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Panel contents
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.group { display: flex; flex-direction: column; gap: .5rem; }
+.group > h2 {
+  margin: 0; font-size: .72rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .07em;
+}
+.group > h2 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+.row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+
+/* A segmented control, not four loose buttons. */
+.segmented {
+  display: flex; gap: .2rem; width: 100%;
+  padding: .2rem;
+  background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.segmented button {
+  flex: 1; min-height: 38px; padding: .35rem .3rem;
+  background: none; border: none; border-radius: var(--r-sm);
+  font-size: .88rem; color: var(--muted);
+}
+.segmented button.on {
+  background: var(--panel); color: var(--text); font-weight: 620;
+  box-shadow: var(--shadow-1);
+}
+
+/* The hour. A slider, not a 24-item dropdown: this is the one control on the
+   page people actually move, and a dropdown of twenty-four times is a scroll
+   in a 40px window. */
+.when { display: flex; flex-direction: column; gap: .35rem; }
+.when-head { display: flex; align-items: center; gap: .5rem; }
+.when-time { font-size: 1.35rem; font-weight: 680; font-variant-numeric: tabular-nums; }
+.when-light { font-size: .8rem; color: var(--muted); }
+.when-head button { margin-left: auto; padding: .3rem .9rem; font-size: .84rem; }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; min-height: var(--tap); padding: 0;
+  background: none; border: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px; background: var(--line);
+}
+input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--line); }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 26px; height: 26px; margin-top: -10px;
+  border-radius: 50%; background: var(--accent);
+  border: 3px solid var(--panel); box-shadow: var(--shadow-1);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); border: 3px solid var(--panel); box-shadow: var(--shadow-1);
+}
+.when-scale {
+  display: flex; justify-content: space-between;
+  font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+.hint { margin: 0; font-size: .86rem; color: var(--muted); line-height: 1.45; }
+
+.empty {
+  margin: 0; padding: 1.1rem .9rem;
+  text-align: center; font-size: .88rem; color: var(--muted); line-height: 1.5;
+  background: var(--raised); border: 1px dashed var(--line); border-radius: var(--r-md);
+}
+.empty strong { color: var(--text); }
+
+.summary { display: flex; gap: .5rem; }
 .summary div {
-  flex: 1; background: var(--bg); border: 1px solid var(--line);
-  border-radius: 11px; padding: .6rem .7rem;
+  flex: 1; background: var(--raised); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: .55rem .7rem;
 }
-.summary span { display: block; font-size: 1.15rem; font-weight: 650; }
-.summary small { color: var(--muted); font-size: .74rem; }
+.summary span { display: block; font-size: 1.1rem; font-weight: 660; }
+.summary small { color: var(--muted); font-size: .72rem; }
 
 .error {
-  margin: 0; padding: .6rem .7rem; font-size: .84rem;
+  margin: 0; padding: .6rem .7rem; font-size: .84rem; line-height: 1.45;
   color: var(--bad-text); background: var(--bad-bg);
-  border: 1px solid var(--bad); border-radius: 10px;
+  border: 1px solid var(--bad); border-radius: var(--r-md);
 }
 
-.panel footer { margin-top: auto; padding-top: .6rem; font-size: .74rem; color: var(--muted); }
+.credit { margin: 0; font-size: .74rem; color: var(--muted); line-height: 1.5; }
 
-.map { position: relative; height: 100%; min-height: 0; }
-.map.reporting { cursor: crosshair; }
-.map.reporting .leaflet-container { cursor: crosshair; }
-.map-loading { display: grid; place-items: center; height: 100%; color: var(--muted); }
+/* ── the route comparison ───────────────────────────────────────────────── */
 
-/* Leaflet's own chrome, matched to the page.
-   These selectors are deliberately more specific than Leaflet's: its stylesheet
-   is imported inside the dynamically-loaded map chunk, so it lands AFTER this
-   file and a bare `.leaflet-container` rule loses to its default grey. */
-.map .leaflet-container { background: var(--map-void); }
-.leaflet-bar a, .leaflet-bar a:hover { background: var(--panel); color: var(--text); border-color: var(--line); }
-.leaflet-control-attribution {
-  background: color-mix(in srgb, var(--panel) 85%, transparent) !important;
-  color: var(--muted) !important;
+.choices ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .45rem; }
+
+.choice {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .15rem .5rem;
+  width: 100%; text-align: left;
+  min-height: 58px; padding: .6rem .75rem;
+  background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-md);
 }
-.leaflet-control-attribution a { color: var(--accent) !important; }
-.leaflet-popup-content-wrapper, .leaflet-popup-tip {
-  background: var(--panel); color: var(--text); box-shadow: var(--shadow);
+.choice.on { border-color: var(--accent); background: var(--accent-soft); }
+.choice-head { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.choice-name { font-weight: 640; font-size: .92rem; }
+.choice-figures { grid-column: 2; grid-row: 1; font-size: .84rem; color: var(--muted); white-space: nowrap; }
+.choice-verdict { grid-column: 1 / -1; font-size: .8rem; color: var(--muted); }
+
+/* A dot in the route's own verdict colour, so the list, the strip and the line
+   on the map are all saying the same thing in the same way. */
+.choice-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+.tag {
+  font-size: .64rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: .12rem .4rem; border-radius: 999px; border: 1px solid;
+}
+.tag.preferred { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.tag.fastest { color: var(--muted); border-color: var(--line); }
+
+/* ── the filter panel ───────────────────────────────────────────────────── */
+
+.filters { display: flex; flex-direction: column; gap: .55rem; }
+
+.filter {
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--r-md);
+  background: var(--raised);
+  padding: 0 .75rem;
+}
+.filter > summary {
+  display: flex; align-items: center; gap: .5rem;
+  min-height: var(--tap);
+  cursor: pointer; font-size: .92rem; font-weight: 620; list-style: none;
+}
+.filter > summary::-webkit-details-marker { display: none; }
+.filter > summary::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: .82rem; }
+.filter[open] > summary::after { content: "▴"; }
+.filter[open] { padding-bottom: .6rem; }
+.filter .count {
+  margin-left: auto; padding: .05rem .45rem;
+  font-size: .74rem; color: var(--muted); font-weight: 600;
+  background: var(--panel); border-radius: 999px;
+}
+.filter .count + ::after { margin-left: .4rem; }
+
+.swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+.filter.crime { border-left-color: var(--crime); }
+.filter.crime .swatch { background: var(--crime); }
+.filter.safe { border-left-color: var(--safe); }
+.filter.safe .swatch { background: var(--safe); border-radius: 50%; }
+.filter.light { border-left-color: var(--light); }
+.filter.light .swatch { background: var(--light); }
+
+.filter-note { margin: .4rem 0 .55rem; font-size: .8rem; color: var(--muted); line-height: 1.5; }
+.filter-note code { font-size: .95em; }
+
+/* A whole row is the target, not the 13px box in the corner of it. */
+.check {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: center;
+  gap: .1rem .55rem;
+  min-height: var(--tap); padding: .2rem .1rem;
+  font-size: .9rem; cursor: pointer; border-radius: var(--r-sm);
+}
+.check:hover { background: var(--panel); }
+.check input {
+  flex: none; width: 21px; height: 21px; min-height: 0; margin: 0; padding: 0;
+  accent-color: var(--accent);
+}
+.check .glyph { font-size: 1rem; }
+.check small {
+  grid-column: 2 / -1; font-size: .74rem; color: var(--muted); line-height: 1.4;
+}
+/* A checkbox without a glyph still needs its label in the third column. */
+.check > input + :not(.glyph) { grid-column: 2 / -1; }
+
+.quick { display: flex; gap: .4rem; margin: .3rem 0 .5rem; }
+.quick button { padding: .3rem 1rem; font-size: .84rem; }
+
+.report-add {
+  margin-top: .5rem; padding-top: .5rem;
+  border-top: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: .45rem;
 }
 
-/* Night mode inverts the tiles rather than loading a dark basemap from a second
-   host. One provider is one thing that can be unreachable — and a blank
-   background is the worst possible failure on a page about walking after dark.
-   The double hue-rotate puts the greens and blues back the right way round. */
-.tiles-night {
-  filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.75);
+/* ── the safety read ────────────────────────────────────────────────────── */
+
+.safety { display: flex; flex-direction: column; gap: .6rem; }
+
+.verdict {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .5rem;
+  background: var(--raised); border: 1px solid var(--line); border-left-width: 3px;
+  border-radius: var(--r-md); padding: .7rem .8rem;
+}
+.v-label { font-weight: 660; font-size: 1rem; }
+.v-score { font-size: 1.5rem; font-weight: 680; font-variant-numeric: tabular-nums; }
+.v-score small { font-size: .7rem; color: var(--muted); font-weight: 400; }
+
+.narration { margin: 0; font-size: .9rem; line-height: 1.55; }
+
+/* ── the route, stretch by stretch ──────────────────────────────────────────
+   One block per ~400 m, length-weighted, in the same colours the map draws the
+   line in. The two have to match: the strip is how you find the bad stretch on
+   the map, and a different palette would make them two separate claims. */
+.strip {
+  display: flex; gap: 2px;
+  height: 14px; border-radius: 7px; overflow: hidden;
+  background: var(--line);
+}
+.strip-part { display: block; min-width: 3px; }
+.strip-caption { margin: 0; font-size: .74rem; color: var(--muted); line-height: 1.45; }
+
+/* The stretch being singled out. Bordered rather than filled: it sits above the
+   model's paragraph, and two filled blocks in a row read as one panel. */
+.worst {
+  margin: 0; padding: .6rem .7rem;
+  font-size: .86rem; line-height: 1.5;
+  border: 1px solid var(--line); border-left: 3px solid var(--bad);
+  border-radius: var(--r-md); background: var(--raised);
+}
+
+.findings { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .3rem; }
+.findings li { font-size: .84rem; color: var(--muted); line-height: 1.5; }
+
+/* A search that could not run is not a search that found nothing. */
+.search-failed { margin: 0; font-size: .78rem; color: var(--bad); line-height: 1.4; }
+
+/* Verdict colours, one pair per theme: the light-on-dark green that reads
+   nicely at night is invisible on white. */
+.v-good { --verdict: #0f8a4d; }
+.v-fair { --verdict: #9a7300; }
+.v-poor { --verdict: #c0491f; }
+.v-unknown { --verdict: #64708a; }
+[data-theme="dark"] .v-good { --verdict: #6ee7a8; }
+[data-theme="dark"] .v-fair { --verdict: #e0c04c; }
+[data-theme="dark"] .v-poor { --verdict: #ef8f5b; }
+[data-theme="dark"] .v-unknown { --verdict: #7c8798; }
+
+.verdict { border-left-color: var(--verdict); }
+.verdict .v-label { color: var(--verdict); }
+.peek-verdict { color: var(--verdict); border-color: var(--verdict); }
+
+/* Example data from `npm run seed`. Loud on purpose: these points sit on real
+   streets, and the only thing keeping them from being read as records of real
+   events is that the screen says otherwise everywhere they appear. */
+.example-banner {
+  margin: .5rem 0;
+  padding: .6rem .7rem;
+  font-size: .8rem;
+  line-height: 1.5;
+  color: var(--text);
+  border: 1px dashed var(--crime);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--crime) 10%, transparent);
+}
+.example-banner button {
+  display: flex; width: 100%;
+  margin-top: .5rem;
+  font-size: .82rem;
+  border-color: var(--crime);
+  color: var(--crime);
+  background: transparent;
+}
+.example-tag {
+  display: inline-block;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--crime);
 }
 
 /* ── layer markers ──────────────────────────────────────────────────────── */
@@ -214,165 +657,88 @@ select {
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45));
 }
 
-/* ── the route comparison ───────────────────────────────────────────────── */
-
-.choices h2 { margin: 0 0 .45rem; font-size: .8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-.choices h2 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
-.choices ul { margin: 0 0 .5rem; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .4rem; }
-
-.choice {
-  display: flex; flex-direction: column; gap: .15rem;
-  width: 100%; text-align: left; padding: .55rem .7rem;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 11px;
+/* ── Leaflet's own chrome, matched to the page ──────────────────────────────
+   These selectors are deliberately more specific than Leaflet's: its stylesheet
+   is imported inside the dynamically-loaded map chunk, so it lands AFTER this
+   file and a bare `.leaflet-container` rule loses to its default grey. */
+.map .leaflet-container { background: var(--map-void); font: inherit; }
+.leaflet-bar a, .leaflet-bar a:hover {
+  background: var(--panel); color: var(--text); border-color: var(--line);
+  width: 34px; height: 34px; line-height: 34px;
 }
-.choice.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.choice-head { display: flex; align-items: center; gap: .4rem; }
-.choice-name { font-weight: 600; font-size: .88rem; }
-.choice-figures { font-size: .82rem; color: var(--muted); }
-.choice-verdict { font-size: .78rem; color: var(--muted); }
-
-.tag {
-  font-size: .66rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-  padding: .1rem .38rem; border-radius: 999px; border: 1px solid;
+.leaflet-control-attribution {
+  background: color-mix(in srgb, var(--panel) 88%, transparent) !important;
+  color: var(--muted) !important;
+  font-size: .66rem;
 }
-.tag.preferred { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-.tag.fastest { color: var(--muted); border-color: var(--line); }
-
-/* ── the filter panel ───────────────────────────────────────────────────── */
-
-.filters { display: flex; flex-direction: column; gap: .5rem; }
-
-.filter {
-  border: 1px solid var(--line); border-left-width: 3px; border-radius: 11px;
-  background: var(--bg); padding: .5rem .7rem;
+.leaflet-control-attribution a { color: var(--accent) !important; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--panel); color: var(--text); box-shadow: var(--shadow-2);
 }
-.filter > summary {
-  display: flex; align-items: center; gap: .45rem;
-  cursor: pointer; font-size: .88rem; font-weight: 600; list-style: none;
-}
-.filter > summary::-webkit-details-marker { display: none; }
-.filter > summary::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: .8rem; }
-.filter[open] > summary::after { content: "▴"; }
-.filter .count { margin-left: auto; padding-right: .1rem; font-size: .74rem; color: var(--muted); font-weight: 400; }
+.leaflet-popup-content-wrapper { border-radius: var(--r-md); }
+.leaflet-popup-content { font-size: .84rem; line-height: 1.5; }
 
-.swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
-.filter.crime { border-left-color: var(--crime); }
-.filter.crime .swatch { background: var(--crime); }
-.filter.safe { border-left-color: var(--safe); }
-.filter.safe .swatch { background: var(--safe); border-radius: 50%; }
-.filter.light { border-left-color: var(--light); }
-.filter.light .swatch { background: var(--light); }
+/* Keep Leaflet's bottom-left chrome above the collapsed sheet — otherwise the
+   attribution, which the tile licence requires, sits underneath it. */
+.app[data-snap="half"] .reporting-banner { bottom: calc(var(--snap-half) * 1dvh + .7rem); }
+.app[data-snap="full"] .reporting-banner { display: none; }
 
-.filter-note { margin: .5rem 0; font-size: .76rem; color: var(--muted); line-height: 1.45; }
-.filter-note code { font-size: .95em; }
+.leaflet-bottom { bottom: var(--peek); }
 
-.check {
-  display: grid; grid-template-columns: auto auto 1fr; align-items: center;
-  gap: .4rem; padding: .18rem 0; font-size: .84rem; cursor: pointer;
-}
-.check input { flex: none; width: auto; accent-color: var(--accent); }
-.check .glyph { font-size: .9rem; }
-.check small {
-  grid-column: 2 / -1; font-size: .72rem; color: var(--muted); line-height: 1.35;
-}
-/* A checkbox without a glyph still needs its label in the third column. */
-.check > input + :not(.glyph) { grid-column: 2 / -1; }
-
-.quick { display: flex; gap: .35rem; margin: .35rem 0; }
-.quick button { padding: .25rem .55rem; font-size: .76rem; }
-
-.report-add { margin-top: .5rem; display: flex; flex-direction: column; gap: .4rem; }
-
-/* ── the safety read ────────────────────────────────────────────────────── */
-
-.when { display: flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--muted); }
-
-.safety { display: flex; flex-direction: column; gap: .55rem; }
-
-.verdict {
-  display: flex; align-items: baseline; justify-content: space-between;
-  background: var(--bg); border: 1px solid var(--line); border-left-width: 3px;
-  border-radius: 11px; padding: .6rem .75rem;
-}
-.v-label { font-weight: 650; font-size: .95rem; }
-.v-score { font-size: 1.3rem; font-weight: 650; }
-.v-score small { font-size: .7rem; color: var(--muted); font-weight: 400; }
-
-.narration { margin: 0; font-size: .88rem; line-height: 1.5; }
-
-/* ── the route, stretch by stretch ──────────────────────────────────────────
-   One block per ~400 m, length-weighted, in the same colours the map draws the
-   line in. The two have to match: the strip is how you find the bad stretch on
-   the map, and a different palette would make them two separate claims. */
-.strip {
-  display: flex; gap: 2px;
-  height: 12px; border-radius: 6px; overflow: hidden;
-  background: var(--line);
-}
-.strip-part { display: block; min-width: 3px; }
-.strip-caption { margin: 0; font-size: .74rem; color: var(--muted); }
-
-/* The stretch being singled out. Bordered rather than filled: it sits above the
-   model's paragraph, and two filled blocks in a row read as one panel. */
-.worst {
-  margin: 0; padding: .5rem .6rem;
-  font-size: .84rem; line-height: 1.45;
-  border: 1px solid var(--line); border-left: 3px solid var(--bad);
-  border-radius: 8px; background: var(--bg);
+/* Night mode inverts the tiles rather than loading a dark basemap from a second
+   host. One provider is one thing that can be unreachable — and a blank
+   background is the worst possible failure on a page about walking after dark.
+   The double hue-rotate puts the greens and blues back the right way round. */
+.tiles-night {
+  filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.75);
 }
 
-.findings { margin: 0; padding-left: 1.05rem; display: flex; flex-direction: column; gap: .25rem; }
-.findings li { font-size: .81rem; color: var(--muted); line-height: 1.45; }
+/* ────────────────────────────────────────────────────────────────────────────
+   From a tablet up: the sheet stops being a sheet and becomes a sidebar. The
+   only `min-width` queries in the file, and they add to the rules above rather
+   than undoing them.
+   ──────────────────────────────────────────────────────────────────────────── */
 
-/* A search that could not run is not a search that found nothing. */
-.search-failed { margin: 0; font-size: .78rem; color: var(--bad); line-height: 1.4; }
+@media (min-width: 900px) {
+  .app { flex-direction: row; }
 
-/* Verdict colours, one pair per theme: the light-on-dark green that reads
-   nicely at night is invisible on white. */
-.verdict.v-good { border-left-color: #0f8a4d; }
-.verdict.v-good .v-label { color: #0f8a4d; }
-.verdict.v-fair { border-left-color: #9a7300; }
-.verdict.v-fair .v-label { color: #9a7300; }
-.verdict.v-poor { border-left-color: #c0491f; }
-.verdict.v-poor .v-label { color: #c0491f; }
-.verdict.v-unknown { border-left-color: #64708a; }
-.verdict.v-unknown .v-label { color: #64708a; }
+  .sheet {
+    position: relative;
+    order: -1;                      /* the sidebar goes on the left */
+    z-index: 1;
+    width: 400px; flex: none;
+    height: 100%; max-height: none;
+    border-top: none; border-right: 1px solid var(--line); border-radius: 0;
+    box-shadow: none;
+    transition: none;
+  }
+  /* A dragged height from a narrow window must not survive the resize. */
+  .sheet { --sheet-live: 100%; }
+  .grab { display: none; }
 
-[data-theme="dark"] .verdict.v-good { border-left-color: #6ee7a8; }
-[data-theme="dark"] .verdict.v-good .v-label { color: #6ee7a8; }
-[data-theme="dark"] .verdict.v-fair { border-left-color: #e0c04c; }
-[data-theme="dark"] .verdict.v-fair .v-label { color: #e0c04c; }
-[data-theme="dark"] .verdict.v-poor { border-left-color: #ef8f5b; }
-[data-theme="dark"] .verdict.v-poor .v-label { color: #ef8f5b; }
-[data-theme="dark"] .verdict.v-unknown { border-left-color: #7c8798; }
-[data-theme="dark"] .verdict.v-unknown .v-label { color: #7c8798; }
+  .sheet-peek { display: none; }
+  .sheet-body { padding: .9rem 1rem 1.2rem; gap: .9rem; }
 
-/* Example data from `npm run seed`. Loud on purpose: these points sit on real
-   streets, and the only thing keeping them from being read as records of real
-   events is that the screen says otherwise everywhere they appear. */
-.example-banner {
-  margin: .5rem 0;
-  padding: .55rem .65rem;
-  font-size: .76rem;
-  line-height: 1.45;
-  color: var(--text);
-  border: 1px dashed var(--crime);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--crime) 10%, transparent);
+  /* At this width the tabs can sit at the top, where the eye starts. */
+  .tabs { order: -1; border-top: none; border-bottom: 1px solid var(--line); padding: .5rem; }
+
+  .map { position: relative; flex: 1; inset: auto; }
+
+  /* The card keeps floating over the map — it is the one thing that must never
+     live inside a scrolling box, or the suggestions list gets clipped by it. */
+  .trip { max-width: 27rem; padding: 1rem; }
+
+  /* No sheet to ride above at this width — the panel is beside the map. */
+  .map-tools, .app[data-snap] .map-tools { bottom: calc(env(safe-area-inset-bottom) + 1.6rem); display: flex; }
+  .reporting-banner, .app[data-snap] .reporting-banner { bottom: 1.6rem; display: block; }
+  .leaflet-bottom { bottom: 0; }
 }
-.example-banner button {
-  display: block;
-  margin-top: .45rem;
-  padding: .3rem .6rem;
-  font-size: .76rem;
-  border-color: var(--crime);
-  color: var(--crime);
-  background: transparent;
+
+@media (min-width: 1280px) {
+  .sheet { width: 440px; }
 }
-.example-tag {
-  display: inline-block;
-  font-size: .68rem;
-  font-weight: 700;
-  letter-spacing: .04em;
-  color: var(--crime);
+
+/* Someone who has asked for less movement gets less of it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }

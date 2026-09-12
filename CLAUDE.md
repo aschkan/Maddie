@@ -34,6 +34,8 @@ short list of things that will bite you while editing.
 - `src/app/api/assess/route.ts` — the model endpoint.
 - `src/app/api/reports/route.ts` — the crime layer's storage.
 - `src/app/api/osm/[service]/[[...path]]/route.ts` — OSM through this server.
+- `src/components/BottomSheet.tsx` — the panel, as a sheet with three stops.
+- `src/components/TripCard.tsx` — A and B, floating over the map; collapses.
 - `src/components/` — the map, the planner, the filters, the comparison, the
   search box, the safety panel.
 
@@ -78,6 +80,61 @@ When the verdict is `unknown` the model is **not called at all**. There is
 nothing to explain but the gap, and a model asked to comment anyway produces a
 sentence that sounds like an answer. That was observed: a fluent "most of this
 walk is on lit streets" printed directly under "Not enough map data".
+
+## The page is MOBILE FIRST — literally
+
+`globals.css` is written for a **360px phone** and widened with `min-width`
+queries. It was a two-column desktop sheet with a single `max-width: 820px`
+patch under it, which on a phone gave the panel a 55vh box to scroll inside and
+the map whatever was left. **`README.md` § "The page is mobile first" is the
+spec.** The rules that will be undone by accident:
+
+- **Every rule starts at phone width.** There is no `max-width` block in the
+  stylesheet, and a new one is a sign the rule above it was written for a
+  desktop and patched afterwards. The only `min-width` queries are the two at
+  the bottom of the file, and they ADD to the rules above rather than undoing
+  them.
+- **`--tap: 44px`, and nothing interactive is under it.** Including the sheet's
+  grab handle and the filter checkboxes — for those the whole `.check` row is
+  the target, not the 21px box in the corner of it.
+- **16px minimum on inputs.** Anything under it makes iOS Safari zoom the page
+  on focus, and it never zooms back.
+- **No horizontal scroll.** `overflow-wrap: anywhere` on the body; long values
+  wrap rather than widening the page. Addresses and street names are long.
+- **The tab bar is at the BOTTOM** below 900px, because the top of a phone
+  screen is the hardest place to reach with the hand holding it. Above 900px it
+  moves to the top of the sidebar, where the eye starts.
+- **`safe-area-inset-*`** on the trip card, the tab bar and the map's buttons.
+- **The map is the page.** Everything else floats over it: the trip card at the
+  top, the sheet at the bottom, one cluster of map buttons bottom-right where a
+  thumb already is. Leaflet's own zoom control is off (`zoomControl={false}`) —
+  it lives top-left, which is both unreachable and under the trip card.
+
+### The sheet, and the things that have to move with it
+
+- **Three stops, not free positioning.** `peek` / `half` / `full`. A sheet that
+  stays wherever you let go ends up at some useless in-between height, and
+  there is no right answer to "where was it last time" on a page opened once a
+  week. Tapping the handle cycles; dragging snaps to the nearest.
+- **The stops are defined ONCE, in the stylesheet** (`--peek`, `--snap-half`,
+  `--snap-full`). `BottomSheet` reads them back with `getComputedStyle` and the
+  map's buttons position against them. Three copies of "how far up is half" is
+  three places for it to stop being the same number.
+- **`data-snap` is on `.app`, not just the sheet.** The map's own buttons and
+  the reporting banner have to climb out from under the panel when it opens, and
+  they are not inside it.
+- **`FitToRoute` measures the furniture rather than assuming it.** The card
+  covers the top of the map and the sheet covers the bottom, so fitting into the
+  whole viewport hides both ends of the route. It reads the two elements' real
+  heights after the sheet has settled — 260ms, because measuring mid-slide fits
+  the route into a box that has stopped existing by the time it paints.
+- **`touch-action: none` on the grab handle.** Without it the browser claims the
+  vertical drag for page scrolling and the sheet never moves.
+- **The trip card collapses the moment both ends are set**, and that is the
+  point of it: two address fields, two labels and two coordinate readouts is a
+  third of a phone screen, permanently, for something touched once.
+- **The card is never inside a scrolling container.** The suggestions dropdown
+  is `position: absolute` under the input, and a scroll parent clips it.
 
 ## The score has two resolutions, and one set of weights
 
@@ -328,6 +385,14 @@ can act on by walking a different way), and is the same data OSRM routed on.
   low score.
 - **`segmentRoute` and `assess` share one set of weights.** Scoring a window
   with its own formula is how the parts come to disagree with the whole.
+- **A new `@media (max-width: …)` block is the bug, not the fix.** The base rule
+  it is patching was written for a desktop; rewrite that instead.
+- **The sheet's stops live in CSS and are read from it.** Hardcoding 54% in
+  `BottomSheet` as well is how the panel and the buttons that dodge it drift
+  apart.
+- **The React Compiler lint rejects reading a ref during render.** `BottomSheet`
+  derives "is this being dragged" from the live height in state instead — a
+  render that depends on a ref is a render React did not cause.
 - **A bare `npm run seed` now wipes the whole database**, community reports
   included. It used to keep them and replace only the example ones; that is
   `--keep` now. The change was to make one button mean one thing on every

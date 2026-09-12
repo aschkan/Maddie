@@ -28,6 +28,21 @@ export const VERDICT_LABEL: Record<Verdict, string> = {
  * colouring them alike turns a gap in the map into an accusation about a
  * street. Grey reads as absent, which is what it is.
  */
+/**
+ * The class that carries a verdict's colour into the CSS.
+ *
+ * A class rather than a hex wherever the browser is doing the painting, because
+ * the two themes need different values for the same verdict: the light-on-dark
+ * green that reads at night is invisible on white. `--verdict` is set by these
+ * classes and read by `.verdict`, `.peek-verdict` and anything else showing one.
+ */
+export const VERDICT_CLASS: Record<Verdict, string> = {
+  good: "v-good",
+  fair: "v-fair",
+  poor: "v-poor",
+  unknown: "v-unknown",
+};
+
 export const VERDICT_COLOUR: Record<Verdict, string> = {
   good: "#35c46a",
   fair: "#e8b33a",

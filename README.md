@@ -27,6 +27,34 @@ npm run build && npm run start
 npm run check      # typecheck, lint, and 146 tests — all offline
 ```
 
+## The page is mobile first
+
+The whole thing is written for a **360px phone** and widened from there, because
+that is where it is used: outside, one-handed, often in the dark.
+
+**The map is the page.** The trip card floats over the top of it and collapses
+to a single line the moment both ends are set — before that it is two address
+fields, and after that it is something you glance at. The panel is a sheet you
+drag up from the bottom, with three stops: collapsed it shows the verdict, the
+distance and the tabs and nothing else; half-open it shows the routes; fully
+open it shows everything. The map's own buttons ride above it, bottom-right,
+where a thumb already is.
+
+**The panel's contents are three tabs**, not one long scroll — Route, Safety,
+Layers. The scroll was six screens deep on a phone, and the safety read, which
+is the thing the page exists for, was four of them down. The tab bar sits at
+the bottom below 900px: the top of a phone screen is the hardest place to reach
+with the hand that is holding it.
+
+Nothing interactive is smaller than 44px, no input is under 16px (anything less
+and iOS Safari zooms the page on focus and never zooms back), long values wrap
+instead of widening the page, and the header, tab bar and map buttons all
+respect `safe-area-inset-*`.
+
+From 900px up the sheet becomes a sidebar and the tabs move to the top of it.
+That is the only breakpoint, and it adds to the phone rules rather than undoing
+them — there is no `max-width` query in the stylesheet at all.
+
 ## The safety read
 
 With a route on screen, the page reads the streets it runs along and says how

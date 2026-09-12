@@ -3,6 +3,15 @@
 /**
  * The page: pick two points, get routes, compare them, and switch layers on.
  *
+ * Built for a 360px phone and widened from there. The map is the page; the
+ * trip card floats over the top of it and the panel is a sheet you drag up
+ * from the bottom. From 900px the sheet becomes a sidebar — see `globals.css`,
+ * where the only `min-width` query in the app lives.
+ *
+ * The panel's contents are three tabs rather than one long scroll, because the
+ * scroll was six screens deep on a phone and the safety read — the thing the
+ * page exists for — was four of them down.
+ *
  * The map is imported with `ssr: false` and that has to happen from a CLIENT
  * component: `next/dynamic` refuses to disable SSR from a server component, and
  * Leaflet cannot be server-rendered at all — it touches `window` while the
@@ -12,21 +21,23 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import BottomSheet, { type Snap } from "@/components/BottomSheet";
 import FilterPanel from "@/components/FilterPanel";
-import PlaceSearch from "@/components/PlaceSearch";
 import RouteChoices from "@/components/RouteChoices";
 import SafetyPanel from "@/components/SafetyPanel";
+import TripCard from "@/components/TripCard";
 import { useReports } from "@/components/useReports";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import { compareRoutes } from "@/lib/compare";
-import { plannedAt } from "@/lib/daylight";
+import { plannedAt, type Light } from "@/lib/daylight";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, type BBox, type LayerData } from "@/lib/layers";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
-import { assess, type When } from "@/lib/score";
+import { assess, lightingFor, type When } from "@/lib/score";
 import { describeWorst, segmentRoute, worstStretch } from "@/lib/segments";
 import { formatDistance, formatDuration } from "@/lib/format";
+import { VERDICT_CLASS, VERDICT_LABEL } from "@/lib/verdict";
 
 const MapCanvas = dynamic(() => import("@/components/MapCanvas"), {
   ssr: false,
@@ -47,6 +58,21 @@ const PROFILE_TIME: Record<Profile, string> = {
   walking: "walking time",
   cycling: "cycling time",
 };
+
+/** What the hour you picked actually means, beside the clock reading. */
+const LIGHT_WORD: Record<Light, string> = {
+  day: "daylight",
+  twilight: "dusk",
+  night: "after dark",
+};
+
+type Tab = "route" | "safety" | "layers";
+
+const TABS: { id: Tab; glyph: string; label: string }[] = [
+  { id: "route", glyph: "🧭", label: "Route" },
+  { id: "safety", glyph: "🔦", label: "Safety" },
+  { id: "layers", glyph: "◉", label: "Layers" },
+];
 
 /**
  * Below this, the visible box is tens of kilometres across and the query for
@@ -74,6 +100,9 @@ export default function RoutePlanner() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tilesFailed, setTilesFailed] = useState(false);
+
+  const [tab, setTab] = useState<Tab>("route");
+  const [snap, setSnap] = useState<Snap>("peek");
 
   const [night, setNight] = useState(false);
   const [spots, setSpots] = useState<string[]>(["police", "hospital", "transit", "bar"]);
@@ -172,6 +201,9 @@ export default function RoutePlanner() {
         setRoutes(result.routes.slice(0, MAX_ROUTES));
         setSelected(0);
         setError(null);
+        // There is something to read now, so show some of it. Half rather than
+        // full: the point of the answer is where on the map it applies.
+        setSnap((current) => (current === "peek" ? "half" : current));
       } else {
         setRoutes([]);
         // An abort is us replacing the request, not a failure worth showing.
@@ -201,11 +233,20 @@ export default function RoutePlanner() {
     [hour, start, end],
   );
 
+  // Day, dusk or dark — shown beside the hour, so the control that moves the
+  // score most says what it is doing before you read the verdict.
+  const light = useMemo(() => lightingFor(when).light, [when]);
+
   // The hour changes the verdict but not the counts, so re-judging is free —
   // no second trip to OpenStreetMap.
   const assessments = useMemo(
     () => facts.map((found) => (found ? assess(found, when) : null)),
     [facts, when],
+  );
+
+  const comparison = useMemo(
+    () => compareRoutes(routes, assessments),
+    [routes, assessments],
   );
 
   /*
@@ -220,19 +261,9 @@ export default function RoutePlanner() {
     return read ? segmentRoute(read, when) : [];
   }, [reads, selected, when]);
 
-  const worst = useMemo(
-    () => worstStretch(segments, assessments[selected]?.score ?? null),
-    [segments, assessments, selected],
-  );
-  const worstLine = useMemo(
-    () => describeWorst(worst, assessments[selected]?.score ?? null),
-    [worst, assessments, selected],
-  );
-
-  const comparison = useMemo(
-    () => compareRoutes(routes, assessments),
-    [routes, assessments],
-  );
+  const chosenScore = assessments[selected]?.score ?? null;
+  const worst = useMemo(() => worstStretch(segments, chosenScore), [segments, chosenScore]);
+  const worstLine = useMemo(() => describeWorst(worst, chosenScore), [worst, chosenScore]);
 
   /* ── the layers over the visible map ─────────────────────────────────── */
   const zoomedOut = view !== null && view.zoom < MIN_LAYER_ZOOM;
@@ -291,145 +322,46 @@ export default function RoutePlanner() {
     setEndText(startText);
   };
 
+  /** Opening a tab is a request to see it, so the sheet comes up with it. */
+  const openTab = (next: Tab) => {
+    setTab(next);
+    setSnap((current) => (current === "peek" ? "half" : current));
+  };
+
   const next = start === null ? "A" : end === null ? "B" : null;
   const chosen = routes[selected];
+  const chosenAssessment = assessments[selected] ?? null;
+  const activeLayers = spots.length + (lighting ? 1 : 0);
+
+  /* The one line that stays on screen however far down the sheet is pushed. */
+  const peek = chosenAssessment ? (
+    <>
+      <span className={`peek-verdict ${VERDICT_CLASS[chosenAssessment.verdict]}`}>
+        {VERDICT_LABEL[chosenAssessment.verdict]}
+        {chosenAssessment.score !== null && <small>{chosenAssessment.score}/100</small>}
+      </span>
+      {chosen && (
+        <span className="peek-figures">
+          {formatDistance(chosen.metres)} · {formatDuration(chosen.seconds)}
+        </span>
+      )}
+    </>
+  ) : (
+    <span className="peek-hint" aria-live="polite">
+      {busy
+        ? "Finding the ways round…"
+        : routes.length > 0
+          ? "Reading the streets…"
+          : next
+            ? `Tap the map to set ${next}, or search above.`
+            : "Set a start and a destination."}
+    </span>
+  );
 
   return (
-    <div className="layout">
-      <aside className="panel">
-        <header>
-          <div className="title-row">
-            <h1>Maddie</h1>
-            <button
-              type="button"
-              className="ghost theme"
-              onClick={() => setNight((on) => !on)}
-              aria-pressed={night}
-              title={night ? "Switch to light mode" : "Switch to night mode"}
-            >
-              {night ? "☀ Light" : "☾ Night"}
-            </button>
-          </div>
-          <p>
-            Set <strong>A</strong> and <strong>B</strong>, then compare the ways round.
-            Click the map or search for an address; drag either pin to move it.
-          </p>
-        </header>
-
-        <PlaceSearch
-          label="Start" badge="A" accent="#22c55e"
-          value={start} text={startText} onText={setStartText}
-          onPick={usePlace("start")}
-          onClear={() => { setStart(null); setStartText(""); }}
-        />
-
-        <PlaceSearch
-          label="Destination" badge="B" accent="#7c5cff"
-          value={end} text={endText} onText={setEndText}
-          onPick={usePlace("end")}
-          onClear={() => { setEnd(null); setEndText(""); }}
-        />
-
-        <div className="row">
-          <div className="profiles" role="group" aria-label="Travel mode">
-            {PROFILES.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={option === profile ? "on" : ""}
-                onClick={() => setProfile(option)}
-              >
-                {PROFILE_LABEL[option]}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="ghost" onClick={swap} disabled={!start && !end}>
-            ⇅ Swap
-          </button>
-        </div>
-
-        <div className="row">
-          <label className="when">
-            Travelling at
-            <select value={hour} onChange={(event) => setHour(Number(event.target.value))}>
-              {Array.from({ length: 24 }, (_, h) => (
-                <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {reportMode && (
-          <p className="hint report-on">
-            Clicking the map adds a report, not a route point. Untick it in the Crime filter
-            to go back to setting A and B.
-          </p>
-        )}
-        {next && !reportMode && (
-          <p className="hint">Click the map to place <strong>{next}</strong>.</p>
-        )}
-
-        {busy && <p className="hint">Finding routes…</p>}
-        {error && <p className="error">{error}</p>}
-        {factsError && <p className="error">{factsError}</p>}
-
-        <RouteChoices
-          routes={routes}
-          assessments={assessments}
-          comparison={comparison}
-          selected={selected}
-          onSelect={setSelected}
-          done={done}
-        />
-
-        {chosen && !busy && (
-          <div className="summary">
-            <div><span>{formatDistance(chosen.metres)}</span><small>distance</small></div>
-            <div><span>{formatDuration(chosen.seconds)}</span><small>{PROFILE_TIME[profile]}</small></div>
-          </div>
-        )}
-
-        {!busy && (
-          <SafetyPanel
-            facts={facts[selected] ?? null}
-            when={when}
-            segments={segments}
-            worstLine={worstLine}
-          />
-        )}
-
-        <FilterPanel
-          spots={spots} onSpots={setSpots}
-          lighting={lighting} onLighting={setLighting}
-          crime={crime} onCrime={setCrime}
-          reportMode={reportMode} onReportMode={setReportMode}
-          reportCategory={reportCategory} onReportCategory={setReportCategory}
-          reportCount={visibleReports.length}
-          hiddenReports={reports.length - visibleReports.length}
-          exampleCount={exampleCount}
-          onClearExamples={clearExamples}
-          backend={backend}
-          reportError={reportError}
-          zoomedOut={zoomedOut}
-          layerError={layerError}
-          truncated={layers.truncated}
-        />
-
-        {tilesFailed && (
-          <p className="error">
-            The map tiles could not be loaded, so the background is blank. Everything else still
-            works — that is a gap in what this browser can reach, not an empty map.
-          </p>
-        )}
-
-        <footer>
-          Routing by <a href="https://project-osrm.org/" target="_blank" rel="noreferrer">OSRM</a>,
-          search by <a href="https://nominatim.org/" target="_blank" rel="noreferrer">Nominatim</a>,
-          map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors.
-          Nothing here can tell you a route is safe.
-        </footer>
-      </aside>
-
+    /* The stop is on the frame, not just the sheet: the map's own buttons and
+       the reporting banner have to move out from under the panel with it. */
+    <div className="app" data-snap={snap}>
       <main className={reportMode ? "map reporting" : "map"}>
         <MapCanvas
           start={start}
@@ -438,6 +370,7 @@ export default function RoutePlanner() {
           selected={selected}
           segments={segments}
           highlight={worst}
+          sheetSnap={snap}
           onSelectRoute={setSelected}
           centre={centre}
           layers={layers}
@@ -452,7 +385,173 @@ export default function RoutePlanner() {
           onView={setView}
           night={night}
         />
+
+        <TripCard
+          start={start} end={end}
+          startText={startText} endText={endText}
+          onStartText={setStartText} onEndText={setEndText}
+          onPickStart={usePlace("start")} onPickEnd={usePlace("end")}
+          onClearStart={() => { setStart(null); setStartText(""); }}
+          onClearEnd={() => { setEnd(null); setEndText(""); }}
+          onSwap={swap}
+          next={next}
+          night={night} onNight={setNight}
+        />
+
+        {reportMode && (
+          <p className="reporting-banner">
+            Tapping the map adds a report — not a route point.
+          </p>
+        )}
       </main>
+
+      <BottomSheet
+        snap={snap}
+        onSnap={setSnap}
+        peek={peek}
+        tabs={
+          <nav className="tabs" aria-label="Panel sections">
+            {TABS.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                className={entry.id === tab ? "on" : ""}
+                aria-pressed={entry.id === tab}
+                onClick={() => openTab(entry.id)}
+              >
+                <span className="tab-glyph" aria-hidden="true">{entry.glyph}</span>
+                {entry.label}
+                {entry.id === "layers" && activeLayers > 0 ? ` ${activeLayers}` : ""}
+              </button>
+            ))}
+          </nav>
+        }
+      >
+        {error && <p className="error">{error}</p>}
+        {factsError && <p className="error">{factsError}</p>}
+        {tilesFailed && (
+          <p className="error">
+            The map tiles could not load, so the background is blank. Everything else still
+            works — that is a gap in what this browser can reach, not an empty map.
+          </p>
+        )}
+
+        {/* ── Route ─────────────────────────────────────────────────────── */}
+        {tab === "route" && (
+          <>
+            <div className="group">
+              <h2>Getting there</h2>
+              <div className="segmented" role="group" aria-label="Travel mode">
+                {PROFILES.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={option === profile ? "on" : ""}
+                    aria-pressed={option === profile}
+                    onClick={() => setProfile(option)}
+                  >
+                    {PROFILE_LABEL[option]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* A slider, not a dropdown of twenty-four times. This is the one
+                control on the page people actually move, and what it does to
+                the verdict is said right beside it. */}
+            <div className="group when">
+              <h2>Travelling at</h2>
+              <div className="when-head">
+                <span className="when-time">{String(hour).padStart(2, "0")}:00</span>
+                <span className="when-light">{LIGHT_WORD[light]}</span>
+                <button type="button" className="ghost" onClick={() => setHour(new Date().getHours())}>
+                  Now
+                </button>
+              </div>
+              <input
+                type="range"
+                min={0} max={23} step={1}
+                value={hour}
+                onChange={(event) => setHour(Number(event.target.value))}
+                aria-label="Hour of travel"
+                aria-valuetext={`${String(hour).padStart(2, "0")}:00, ${LIGHT_WORD[light]}`}
+              />
+              <div className="when-scale" aria-hidden="true">
+                <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+              </div>
+            </div>
+
+            {routes.length === 0 && !busy && (
+              <p className="empty">
+                <strong>Set A and B</strong> to compare the ways round.<br />
+                Tap the map, or search for an address above.
+              </p>
+            )}
+
+            <RouteChoices
+              routes={routes}
+              assessments={assessments}
+              comparison={comparison}
+              selected={selected}
+              onSelect={setSelected}
+              done={done}
+            />
+
+            {chosen && !busy && (
+              <div className="summary">
+                <div><span>{formatDistance(chosen.metres)}</span><small>distance</small></div>
+                <div><span>{formatDuration(chosen.seconds)}</span><small>{PROFILE_TIME[profile]}</small></div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Safety ────────────────────────────────────────────────────── */}
+        {tab === "safety" && (
+          <>
+            {!busy && facts[selected] ? (
+              <SafetyPanel
+                facts={facts[selected] ?? null}
+                when={when}
+                segments={segments}
+                worstLine={worstLine}
+              />
+            ) : (
+              <p className="empty">
+                {routes.length === 0
+                  ? <>The safety read appears once there is a route.<br />Set <strong>A</strong> and <strong>B</strong> first.</>
+                  : "Reading what OpenStreetMap says about these streets…"}
+              </p>
+            )}
+            <p className="credit">
+              Routing by <a href="https://project-osrm.org/" target="_blank" rel="noreferrer">OSRM</a>,
+              search by <a href="https://nominatim.org/" target="_blank" rel="noreferrer">Nominatim</a>,
+              map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors.
+              <strong> Nothing here can tell you a route is safe.</strong>
+            </p>
+          </>
+        )}
+
+        {/* ── Layers ────────────────────────────────────────────────────── */}
+        {tab === "layers" && (
+          <FilterPanel
+            spots={spots} onSpots={setSpots}
+            lighting={lighting} onLighting={setLighting}
+            crime={crime} onCrime={setCrime}
+            reportMode={reportMode} onReportMode={setReportMode}
+            reportCategory={reportCategory} onReportCategory={setReportCategory}
+            reportCount={visibleReports.length}
+            hiddenReports={reports.length - visibleReports.length}
+            exampleCount={exampleCount}
+            onClearExamples={clearExamples}
+            backend={backend}
+            reportError={reportError}
+            zoomedOut={zoomedOut}
+            layerError={layerError}
+            truncated={layers.truncated}
+          />
+        )}
+      </BottomSheet>
     </div>
   );
 }

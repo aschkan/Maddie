@@ -8,7 +8,7 @@
  * keep typing. Firing on every keystroke is what gets an IP blocked.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { searchPlaces, type Place } from "@/lib/geocode";
 import type { LatLng } from "@/lib/osrm";
@@ -30,6 +30,9 @@ export default function PlaceSearch({ label, badge, accent, value, text, onText,
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  // Both fields are on screen at once, so the label has to point at its own
+  // input — otherwise tapping "Destination" focuses the start box.
+  const id = useId();
 
   useEffect(() => {
     const query = text.trim();
@@ -76,25 +79,36 @@ export default function PlaceSearch({ label, badge, accent, value, text, onText,
 
   return (
     <div className="field" ref={box}>
-      <label>
+      <label className="field-label" htmlFor={id}>
         <span className="badge" style={{ background: accent }}>{badge}</span>
         {label}
       </label>
 
       <div className="input-row">
         <input
+          id={id}
           value={text}
-          placeholder="Type an address, or click the map"
+          placeholder="Search an address, or tap the map"
           onChange={(event) => onText(event.target.value)}
           onFocus={() => setOpen(hits.length > 0)}
           spellCheck={false}
         />
         {value && (
-          <button type="button" className="clear" onClick={onClear} title="Clear this point">✕</button>
+          <button
+            type="button"
+            className="icon ghost"
+            onClick={onClear}
+            title={`Clear ${label.toLowerCase()}`}
+            aria-label={`Clear ${label.toLowerCase()}`}
+          >
+            ✕
+          </button>
         )}
       </div>
 
-      {value && (
+      {/* Only when the point came from the map — under a typed address it is a
+          second spelling of the same thing, in a panel with no room for one. */}
+      {value && !text.trim() && (
         <p className="coords">{value.lat.toFixed(5)}, {value.lng.toFixed(5)}</p>
       )}
       {busy && <p className="coords">searching…</p>}
