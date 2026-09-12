@@ -160,6 +160,39 @@ the browser that entered them. The panel prints which, because a report somebody
 believed they had filed, visible to nobody, is worse than not being able to file
 one.
 
+## Where the browser asks for the map
+
+Tiles, routing, address search and the OpenStreetMap query all go to
+**`/api/osm/*` on this server**, and the server fetches them — straight out
+where it can, and through the proxy chain below where it cannot. That is the
+default, with nothing configured.
+
+It used to go straight from the browser, which is the tidier shape: no server
+in the path, nothing to scale, nothing to pay for. It stops working the moment
+a network in the way cannot reach those hosts — and this app answers from more
+than one machine. One can reach the internet, one cannot, the same build is
+deployed to both, and a visitor may be on a network that reaches neither.
+Asking this server is the only arrangement that works in every combination,
+because the server is the one host that is certainly reachable: the page came
+from it. Both machines then behave the same from the browser's side.
+
+**This app's own API is never involved.** `/api/assess` (the model) and
+`/api/reports` (the crime layer) are same-origin calls to the box that served
+the page. There is nothing to reach around, and the forwarder's table of
+upstreams holds neither of them, so they cannot be routed through it even by
+mistake.
+
+A **502 from `/api/osm/*` is this server** saying nothing it tried got out —
+not OpenStreetMap being down. The page says so in those words, and
+`/api/osm/status` says which routes were tried and what they answered.
+
+To go back to fetching from the browser, set `NEXT_PUBLIC_OSM_DIRECT=1`. To
+point one service at your own server — which is the right answer for a real
+deployment, and removes the rate limit and the reachability problem together —
+set `NEXT_PUBLIC_OSRM_URL`, `NEXT_PUBLIC_OVERPASS_URL`,
+`NEXT_PUBLIC_NOMINATIM_URL` or `NEXT_PUBLIC_TILE_URL`; a named upstream beats
+both defaults.
+
 ## When the browser cannot reach OpenStreetMap
 
 Tiles, routing, search and Overpass are normally fetched **by the browser**,

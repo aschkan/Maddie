@@ -30,6 +30,7 @@ import { useReports } from "@/components/useReports";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import { compareRoutes } from "@/lib/compare";
 import { plannedAt, type Light } from "@/lib/daylight";
+import { isForwarded } from "@/lib/endpoints";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, type BBox, type LayerData } from "@/lib/layers";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
@@ -84,6 +85,14 @@ const MIN_LAYER_ZOOM = 14;
 const MAX_ROUTES = 3;
 
 const THEME_KEY = "maddie.theme.v1";
+
+/**
+ * Whether the basemap comes through this server.
+ *
+ * It decides which half of the tile-failure message is true, and blaming the
+ * wrong end sends whoever is debugging to the wrong machine.
+ */
+const tilesForwarded = isForwarded("tile");
 
 export default function RoutePlanner() {
   const [start, setStart] = useState<LatLng | null>(null);
@@ -431,8 +440,13 @@ export default function RoutePlanner() {
         {factsError && <p className="error">{factsError}</p>}
         {tilesFailed && (
           <p className="error">
-            The map tiles could not load, so the background is blank. Everything else still
-            works — that is a gap in what this browser can reach, not an empty map.
+            The map tiles could not load, so the background is blank — everything else on this
+            page still works, and that is a gap in what could be reached, not an empty map.{" "}
+            {tilesForwarded
+              ? <>They come through this server, so it is this server that could not fetch
+                 them. <a href="/api/osm/status" target="_blank" rel="noreferrer">Check the
+                 routes out.</a></>
+              : "They are fetched straight from OpenStreetMap by this browser."}
           </p>
         )}
 

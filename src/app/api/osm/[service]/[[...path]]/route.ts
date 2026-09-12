@@ -1,21 +1,23 @@
 /**
  * OpenStreetMap, fetched by this server instead of by the browser.
  *
- * Normally this app asks for tiles, routing, search and Overpass from the
- * browser, and that is the right shape: no server in the path, nothing to
- * scale, nothing to pay for. It stops working when the visitor's network — or
- * this server's — cannot reach those hosts at all.
+ * THIS IS THE DEFAULT PATH for tiles, routing, search and Overpass — see
+ * `src/lib/endpoints.ts`, which is where the browser is pointed here. Asking
+ * for them from the browser is the tidier shape and was the default once: no
+ * server in the path, nothing to scale, nothing to pay for. It stops working
+ * the moment the visitor's network, or this server's, cannot reach those hosts
+ * — and this app answers from two machines, only one of which can.
  *
- * So these paths mirror the upstreams one for one, and the client is pointed at
- * them by setting the same `NEXT_PUBLIC_*_URL` variables it already reads:
+ * So these paths mirror the upstreams one for one. Going out is directly where
+ * that works and through the entry proxy and the fastest live exit where it
+ * does not, which makes both machines behave the same from the browser's side.
  *
- *     NEXT_PUBLIC_OVERPASS_URL=/api/osm/overpass
- *     NEXT_PUBLIC_OSRM_URL=/api/osm/osrm
- *     NEXT_PUBLIC_NOMINATIM_URL=/api/osm/nominatim
- *     NEXT_PUBLIC_TILE_URL=/api/osm/tile/{z}/{x}/{y}.png
+ * `NEXT_PUBLIC_OSM_DIRECT=1` sends the browser straight out again, and a
+ * per-service `NEXT_PUBLIC_*_URL` still names a self-hosted upstream.
  *
- * No client code changes; the base URL is simply local. Leave them unset and
- * every request goes straight from the browser as before.
+ * ⚠ This app's OWN API is not served from here and must never be. `/api/assess`
+ * and `/api/reports` are same-origin calls to the box that served the page;
+ * there is nothing to reach around, and `SERVICES` holds neither of them.
  *
  * The upstream is chosen from a fixed table, never from the request. A
  * forwarder that takes its target from a query parameter is an open proxy, and

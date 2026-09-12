@@ -30,6 +30,8 @@ short list of things that will bite you while editing.
 - `src/lib/proxy-chain.ts` — two HTTP proxies in a row. **Server only.**
 - `src/lib/proxy-pool.ts` — which of them work, and which to use next.
 - `src/lib/osm-forward.ts` — the fixed table of upstreams the forwarder allows.
+- `src/lib/endpoints.ts` — where the BROWSER asks for the map. This server, by
+  default. Pure and tested.
 - `scripts/proxies.ts` — `npm run proxies`, the first thing to run on the box.
 - `src/app/api/assess/route.ts` — the model endpoint.
 - `src/app/api/reports/route.ts` — the crime layer's storage.
@@ -39,15 +41,60 @@ short list of things that will bite you while editing.
 - `src/components/` — the map, the planner, the filters, the comparison, the
   search box, the safety panel.
 
-Tiles, routing, search and the OSM query are fetched by the BROWSER **by
-default**. That is why a proxy configured on the server does nothing for them
-unless the forwarder below is switched on.
+Tiles, routing, search and the OSM query are asked for by the browser but go
+**through this server by default** — `/api/osm/*`, resolved in
+`src/lib/endpoints.ts`. That is what makes a proxy configured on the server
+reach them at all.
 
 **The API routes each exist for a reason the browser cannot do itself:** the
 model cannot be called from the browser (the LAN box is unreachable from a
 phone, and the Liara key would be shipped to every visitor), the reports need a
 connection string, and `/api/osm/*` is for the deployment whose network cannot
 reach OpenStreetMap at all.
+
+## Everything except this app's own API goes through this server
+
+**`README.md` § "Where the browser asks for the map" is the spec, and
+`src/lib/endpoints.ts` is the one place that decides.**
+
+The domain answers from TWO machines. One can reach the internet; the other
+cannot reach it at all. The same build is deployed to both, and a visitor may
+be on a network that reaches neither. Sending the browser straight to
+`tile.openstreetmap.org` works on exactly one of those combinations — which is
+how the map came to be blank on a site that was otherwise up.
+
+So the four map services resolve to `/api/osm/*` by default, and this server
+fetches them: directly where that works, through the entry proxy and the
+fastest live exit where it does not. Both machines then behave identically from
+the browser's side.
+
+- **This app's OWN API is never forwarded.** `/api/assess` and `/api/reports`
+  are same-origin calls to the box that served the page. There is nothing to
+  reach around, and putting a proxy chain in front of a loopback call adds two
+  hops and a pool of failure modes to something that cannot fail that way.
+  `SERVICES` in `osm-forward.ts` is a fixed table holding neither of them, so
+  `/api/osm/assess` is a 404; `OWN_API` in `endpoints.ts` says it from the other
+  side, and `test/endpoints.test.ts` pins that the two never overlap.
+- **`NEXT_PUBLIC_*` must be written out STATICALLY.** `process.env.NEXT_PUBLIC_X`
+  is substituted textually at build time; `process.env[name]` is not rewritten
+  and arrives in the browser as `undefined`. That is why `endpoints.ts` lists
+  the four by hand into a record rather than looking them up by service name —
+  a lookup would silently disable every override.
+- **`resolve()` is pure and the module-level reads are the only impure part.**
+  Order: an explicit `NEXT_PUBLIC_<SERVICE>_URL` (point at your own OSRM), then
+  `NEXT_PUBLIC_OSM_DIRECT=1` (browser goes straight out, the old behaviour),
+  then the forwarder.
+- **A 502 from `/api/osm/*` is THIS SERVER, not OpenStreetMap.** It means
+  nothing it tried got out. `forwarderFailure()` turns it into a sentence that
+  names the right machine and points at `/api/osm/status`; reporting it as
+  "OpenStreetMap answered 502" sends whoever is debugging to the wrong box.
+- **The fastest exit is already what the pool hands out.** `rank()` sorts
+  known-good first and fastest-first within that, and `sweep()` probes in the
+  background so a visitor never waits on a dead proxy to discover it is dead.
+  There is nothing to add for "use the fastest one".
+- **The honest cost:** every tile now passes through this server. The forwarder
+  caches them for a week (`public, max-age=604800, immutable`), and a blank
+  basemap is the worst failure this page has.
 
 ## The forwarder, and the two-proxy chain
 
@@ -426,6 +473,15 @@ can act on by walking a different way), and is the same data OSRM routed on.
   them and still gets a 400.
 - **`[[...path]]`, two brackets.** A single-bracket catch-all does not match
   `/api/osm/overpass` itself, and that bare path is where the client POSTs.
+- **A forwarded path segment must keep its sub-delims.** OSRM takes its
+  coordinates as ONE segment, `lon,lat;lon,lat`, and parses that segment itself
+  rather than letting a URL library decode it first. `encodeURIComponent` turns
+  it into `4.89%2C52.37%3B4.90%2C52.38` and OSRM answers 400 — so forwarded
+  tiles and search kept working while routing did not, which reads as "routing
+  is broken" rather than as an encoding bug. `safeSegment` encodes only what is
+  not `pchar`.
+- **`/api/assess` and `/api/reports` are never routed through `/api/osm/*`.**
+  Same-origin already; there is nothing to reach around.
 
 ## Toolchain constraints
 

@@ -9,15 +9,20 @@
  * dark, and the one you can act on by walking a different way), and is the same
  * data OSRM routed on — so the route and the read agree about the world.
  *
- * Queried from the BROWSER, like the tiles and the routing. The server is not
- * on the path for any of it.
+ * Asked for by the browser, but THROUGH THIS SERVER by default — `/api/osm/*`,
+ * which goes out directly when it can and through the proxy chain when it
+ * cannot. See `endpoints.ts` for why that is the default: the domain answers
+ * from two machines and only one of them can reach OpenStreetMap.
+ *
+ * `options.base` still takes whatever you give it, so the parsing below is
+ * testable without a network and a self-hosted Overpass is one variable away.
  */
 
+import { endpoint, forwarderFailure, unreachableMessage } from "./endpoints.ts";
 import { distanceM, distanceToPathM, pathLengthM, samplePath } from "./geo.ts";
 import type { LatLng } from "./osrm.ts";
 
-export const DEFAULT_OVERPASS =
-  process.env.NEXT_PUBLIC_OVERPASS_URL ?? "https://overpass-api.de/api/interpreter";
+export const DEFAULT_OVERPASS = endpoint("overpass");
 
 /** How far off the line something still counts as being on it. */
 const ON_ROUTE_M = 20;
@@ -381,6 +386,8 @@ export async function fetchFacts(
         error: "OpenStreetMap's query service timed out on this route. It is busy — try again, or try a shorter route.",
       };
     }
+    const ours = forwarderFailure("overpass", response.status);
+    if (ours) return { ok: false, error: ours };
     if (!response.ok) {
       return { ok: false, error: `OpenStreetMap's query service answered ${response.status}.` };
     }
@@ -394,6 +401,6 @@ export async function fetchFacts(
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, error: "cancelled" };
     }
-    return { ok: false, error: "Could not reach OpenStreetMap's query service from this browser." };
+    return { ok: false, error: unreachableMessage("overpass", "OpenStreetMap's query service") };
   }
 }

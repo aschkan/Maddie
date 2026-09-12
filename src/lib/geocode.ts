@@ -7,18 +7,17 @@
  * Bursting past that limit gets an IP blocked, not throttled.
  */
 
+import { endpoint, forwarderFailure } from "./endpoints.ts";
 import type { LatLng } from "./osrm.ts";
 
 /**
- * Nominatim, or this server standing in front of it.
- *
- * Set `NEXT_PUBLIC_NOMINATIM_URL=/api/osm/nominatim` and the search goes out
- * through the server instead of from the browser — which is the only thing
- * that works on a network the browser cannot get out of. See
- * `src/app/api/osm/[service]/[...path]/route.ts`.
+ * This server standing in front of Nominatim — `/api/osm/nominatim`, the
+ * default. It is the only arrangement that works on a network the browser
+ * cannot get out of, and this app is deployed behind two of them. Set
+ * `NEXT_PUBLIC_NOMINATIM_URL` to name a different one, or
+ * `NEXT_PUBLIC_OSM_DIRECT=1` to go straight out; see `endpoints.ts`.
  */
-export const DEFAULT_NOMINATIM =
-  process.env.NEXT_PUBLIC_NOMINATIM_URL ?? "https://nominatim.openstreetmap.org";
+export const DEFAULT_NOMINATIM = endpoint("nominatim");
 
 export interface Place {
   label: string;
@@ -86,6 +85,8 @@ export async function searchPlaces(
     if (response.status === 429) {
       return { places: [], error: "Address search is rate limited just now — type more slowly, or click the map." };
     }
+    const ours = forwarderFailure("nominatim", response.status);
+    if (ours) return { places: [], error: ours };
     if (!response.ok) {
       return { places: [], error: `Address search answered ${response.status}.` };
     }
