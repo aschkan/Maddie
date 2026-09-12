@@ -123,7 +123,7 @@ export function loadHops(): Hop[] {
   }
 }
 
-/** What is known about the entry proxy, which is checked on its own. */
+/** What is known about one link, checked on its own rather than inferred. */
 export interface EntryState {
   /** null until it has been checked. */
   ok: boolean | null;
@@ -135,6 +135,16 @@ export interface EntryState {
 export class ProxyPool {
   entry: Hop | null;
   entryState: EntryState;
+  /**
+   * Whether this server can reach OpenStreetMap with no proxy at all.
+   *
+   * The two machines this is deployed on differ in exactly this, and it is
+   * worth knowing rather than assuming in either direction: the one that can
+   * get out should not be sending every tile through a stranger's proxy, and
+   * the one that cannot should not be spending a timeout per request finding
+   * that out again.
+   */
+  directState: EntryState;
   states: HopState[];
   probeUrl: string;
   timeoutMs: number;
@@ -150,6 +160,7 @@ export class ProxyPool {
   constructor() {
     this.entry = parseHop(process.env.OSM_PROXY_ENTRY ?? "");
     this.entryState = { ok: null, lastError: null, lastCheck: 0, latencyMs: null };
+    this.directState = { ok: null, lastError: null, lastCheck: 0, latencyMs: null };
     this.states = loadHops().map((hop) => ({
       hop, ok: null, latencyMs: null, lastProbe: 0, lastError: null,
       failures: 0, restingUntil: 0, inFlight: false, successes: 0,
@@ -226,7 +237,7 @@ export class ProxyPool {
    *
    * This exists because the answer used to be buried. With the entry down,
    * every one of 649 hops failed with the same sentence — "no TCP connection
-   * to 192.168.11.165:2000" — and the status page reported `working: 0` and
+   * to the LAN entry proxy" — and the status page reported `working: 0` and
    * eight identical sample failures, which reads as "the proxy list is dead"
    * when the list was never tried. One connect, up front, names the machine
    * that is actually unreachable.
@@ -256,6 +267,51 @@ export class ProxyPool {
       };
       return false;
     }
+  }
+
+  /**
+   * Can this server just fetch it? One probe, no proxy in the way.
+   *
+   * Run on every sweep, so the answer is usually known before a visitor asks
+   * for anything.
+   */
+  async checkDirect(): Promise<boolean> {
+    const started = Date.now();
+    try {
+      const response = await requestThrough(this.probeUrl, {
+        entry: null,
+        hop: null,
+        timeoutMs: this.entryTimeoutMs,
+        headers: { "User-Agent": USER_AGENT },
+      });
+      const ok = response.status >= 200 && response.status < 400;
+      this.directState = {
+        ok,
+        lastError: ok ? null : `probe answered ${response.status}`,
+        lastCheck: started,
+        latencyMs: ok ? Date.now() - started : null,
+      };
+      return ok;
+    } catch (error) {
+      this.directState = {
+        ok: false,
+        lastError: (error instanceof Error ? error.message : "failed").slice(0, 200),
+        lastCheck: started,
+        latencyMs: null,
+      };
+      return false;
+    }
+  }
+
+  /**
+   * Should a request try going out with no proxy first?
+   *
+   * Only when that has actually been shown to work. `null` — not yet probed —
+   * means no, because on the blocked machine an unproven "maybe" costs a full
+   * timeout on every request until the sweep gets round to it.
+   */
+  get directWorks(): boolean {
+    return this.directState.ok === true;
   }
 
   /**
@@ -323,7 +379,7 @@ export class ProxyPool {
      * is down, `entryFor()` now returns null and the sweep goes on WITHOUT it,
      * which is the only way the provided list gets tried at all.
      */
-    await this.checkEntry();
+    await Promise.all([this.checkEntry(), this.checkDirect()]);
 
     // Known-good first, so a sweep that is interrupted has still refreshed the
     // hops the app is actually using.
@@ -444,6 +500,7 @@ export class ProxyPool {
    * left to whoever was reading. This says it.
    */
   problem(): string | null {
+    if (this.directWorks) return null;   // nothing to route around
     if (this.entry && this.entryState.ok === false) {
       return (
         `The entry proxy ${this.entry.label} cannot be reached from this server ` +
@@ -456,7 +513,10 @@ export class ProxyPool {
       return "No proxies are configured. This server is fetching OpenStreetMap directly.";
     }
     if (this.states.length > 0 && this.states.every((state) => state.ok === false)) {
-      return "Every proxy in the list has failed. Nothing here can reach OpenStreetMap.";
+      return (
+        "This server cannot reach OpenStreetMap directly and every proxy in the list has " +
+        "failed. Set OSM_PROXY_LIST to a proxy that works from here."
+      );
     }
     return null;
   }
@@ -466,6 +526,8 @@ export class ProxyPool {
     entryOk: boolean | null;
     entryError: string | null;
     bypassingEntry: boolean;
+    directOk: boolean | null;
+    directError: string | null;
     problem: string | null;
     total: number;
     working: number;
@@ -484,6 +546,9 @@ export class ProxyPool {
       entryOk: this.entryState.ok,
       entryError: this.entryState.lastError,
       bypassingEntry: this.bypassingEntry,
+      // Whether a proxy is needed at all, which is the first thing to know.
+      directOk: this.directState.ok,
+      directError: this.directState.lastError,
       problem: this.problem(),
       total: this.states.length,
       working: this.states.filter((state) => state.ok === true).length,

@@ -14,9 +14,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const proxies = pool();
-  // Check the entry on the way past: it is one TCP connect to a LAN address,
-  // and it is the answer most of the time this page is being read.
-  await proxies.checkEntry();
+  // Both links, fresh, on the way past. Whether this server needs a proxy at
+  // all is the first question, and the entry is one TCP connect — answering
+  // either from a stale sweep is how this page came to say `working: 0` about
+  // a list it had never tried.
+  await Promise.all([proxies.checkEntry(), proxies.checkDirect()]);
   const summary = proxies.summary();
 
   const failures = proxies.states

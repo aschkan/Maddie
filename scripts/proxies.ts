@@ -31,9 +31,9 @@ async function main(): Promise<number> {
   const proxies = new ProxyPool();
 
   if (!proxies.entry) {
-    console.log("OSM_PROXY_ENTRY is not set, so hops are probed DIRECTLY.");
-    console.log("On the deployment this was written for that is not the arrangement:");
-    console.log("  OSM_PROXY_ENTRY=192.168.11.165:2000");
+    console.log("entry proxy : none — hops are reached directly, which is the usual case.");
+    console.log("              Set OSM_PROXY_ENTRY only when the proxies in the list are");
+    console.log("              themselves reachable solely through another one.");
   } else {
     console.log(`entry proxy : ${proxies.entry.label}`);
   }

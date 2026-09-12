@@ -71,11 +71,18 @@ test("a comma or newline list is read too, and duplicates collapse", () => {
 });
 
 test("the committed proxy list parses to something usable", () => {
+  // It holds proxies known to work rather than everything a scrape found.
+  // 649 scraped entries were committed once; a full sweep put every one of
+  // them at dead, and probing them cost a few minutes of every boot to learn
+  // it again. What matters here is that the file is well formed and not empty
+  // — how many are in it is a deployment's business, not this test's.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const raw = fs.readFileSync(path.join(here, "..", "proxies.json"), "utf8");
   const hops = parseHopList(raw);
-  assert.ok(hops.length > 500, `expected the full list, got ${hops.length}`);
+  assert.ok(hops.length >= 1, "the committed list parses to nothing");
   assert.ok(hops.every((hop) => hop.port > 0 && hop.host.length > 0));
+  // No duplicates: the pool keys everything by label.
+  assert.equal(new Set(hops.map((hop) => hop.label)).size, hops.length);
 });
 
 /* ------------------------------ the protocol ------------------------------- */

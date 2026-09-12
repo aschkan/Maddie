@@ -109,11 +109,31 @@ nothing else — that was the requirement, and it is also what keeps this
 server's map queries out of the LAN proxy's logs. `test/proxy-chain.test.ts`
 asserts the ORDER of the two CONNECTs for exactly that reason.
 
+**Direct first, when direct has been shown to work.** `checkDirect()` probes
+it on every sweep and the forwarder uses it only when `directWorks` is true.
+The two machines this is deployed on differ in exactly this: the one with
+working internet must not send every tile through a public proxy, and the one
+without must not spend a timeout per request rediscovering that it is blocked.
+A probe that has not run yet counts as "no", for the second reason.
+
+**`proxies.json` holds proxies known to WORK, not everything a scrape found.**
+It held 649 scraped entries; a full sweep put every one at dead, and probing
+them cost minutes of each boot to learn it again — while the status page
+reported `total: 649` as though that were reassuring. `npm run proxies`
+re-probes; `OSM_PROXY_LIST` overrides the file entirely.
+
+**`OSM_PROXY_ENTRY` is rarely needed and is not the normal arrangement.** It is
+only for a network where the proxies in the list are reachable solely through
+another one. Do not write a specific LAN address into this repo as though it
+were the default — it was, and when that machine went away every example, the
+scraper's help text and the failure message pointed at a box that no longer
+existed.
+
 **A dead ENTRY must not condemn the list.** Everything goes through the entry
 when one is configured, so an unreachable entry fails every hop with the same
 sentence — and the pool used to mark all of them dead and rest them. A real
 status page read `total: 649, working: 0, resting: 536` with eight identical
-failures, all of them "no TCP connection to 192.168.11.165:2000": hundreds of
+failures, all of them "no TCP connection to <the entry proxy>": hundreds of
 proxies blacklisted for a fault none of them had, about a list that had never
 been tried. The rules now:
 

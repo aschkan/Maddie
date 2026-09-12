@@ -210,29 +210,49 @@ The upstream for each is fixed in a table in `src/lib/osm-forward.ts` and cannot
 be named by the request — a forwarder whose target comes from a query parameter
 is an open proxy.
 
-### Two proxies in a row
+### Getting out when this server's own internet is filtered
 
-For a server whose own internet is filtered, where one proxy is reachable and
-the proxies that can actually get out are only reachable *through* it:
+The forwarder tries to fetch OpenStreetMap **directly first**, and only when
+that has actually been shown to work — it is probed on a schedule, so the
+machine that cannot get out never pays a timeout to rediscover that, and the
+machine that can does not send every tile through somebody else's box. When
+direct does not work, it goes through a proxy:
+
+```
+browser → this server → a proxy from OSM_PROXY_LIST → OpenStreetMap
+```
+
+`proxies.json` ships with one proxy that works from every network this is
+deployed on, so there is nothing to configure. To use your own:
+
+```bash
+OSM_PROXY_LIST=176.111.37.5:39811              # comma-separated, or JSON
+OSM_PROXY_LIST_FILE=./proxies.json             # the default
+```
+
+That file used to hold 649 scraped proxies. A full sweep put every one of them
+at dead, and probing them cost a few minutes of every boot to learn it again,
+so it now holds what is known to work. `npm run proxies` re-probes whatever is
+configured.
+
+#### A second hop in front of the list — rarely needed
+
+Only for a network where the proxies in the list are themselves reachable
+solely *through* one other proxy:
 
 ```
 browser → this server → OSM_PROXY_ENTRY → one of OSM_PROXY_LIST → OpenStreetMap
 ```
 
-```bash
-OSM_PROXY_ENTRY=192.168.11.165:2000
-OSM_PROXY_LIST_FILE=proxies.json      # the default; a scraper's JSON is fine
-```
-
-The entry proxy is never the exit on its own — it is the way in to the second
-hop and nothing else. Both are plain HTTP proxies, so this is two `CONNECT`s
-stacked with TLS on top; `src/lib/proxy-chain.ts` has the detail and the tests
-stand up two real proxies on loopback to prove it.
+Leave `OSM_PROXY_ENTRY` unset unless that is your situation. Both are plain
+HTTP proxies, so this is two `CONNECT`s stacked with TLS on top;
+`src/lib/proxy-chain.ts` has the detail and the tests stand up two real proxies
+on loopback to prove it.
 
 The list is probed in the background — the real chain, to a real upstream — and
 ranked working-first, fastest-first, with a failing hop resting for longer each
-consecutive time. Nothing trusts the list's own metadata: the 649-entry list
-this was built for claims `https: false` for every entry, which taken literally
+consecutive time. Nothing trusts a list's own metadata: the scraped list this
+was built for claimed `https: false` for every entry, which taken literally
 would mean not one can tunnel.
 
 ```bash
@@ -258,10 +278,10 @@ when in truth not one of them had been contacted.
 So the entry is checked on its own, with a single TCP connect, and
 `/api/osm/status` leads with a sentence rather than a table:
 
-> The entry proxy 192.168.11.165:2000 cannot be reached from this server (no
-> TCP connection within 4000ms). Every exit is being tried directly instead —
-> check that this machine is on the same network as 192.168.11.165, and that
-> something is listening on port 2000.
+> The entry proxy 198.51.100.7:2000 cannot be reached from this server (no TCP
+> connection within 4000ms). Every exit is being tried directly instead — check
+> that this machine is on the same network as 198.51.100.7, and that something
+> is listening on port 2000.
 
 Two things follow from that. A failure to reach the entry is never held against
 an exit, so the list is not blacklisted for somebody else's fault. And the

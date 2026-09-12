@@ -68,6 +68,26 @@ async function forward(request: Request, service: Service, parts: string[]): Pro
     });
   };
 
+  /*
+   * Straight out first, when that has been SHOWN to work.
+   *
+   * The two machines this is deployed on differ in exactly this. Sending every
+   * tile from the one that has working internet through a public proxy would
+   * be slower, less private and more fragile than just fetching it, and the
+   * proxy list exists for the machine that cannot. `directWorks` is only true
+   * after a probe succeeded, so the blocked machine never pays a timeout to
+   * rediscover that it is blocked.
+   */
+  if (proxies.configured && proxies.directWorks) {
+    try {
+      const response = await send(null, 0);
+      return reply(response.status, response.headers, response.body, service, "direct", 1);
+    } catch {
+      // Fall through to the proxies — the probe is a few minutes old at most,
+      // but "it worked last sweep" is not a promise about this second.
+    }
+  }
+
   // No chain configured at all: straight out, exactly as the browser would
   // have done. This route is then only a same-origin hop, which is still worth
   // having when it is the VISITOR's network doing the blocking.

@@ -255,12 +255,12 @@ test("the first exit that answers is the one used, and it is named", async () =>
 
 test("an entry that cannot be reached is not the exit's fault", async () => {
   // The bug this pins, from a real status page: every one of 649 hops failed
-  // with "no TCP connection to 192.168.11.165:2000", all 649 were marked dead
+  // with "no TCP connection to <the entry proxy>", all 649 were marked dead
   // and 536 were left resting — for a fault none of them had, through a LAN
   // proxy none of them was ever reached through. The list then reported
   // `working: 0` about proxies it had never tried.
   const pool = new ProxyPool();
-  pool.entry = { host: "192.168.11.165", port: 2000, label: "192.168.11.165:2000" };
+  pool.entry = { host: "198.51.100.7", port: 2000, label: "198.51.100.7:2000" };
   pool.states = [state("1.1.1.1:8080")];
   // An unreachable LAN address would otherwise burn the nine-second default.
   pool.probeTimeoutMs = 400;
@@ -277,12 +277,12 @@ test("an entry that cannot be reached is not the exit's fault", async () => {
 
   // And what WAS learned is recorded against the thing that failed.
   assert.equal(pool.entryState.ok, false);
-  assert.match(pool.entryState.lastError ?? "", /192\.168\.11\.165:2000/);
+  assert.match(pool.entryState.lastError ?? "", /198\.51\.100\.7:2000/);
 });
 
 test("and the entry is reported as the thing that is down", async () => {
   const pool = new ProxyPool();
-  pool.entry = { host: "192.168.11.165", port: 2000, label: "192.168.11.165:2000" };
+  pool.entry = { host: "198.51.100.7", port: 2000, label: "198.51.100.7:2000" };
   pool.states = [state("1.1.1.1:8080")];
   pool.entryTimeoutMs = 400;
 
@@ -291,7 +291,7 @@ test("and the entry is reported as the thing that is down", async () => {
 
   const said = pool.problem();
   assert.ok(said, "a dead entry is a problem worth one sentence");
-  assert.match(said, /192\.168\.11\.165:2000/);
+  assert.match(said, /198\.51\.100\.7:2000/);
   assert.match(said, /cannot be reached from this server/i);
   // And it says what happens next, because "working: 0" did not.
   assert.match(said, /tried directly instead/i);
@@ -306,10 +306,10 @@ test("with the entry down, the provided list is used DIRECTLY", async () => {
   // The whole point. An entry that is the only way out is an assumption, and
   // enforcing it against a dead entry turns 649 proxies into none.
   const pool = new ProxyPool();
-  pool.entry = { host: "192.168.11.165", port: 2000, label: "192.168.11.165:2000" };
+  pool.entry = { host: "198.51.100.7", port: 2000, label: "198.51.100.7:2000" };
   pool.states = [state("1.1.1.1:8080")];
 
-  assert.equal(pool.entryFor()?.label, "192.168.11.165:2000", "used while it is believed up");
+  assert.equal(pool.entryFor()?.label, "198.51.100.7:2000", "used while it is believed up");
 
   pool.entryState = { ok: false, lastError: "no TCP connection", lastCheck: Date.now(), latencyMs: null };
   assert.equal(pool.entryFor(), null, "and stepped over once it is known down");
