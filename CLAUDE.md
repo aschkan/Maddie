@@ -395,6 +395,147 @@ The seed writes visibly placeholder notes. Invented first-person testimony is
 exactly what the real interviews will supply, and a convincing fake of it in the
 same collection is how a fake ends up quoted as a finding.
 
+## The box this runs on — the platform reverse proxy
+
+This app does not run alone. It is one of nine platforms on a pair of servers
+sitting behind the [platform reverse proxy][proxy-repo], which owns :443, routes
+by hostname, and owns this app's process. **Read that repo's `README.md` and
+`CLAUDE.md` before changing anything about how this app boots, reads
+configuration, or talks to its database** — most of what looks like a local
+choice here is actually a contract with that system.
+
+[proxy-repo]: https://github.com/aschkan/platform-reverse-proxy
+
+### Where this app sits
+
+- It listens on **plain HTTP on 127.0.0.1:8087**. TLS is terminated by the proxy
+  in front of it. Never bind `0.0.0.0`, and never take :443 — that port belongs to
+  the proxy, and whichever process loses the race takes *every* site on the box
+  down with it, not just this one.
+- It runs under pm2 as **`platform-maddie`**. That name is how the proxy finds and
+  adopts it; renaming it gives two processes fighting over one port, each
+  invisible to the other.
+- The proxy passes the **original `Host`** through untouched. Tenant-subdomain
+  logic depends on it.
+- Its public name is **`maddie.arsaces.ir`**, and the certificate for it (and its
+  wildcard) is issued by the panel's 🔒 SSL button, not by anything here.
+
+### The contract: this app's entry in `platforms.json`
+
+That file, in the proxy repo, is the single source of truth for what runs on the
+box. This app's entry declares:
+
+- `"serverDir": "."` — the app lives in the repo root. Every `npm` command the
+  panel runs, and the `.env` it reads, are resolved from there.
+- `"appPort": 8087` — the loopback port. It is forced into the environment at
+  launch, so the app must read it rather than hardcode one.
+- `"domain": "maddie.arsaces.ir"` — what the proxy routes to this app.
+- `"secrets": []` — declared NONE, and the empty array is the declaration.
+  Never-declared (`secrets` absent) means "nobody has looked yet" and reads
+  differently in the panel. Do not "tidy" the empty array away.
+- No `"operator"` key — this app does not serve `/api/operator/*`, so the panel
+  REFUSES to write it an `OPERATOR_KEY` rather than leaving a key nothing reads.
+
+A change in this app that needs a new variable, a new port, or a new domain is a
+change to that file too. It is not optional and nothing here will tell you.
+
+### How it is started
+
+`"type": "next"`, so the proxy runs this app's OWN
+`node_modules/next/dist/bin/next start -p 8087 -H 127.0.0.1`. It does not use
+`package.json` "start" — those scripts routinely hardcode a dev port. It also sets
+`PORT` and `HOSTNAME` so anything reading those agrees with the bound port, and it
+refuses to start at all without a `.next` build.
+
+The environment it gets is built **fresh from this checkout's own `.env`** at
+`platforms/maddie/.env`, plus four values the proxy forces:
+`NODE_ENV=production`, `BEHIND_PROXY=true`, `APP_PORT`, `HOST=127.0.0.1`.
+
+There is **one env file** and it is this app's own. There used to be a second
+"orchestrator override" merged on top at spawn time, which meant every shared
+value had two homes and a value set in one and not the other put the app and the
+proxy into permanent disagreement. Do not reintroduce a second layer.
+- **`NEXT_PUBLIC_*` is inlined at BUILD time.** Changing one of those in the env
+  editor and restarting does nothing — it needs a rebuild, which is what the
+  panel's Update button does. The order is always env → build → run.
+
+### The buttons, and exactly what each one runs here
+
+| button | what it does to this app |
+|---|---|
+| **Start** | clone if needed → install → build → run under pm2 |
+| **Update** | `git pull` + reinstall + rebuild + restart |
+| **🔑 Fix secrets** | generates only the keys declared above, into this checkout's `.env`, **filling in and never rotating** |
+| **💣 Reseed DB** | `npm run seed -- --force` in the repo root, with this `.env` merged in |
+| **🔒 SSL** | Let's Encrypt over DNS-01 for `maddie.arsaces.ir` — a human publishes the TXT records |
+| **env editor** | edits `platforms/maddie/.env` and restarts this app |
+| **⚙ Apply example env** | replaces that file with `.env.example` wholesale (keeps `.env.bak`) |
+
+Two of those have hurt this deployment and are worth knowing before you press
+them. **💣 Reseed DB is destructive by default** — `--force` beats every keep
+flag and every `SEED_*` env var, which is the whole point of one button meaning
+one thing everywhere. And **⚙ Apply example env replaces host-specific values
+with the generic defaults in `.env.example`**, including the database URI; it now
+reports which values it changed, but the example file is not a safe thing to
+apply to a live box without reading that report.
+
+### Two servers, and what that means for this app
+
+Both servers answer for every domain, and **every DNS name resolves to both
+IPs**. So this app runs twice, once per box, and the two copies must agree:
+
+| what | how it is shared |
+|---|---|
+| code + configuration | the panel's mirror — a Start/Stop/Restart/Update or env save fans out to both |
+| the database | one MongoDB replica set spanning both boxes, over a TCP tunnel the proxy runs in-process |
+| uploaded files | `scripts/sync-uploads.sh` on the proxy — push and pull, never `--delete` |
+| certificates | rsync from one issuing box to the other, plus an hourly timer |
+| taking over | `lib/failover.js` promotes the survivor when the other box is really gone |
+
+The one that reaches into this repo:
+
+- **`MONGO_URI` must name BOTH members and the replica set**, e.g.
+  `mongodb://parsa.rs:27017,aschkan.rs:27017/maddie?replicaSet=rs0`. The driver then
+  finds the primary and follows it when it moves, so this app keeps writing
+  correctly through a failover with no restart.
+- **A single `127.0.0.1` host is the failure to watch for.** It connects, it
+  starts, it serves — and each box quietly writes to its own copy, which is
+  exactly the split the replica set exists to end. It has happened here twice.
+  `scripts/set-mongo-uri.js` in the proxy repo rewrites all nine platforms and
+  reports any that are wrong; the panel's Servers tab flags them per machine.
+- **Never drop the database name** from the URI. Without it the driver picks
+  `test`, and the app connects and serves an empty site.
+
+### Traps that have actually bitten this system
+
+- **pm2 replays a saved environment, and dotenv will not override what is
+  already set.** Editing `.env` and running `pm2 restart` — even with
+  `--update-env`, which re-reads the *shell's* environment and not the file —
+  can leave the process running the old value indefinitely, with the file in
+  front of you saying something else. It has done this three times here
+  (`ADMIN_PASS`, `MONGO_URI`, `OSM_PROXY_ENTRY`). The fix is
+  `pm2 delete platform-maddie` so the dump forgets it, then Start from the panel.
+  The platform card now shows **⚠ n env key(s) stale in the process** when it
+  happens.
+- **Redis is never required.** Nothing in this app's seed, build or boot may
+  depend on a cache server being up — that rule holds across every platform on
+  the box. Using one for caching is fine; needing one is not.
+- **The seed contract is owned by the proxy repo**, not by this one. Read
+  README § "The seed contract" there before changing this app's seed.
+- **Secrets are filled in, never rotated.** A regenerated signing key logs every
+  user out at once; a regenerated encryption key makes stored data permanently
+  unreadable.
+
+### Where to read more
+
+Everything above is the short version. In the proxy repo:
+
+- `README.md` § **"Both servers live"** — the five kinds of shared state, how a
+  real failure plays out, and the commands that verify the whole thing.
+- `README.md` § **"The seed contract"** — what `npm run seed` must do here.
+- `README.md` § **"How secrets work"** and § **"SSL"** — the specs for both.
+- `CLAUDE.md` — the same list of traps, from the proxy's side.
+
 ## Secrets and SSL — owned by the reverse proxy
 
 Both are run from the [platform reverse proxy][proxy]'s panel, and its README is the
