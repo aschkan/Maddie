@@ -14,13 +14,7 @@ import type { Route } from "@/lib/osrm";
 import type { Assessment } from "@/lib/score";
 import type { Comparison } from "@/lib/compare";
 import { formatDistance, formatDuration } from "@/lib/format";
-
-const VERDICT_LABEL: Record<Assessment["verdict"], string> = {
-  good: "Looks fine",
-  fair: "Mixed",
-  poor: "Take care",
-  unknown: "Not enough map data",
-};
+import { VERDICT_COLOUR, VERDICT_LABEL } from "@/lib/verdict";
 
 interface Props {
   routes: Route[];
@@ -38,7 +32,7 @@ export default function RouteChoices({
   if (routes.length === 0) return null;
 
   return (
-    <div className="choices">
+    <div className="group choices">
       <h2>
         {routes.length === 1 ? "One route" : `${routes.length} ways round`}
         {done < routes.length && <small> · reading {done + 1} of {routes.length}…</small>}
@@ -57,6 +51,13 @@ export default function RouteChoices({
                 aria-pressed={index === selected}
               >
                 <span className="choice-head">
+                  {/* The same colour the map draws this route's stretches in,
+                      so the list and the line are one answer, not two. */}
+                  <span
+                    className="choice-dot"
+                    style={{ background: VERDICT_COLOUR[assessment?.verdict ?? "unknown"] }}
+                    aria-hidden="true"
+                  />
                   <span className="choice-name">Route {index + 1}</span>
                   {preferred && <span className="tag preferred">Preferred</span>}
                   {comparison.fastest === index && routes.length > 1 && (

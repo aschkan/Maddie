@@ -15,12 +15,22 @@
 
 import { useEffect, useState } from "react";
 
-import { fetchFacts, type RouteFacts } from "@/lib/overpass";
+import { fetchFacts, type RouteFacts, type SampleRead } from "@/lib/overpass";
 import type { Route } from "@/lib/osrm";
 
 export interface RouteFactsState {
   /** One slot per route, in the same order. Null until that route is read. */
   facts: (RouteFacts | null)[];
+  /**
+   * The per-point reads behind those counts, one slot per route.
+   *
+   * Kept beside the totals rather than recomputed: `segments.ts` cuts these
+   * into stretches to colour the line and name the worst part of it, and the
+   * matching of points to streets they stand on is the expensive part of the
+   * whole read. Throwing it away and doing it again would double that cost for
+   * numbers we already have.
+   */
+  reads: (SampleRead[] | null)[];
   /** How many have come back — for "reading route 2 of 3". */
   done: number;
   error: string | null;
@@ -32,7 +42,7 @@ function identity(routes: Route[]): string {
 }
 
 export function useRouteFacts(routes: Route[]): RouteFactsState {
-  const [state, setState] = useState<RouteFactsState>({ facts: [], done: 0, error: null });
+  const [state, setState] = useState<RouteFactsState>({ facts: [], reads: [], done: 0, error: null });
   const key = identity(routes);
 
   useEffect(() => {
@@ -42,12 +52,13 @@ export function useRouteFacts(routes: Route[]): RouteFactsState {
     // Compiler lint rejects a setState reached synchronously from an effect.
     void (async () => {
       if (routes.length === 0) {
-        setState({ facts: [], done: 0, error: null });
+        setState({ facts: [], reads: [], done: 0, error: null });
         return;
       }
 
       const facts: (RouteFacts | null)[] = routes.map(() => null);
-      setState({ facts: [...facts], done: 0, error: null });
+      const reads: (SampleRead[] | null)[] = routes.map(() => null);
+      setState({ facts: [...facts], reads: [...reads], done: 0, error: null });
 
       for (let index = 0; index < routes.length; index++) {
         const route = routes[index];
@@ -57,11 +68,12 @@ export function useRouteFacts(routes: Route[]): RouteFactsState {
 
         if (found.ok) {
           facts[index] = found.facts;
-          setState({ facts: [...facts], done: index + 1, error: null });
+          reads[index] = found.reads;
+          setState({ facts: [...facts], reads: [...reads], done: index + 1, error: null });
         } else if (found.error !== "cancelled") {
           // A failure on one route is not a failure of the page: the ones
           // already read stay on screen, and the reason is said once.
-          setState({ facts: [...facts], done: index + 1, error: found.error });
+          setState({ facts: [...facts], reads: [...reads], done: index + 1, error: found.error });
         }
       }
     })();

@@ -13,7 +13,7 @@
  * on the path for any of it.
  */
 
-import { distanceToPathM, pathLengthM, samplePath } from "./geo.ts";
+import { distanceM, distanceToPathM, pathLengthM, samplePath } from "./geo.ts";
 import type { LatLng } from "./osrm.ts";
 
 export const DEFAULT_OVERPASS =
@@ -49,6 +49,52 @@ export interface RouteFacts {
   crossings: number;
   /** Tunnels and underpasses crossed. */
   tunnels: number;
+}
+
+/**
+ * What the map says at ONE point along the route.
+ *
+ * The aggregate counts below are these, summed. They are kept rather than
+ * folded away because a single number for a whole walk cannot say the useful
+ * thing: not "61/100", but "the dark part is the 400 m through the park".
+ * `segments.ts` re-sums them over sliding windows to get exactly that, and it
+ * costs nothing extra — every one of these was already computed on the way to
+ * the totals.
+ */
+export interface SampleRead {
+  point: LatLng;
+  /** Metres from the start of the route, so a window can be cut by distance. */
+  alongM: number;
+  /**
+   * What the street underfoot says about lighting.
+   *
+   * Three states, never two: most streets in most of the world are simply
+   * untagged, and reading "unknown" as "no" reports a gap in the map as a dark
+   * street.
+   */
+  lit: "yes" | "no" | "unknown";
+  footway: boolean;
+  green: boolean;
+  /**
+   * A key identifying the tunnel this point is inside, when it is in one.
+   *
+   * A key rather than a flag because tunnels are counted, not measured: twenty
+   * consecutive points under one underpass are one underpass, and the same
+   * de-duplication has to work over a window as it does over a route.
+   */
+  tunnelId?: string;
+  /** The street's name, where OSM has one. Used to name a bad stretch. */
+  street?: string;
+  /** Nodes nearest to this point, so a stretch can be counted on its own. */
+  lamps: number;
+  venues: number;
+  crossings: number;
+}
+
+/** The counts, and the points they were summed from. */
+export interface RouteRead {
+  facts: RouteFacts;
+  reads: SampleRead[];
 }
 
 interface OverpassElement {
@@ -136,18 +182,70 @@ const GREEN = (tags: Record<string, string>): boolean =>
 
 const FOOTWAY = /^(footway|path|pedestrian|steps|living_street)$/;
 
+/** Metres from the start of the route to each sample, in order. */
+function alongMetres(samples: LatLng[]): number[] {
+  const along: number[] = [];
+  let total = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const here = samples[i];
+    const previous = samples[i - 1];
+    if (i > 0 && here && previous) total += distanceM(previous, here);
+    along.push(total);
+  }
+  return along;
+}
+
+/**
+ * The sample a node belongs to: the nearest one.
+ *
+ * Nodes are counted against a POINT on the route rather than the route as a
+ * whole so that a stretch can be counted on its own — twelve cafes clustered at
+ * the far end are not frontage along the dark middle, and the aggregate could
+ * never tell the two apart.
+ */
+function nearestSample(point: LatLng, samples: LatLng[]): number {
+  let best = -1;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < samples.length; i++) {
+    const sample = samples[i];
+    if (!sample) continue;
+    const d = distanceM(point, sample);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
 /**
  * Turn Overpass elements into the numbers the score is built from.
  *
  * Deliberately deterministic and separate from any model: these are counts of
  * what the map says, and nothing here is a judgement. The judgement is applied
  * afterwards, to numbers that can be checked.
+ *
+ * Both resolutions come out of the one pass. The totals are what the score and
+ * the model are given; the per-point reads are what `segments.ts` re-sums to
+ * find the worst stretch. Computing them twice would mean two answers that can
+ * drift apart, and the second pass is not free — matching a point to the street
+ * underfoot is the expensive part of this whole app.
  */
-export function computeFacts(path: LatLng[], elements: OverpassElement[]): RouteFacts {
+export function readRoute(path: LatLng[], elements: OverpassElement[]): RouteRead {
   const samples = samplePath(path, SAMPLE_EVERY_M);
+  const along = alongMetres(samples);
 
   const highways: { tags: Record<string, string>; line: LatLng[] }[] = [];
   const greens: LatLng[][] = [];
+
+  const reads: SampleRead[] = samples.map((point, index) => ({
+    point,
+    alongM: along[index] ?? 0,
+    lit: "unknown",
+    footway: false,
+    green: false,
+    lamps: 0,
+    venues: 0,
+    crossings: 0,
+  }));
+
   let lamps = 0;
   let venues = 0;
   let crossings = 0;
@@ -159,12 +257,20 @@ export function computeFacts(path: LatLng[], elements: OverpassElement[]): Route
       if (typeof element.lat !== "number" || typeof element.lon !== "number") continue;
       const point = { lat: element.lat, lng: element.lon };
       const away = distanceToPathM(point, path);
+
+      let counted: "lamps" | "venues" | "crossings" | null = null;
       if (tags.highway === "street_lamp") {
-        if (away <= NEARBY_M) lamps++;
+        if (away <= NEARBY_M) { lamps++; counted = "lamps"; }
       } else if (tags.highway === "crossing") {
-        if (away <= ON_ROUTE_M) crossings++;
+        if (away <= ON_ROUTE_M) { crossings++; counted = "crossings"; }
       } else if (tags.amenity || tags.shop) {
-        if (away <= NEARBY_M) venues++;
+        if (away <= NEARBY_M) { venues++; counted = "venues"; }
+      }
+
+      if (counted) {
+        const index = nearestSample(point, samples);
+        const read = reads[index];
+        if (read) read[counted]++;
       }
       continue;
     }
@@ -184,7 +290,11 @@ export function computeFacts(path: LatLng[], elements: OverpassElement[]): Route
   let greenSamples = 0;
   const tunnelIds = new Set<string>();
 
-  for (const sample of samples) {
+  for (let index = 0; index < samples.length; index++) {
+    const sample = samples[index];
+    const read = reads[index];
+    if (!sample || !read) continue;
+
     // The street this sample is standing on: the nearest highway within
     // ON_ROUTE_M. Anything further away is a different street.
     let nearest: { tags: Record<string, string>; d: number } | null = null;
@@ -195,14 +305,19 @@ export function computeFacts(path: LatLng[], elements: OverpassElement[]): Route
 
     if (nearest) {
       const lit = nearest.tags.lit;
-      if (lit === "yes" || lit === "24/7" || lit === "sunset-sunrise") litSamples++;
-      else if (lit === "no") unlitSamples++;
+      if (lit === "yes" || lit === "24/7" || lit === "sunset-sunrise") { litSamples++; read.lit = "yes"; }
+      else if (lit === "no") { unlitSamples++; read.lit = "no"; }
       else unknownLitSamples++;
 
-      if (FOOTWAY.test(nearest.tags.highway ?? "")) footwaySamples++;
+      if (FOOTWAY.test(nearest.tags.highway ?? "")) { footwaySamples++; read.footway = true; }
       if (nearest.tags.tunnel && nearest.tags.tunnel !== "no") {
-        tunnelIds.add(`${nearest.tags.name ?? ""}:${nearest.tags.tunnel}`);
+        const id = `${nearest.tags.name ?? ""}:${nearest.tags.tunnel}`;
+        tunnelIds.add(id);
+        read.tunnelId = id;
       }
+      // The name is for saying WHICH stretch is the bad one. An unnamed way
+      // stays unnamed rather than being given a made-up label.
+      if (nearest.tags.name) read.street = nearest.tags.name;
     } else {
       unknownLitSamples++;
     }
@@ -210,31 +325,40 @@ export function computeFacts(path: LatLng[], elements: OverpassElement[]): Route
     for (const green of greens) {
       if (distanceToPathM(sample, green) <= ON_ROUTE_M) {
         greenSamples++;
+        read.green = true;
         break;
       }
     }
   }
 
   return {
-    lengthM: Math.round(pathLengthM(path)),
-    samples: samples.length,
-    litSamples,
-    unlitSamples,
-    unknownLitSamples,
-    footwaySamples,
-    greenSamples,
-    lamps,
-    venues,
-    crossings,
-    tunnels: tunnelIds.size,
+    reads,
+    facts: {
+      lengthM: Math.round(pathLengthM(path)),
+      samples: samples.length,
+      litSamples,
+      unlitSamples,
+      unknownLitSamples,
+      footwaySamples,
+      greenSamples,
+      lamps,
+      venues,
+      crossings,
+      tunnels: tunnelIds.size,
+    },
   };
+}
+
+/** Just the totals, for callers that have no use for the individual points. */
+export function computeFacts(path: LatLng[], elements: OverpassElement[]): RouteFacts {
+  return readRoute(path, elements).facts;
 }
 
 /** Ask Overpass. Never throws; the caller gets a reason instead. */
 export async function fetchFacts(
   path: LatLng[],
   options: { base?: string; signal?: AbortSignal } = {},
-): Promise<{ ok: true; facts: RouteFacts } | { ok: false; error: string }> {
+): Promise<{ ok: true; facts: RouteFacts; reads: SampleRead[] } | { ok: false; error: string }> {
   const query = overpassQuery(path);
   if (!query) return { ok: false, error: "No route to look at." };
 
@@ -264,7 +388,8 @@ export async function fetchFacts(
     if (!Array.isArray(body?.elements)) {
       return { ok: false, error: "OpenStreetMap sent something unreadable." };
     }
-    return { ok: true, facts: computeFacts(path, body.elements) };
+    const read = readRoute(path, body.elements);
+    return { ok: true, facts: read.facts, reads: read.reads };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, error: "cancelled" };
