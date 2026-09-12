@@ -304,6 +304,23 @@ The short version of [the full contract][ssl]:
 Nothing in this repo serves TLS itself — this app listens on plain HTTP on loopback
 and the proxy terminates TLS in front of it.
 
+### Which server it runs on
+
+The panel serves **both** machines. A selector next to its title chooses which
+one every button acts on — 🔒 SSL and its renew, 🔑 Fix secrets, 💣 Reseed DB,
+the process controls, the env editor. Leave it on *this server* and nothing
+changes; pick the peer and the same buttons run over there instead.
+
+That matters most for certificates, because **a certificate is per machine**.
+Let's Encrypt is not aware there are two servers: issuing on one leaves the
+other still serving the old certificate, or none. When both servers answer for
+this domain, issue or renew on each of them — switch the selector and press the
+button again.
+
+While a peer is selected the header names it and a banner says so under the
+tabs. The selection is deliberately forgotten on reload, so a panel opened fresh
+always acts on the machine serving it.
+
 ## What it is built on
 
 | Piece | Service | Key needed |
