@@ -10,11 +10,37 @@
  * Confidence is reported separately and honestly. Most streets in most of the
  * world carry no `lit` tag at all, and an unlit street and an unmapped one look
  * identical in the data — so coverage is stated rather than assumed away.
+ *
+ * The same function scores a whole route and a 400 m stretch of one — see
+ * `segments.ts`, which builds a `RouteFacts` per window and calls straight back
+ * in here. Two resolutions, one set of weights, so the parts can never disagree
+ * with the whole about what a lit street is worth.
  */
 
+import { crudeLight, lightFromElevation, minutesAfterSunset, plannedAt, solarElevationDeg, type Light } from "./daylight.ts";
+import type { LatLng } from "./osrm.ts";
 import type { RouteFacts } from "./overpass.ts";
 
 export type Verdict = "good" | "fair" | "poor" | "unknown";
+
+/**
+ * When the walk is, and where — because "dark" is a fact about the sky.
+ *
+ * `point` is what makes the difference: with somewhere to stand, the sun's
+ * elevation is worked out properly; without one, `hour` falls back to the old
+ * clock rule and `sunDeg` comes back null so the caller can tell the two apart.
+ */
+export interface When {
+  /** 0–23, read in the viewer's own timezone. See `daylight.ts`. */
+  hour: number;
+  /** Somewhere on the route. Null or absent forces the crude fallback. */
+  point?: LatLng | null;
+  /** The instant being planned for. Defaults to today at `hour`:00. */
+  at?: Date;
+}
+
+/** A bare hour still works — it just cannot know where the sun is. */
+export type Timing = number | When;
 
 export interface Assessment {
   /** 0–100, higher is better. Null when the map says too little to judge. */
@@ -24,14 +50,31 @@ export interface Assessment {
   confidence: number;
   /** Short factual statements, each one checkable against the counts. */
   findings: string[];
-  /** True when the hour means lighting dominates the answer. */
-  afterDark: boolean;
+  /** Day, civil twilight, or night — what the lighting weight turns on. */
+  light: Light;
+  /**
+   * The sun's elevation in degrees, or null when it could not be worked out
+   * and the clock rule stood in. Null is the honest marker for "guessed".
+   */
+  sunDeg: number | null;
 }
 
-/** Roughly, is it dark? Deliberately crude — the exact minute does not matter. */
-export function isAfterDark(hour: number): boolean {
-  return hour >= 20 || hour < 6;
-}
+/**
+ * How much the lighting evidence is allowed to move the score.
+ *
+ * At night it is most of the answer. By day it barely matters — you can see.
+ * Twilight is neither, and was the state that did not exist before: folding it
+ * into night made an Amsterdam evening in June a dark street, and folding it
+ * into day made a Tehran evening in December a bright one.
+ */
+const LIT_WEIGHT: Record<Light, number> = { night: 60, twilight: 34, day: 15 };
+
+/**
+ * How much the darkness penalties — empty parkland, no frontage, few lamps —
+ * count for. They are about being somewhere alone in the dark, so they fade
+ * with the light rather than switching off at a threshold.
+ */
+const DARK_WEIGHT: Record<Light, number> = { night: 1, twilight: 0.5, day: 0 };
 
 function fraction(part: number, whole: number): number {
   return whole > 0 ? part / whole : 0;
@@ -48,9 +91,71 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-export function assess(facts: RouteFacts, hour: number): Assessment {
-  const afterDark = isAfterDark(hour);
-  const findings: string[] = [];
+/** "1 h 20 min", for a span of minutes. */
+function spell(minutes: number): string {
+  const whole = Math.abs(Math.round(minutes));
+  if (whole < 60) return `${whole} min`;
+  const hours = Math.floor(whole / 60);
+  const rest = whole % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
+interface Lighting {
+  light: Light;
+  /** Null when the clock rule stood in for a real sun position. */
+  sunDeg: number | null;
+  /** A checkable sentence about the sky, or null when there is nothing to say. */
+  note: string | null;
+}
+
+/**
+ * Work out how light it is — properly where possible, crudely where not.
+ *
+ * The crude branch is not a bug to be removed: `assess` is also called from the
+ * API route, which may be handed facts and an hour and nothing else, and an
+ * hour alone genuinely cannot say where the sun is. What it must not do is
+ * pretend otherwise, so `sunDeg` stays null and no sentence about the sun is
+ * produced.
+ */
+export function lightingFor(timing: Timing): Lighting {
+  if (typeof timing === "number") {
+    return { light: crudeLight(timing), sunDeg: null, note: null };
+  }
+
+  const point = timing.point;
+  if (!point) return { light: crudeLight(timing.hour), sunDeg: null, note: null };
+
+  const at = timing.at ?? plannedAt(timing.hour);
+  const sunDeg = solarElevationDeg(at, point);
+  const light = lightFromElevation(sunDeg);
+  const down = Math.round(Math.abs(sunDeg) * 10) / 10;
+
+  if (light === "day") {
+    return { light, sunDeg, note: null };
+  }
+
+  const since = minutesAfterSunset(at, point);
+  if (light === "twilight") {
+    return {
+      light,
+      sunDeg,
+      note: `The sun is ${down}° below the horizon at that hour — dusk, not yet full dark.`,
+    };
+  }
+
+  return {
+    light,
+    sunDeg,
+    note:
+      since !== null && since > 0
+        ? `The sun set ${spell(since)} before that hour.`
+        : `The sun is ${down}° below the horizon at that hour.`,
+  };
+}
+
+export function assess(facts: RouteFacts, timing: Timing): Assessment {
+  const { light, sunDeg, note } = lightingFor(timing);
+  const findings: string[] = note ? [note] : [];
 
   const known = facts.litSamples + facts.unlitSamples;
   const rawLitFraction = fraction(facts.litSamples, known);
@@ -67,7 +172,7 @@ export function assess(facts: RouteFacts, hour: number): Assessment {
    * it as such produced a confident green verdict from a route whose lighting
    * was mapped for 1% of its length. Full weight needs about fifteen known
    * points; below that the evidence is shrunk towards "no idea" rather than
-   * believed.
+   * believed. It is also what sets the window size in `segments.ts`.
    */
   const weight = Math.min(1, known / 15);
   const litKnownFraction = 0.5 + (rawLitFraction - 0.5) * weight;
@@ -88,8 +193,10 @@ export function assess(facts: RouteFacts, hour: number): Assessment {
       score: null,
       verdict: "unknown",
       confidence: Math.min(coverage, 0.2),
-      afterDark,
+      light,
+      sunDeg,
       findings: [
+        ...findings,
         `OpenStreetMap records lighting for ${Math.round(coverage * 100)}% of this route, which is too little to judge it.`,
         "That is a gap in the map, not a dark street — and not a safe one either.",
       ],
@@ -97,24 +204,34 @@ export function assess(facts: RouteFacts, hour: number): Assessment {
   }
 
   let score = 55;
+  score += (litKnownFraction - 0.5) * LIT_WEIGHT[light];
 
-  if (afterDark) {
-    // Lighting is most of the answer at night, so it moves the score most.
-    score += (litKnownFraction - 0.5) * 60;
-    if (lampsPerKm >= 20) { score += 8; findings.push(`${facts.lamps} street lamps mapped along it.`); }
-    else if (lampsPerKm > 0 && lampsPerKm < 5) { score -= 6; findings.push(`Only ${plural(facts.lamps, "street lamp", "street lamps")} mapped along ${km.toFixed(1)} km.`); }
+  const dark = DARK_WEIGHT[light];
+  if (dark > 0) {
+    // Lighting is most of the answer once the sun is down, so the things that
+    // make being alone in the dark worse are weighed here and nowhere else.
+    if (lampsPerKm >= 20) {
+      score += 8 * dark;
+      findings.push(`${facts.lamps} street lamps mapped along it.`);
+    } else if (lampsPerKm > 0 && lampsPerKm < 5) {
+      score -= 6 * dark;
+      findings.push(`Only ${plural(facts.lamps, "street lamp", "street lamps")} mapped along ${km.toFixed(1)} km.`);
+    }
 
     if (facts.greenSamples > facts.samples * 0.25) {
-      score -= 12;
-      findings.push("A quarter or more of it runs through parkland, which empties out after dark.");
+      score -= 12 * dark;
+      findings.push(
+        light === "night"
+          ? "A quarter or more of it runs through parkland, which empties out after dark."
+          : "A quarter or more of it runs through parkland, which empties out as the light goes.",
+      );
     }
     if (venuesPerKm < 3) {
-      score -= 8;
+      score -= 8 * dark;
       findings.push(`Little open frontage — ${plural(facts.venues, "shop or cafe", "shops or cafes")} along the way.`);
     }
   } else {
     // By day lighting barely matters; company and crossings do.
-    score += (litKnownFraction - 0.5) * 15;
     if (facts.greenSamples > facts.samples * 0.25) {
       score += 4;
       findings.push("Much of it runs through parkland.");
@@ -126,7 +243,7 @@ export function assess(facts: RouteFacts, hour: number): Assessment {
     findings.push(`Busy frontage — ${facts.venues} shops, cafes or bars along it.`);
   }
   if (facts.tunnels > 0) {
-    score -= afterDark ? 14 : 6;
+    score -= 6 + 8 * dark;
     findings.push(`${plural(facts.tunnels, "tunnel or underpass", "tunnels or underpasses")} on the way.`);
   }
   if (facts.footwaySamples > facts.samples * 0.5) {
@@ -154,5 +271,5 @@ export function assess(facts: RouteFacts, hour: number): Assessment {
     );
   }
 
-  return { score, verdict, confidence: Number(confidence.toFixed(2)), afterDark, findings };
+  return { score, verdict, confidence: Number(confidence.toFixed(2)), light, sunDeg, findings };
 }

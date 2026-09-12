@@ -19,11 +19,13 @@ import SafetyPanel from "@/components/SafetyPanel";
 import { useReports } from "@/components/useReports";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import { compareRoutes } from "@/lib/compare";
+import { plannedAt } from "@/lib/daylight";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, type BBox, type LayerData } from "@/lib/layers";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
-import { assess } from "@/lib/score";
+import { assess, type When } from "@/lib/score";
+import { describeWorst, segmentRoute, worstStretch } from "@/lib/segments";
 import { formatDistance, formatDuration } from "@/lib/format";
 
 const MapCanvas = dynamic(() => import("@/components/MapCanvas"), {
@@ -181,13 +183,50 @@ export default function RoutePlanner() {
   }, [start, end, profile]);
 
   /* ── the read on each route ──────────────────────────────────────────── */
-  const { facts, done, error: factsError } = useRouteFacts(routes);
+  const { facts, reads, done, error: factsError } = useRouteFacts(routes);
+
+  /*
+   * When and where the walk is.
+   *
+   * ONE point for every candidate route, not each route's own: the routes are
+   * being compared against each other, and two of them judged under different
+   * skies would differ by something that has nothing to do with the streets.
+   * A few kilometres moves sunset by under a minute anyway.
+   *
+   * `at` is built here, in the browser, so "22:00" means the viewer's 22:00 —
+   * the server's timezone is whatever the box was installed with.
+   */
+  const when = useMemo<When>(
+    () => ({ hour, point: start ?? end, at: plannedAt(hour) }),
+    [hour, start, end],
+  );
 
   // The hour changes the verdict but not the counts, so re-judging is free —
   // no second trip to OpenStreetMap.
   const assessments = useMemo(
-    () => facts.map((found) => (found ? assess(found, hour) : null)),
-    [facts, hour],
+    () => facts.map((found) => (found ? assess(found, when) : null)),
+    [facts, when],
+  );
+
+  /*
+   * The selected route, cut into stretches and scored one by one.
+   *
+   * Same counts, finer grain: this is what colours the line on the map and
+   * names the dark part, and it is recomputed from data already in hand — so
+   * moving the hour slider re-cuts the whole route without a single request.
+   */
+  const segments = useMemo(() => {
+    const read = reads[selected];
+    return read ? segmentRoute(read, when) : [];
+  }, [reads, selected, when]);
+
+  const worst = useMemo(
+    () => worstStretch(segments, assessments[selected]?.score ?? null),
+    [segments, assessments, selected],
+  );
+  const worstLine = useMemo(
+    () => describeWorst(worst, assessments[selected]?.score ?? null),
+    [worst, assessments, selected],
   );
 
   const comparison = useMemo(
@@ -350,7 +389,14 @@ export default function RoutePlanner() {
           </div>
         )}
 
-        {!busy && <SafetyPanel facts={facts[selected] ?? null} hour={hour} />}
+        {!busy && (
+          <SafetyPanel
+            facts={facts[selected] ?? null}
+            when={when}
+            segments={segments}
+            worstLine={worstLine}
+          />
+        )}
 
         <FilterPanel
           spots={spots} onSpots={setSpots}
@@ -390,6 +436,8 @@ export default function RoutePlanner() {
           end={end}
           routes={routes}
           selected={selected}
+          segments={segments}
+          highlight={worst}
           onSelectRoute={setSelected}
           centre={centre}
           layers={layers}

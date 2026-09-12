@@ -15,7 +15,8 @@ function scored(score: number | null): Assessment {
     verdict: score === null ? "unknown" : score >= 70 ? "good" : score >= 45 ? "fair" : "poor",
     confidence: 0.6,
     findings: [],
-    afterDark: true,
+    light: "night",
+    sunDeg: -18,
   };
 }
 

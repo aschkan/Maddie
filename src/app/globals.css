@@ -300,6 +300,27 @@ select {
 
 .narration { margin: 0; font-size: .88rem; line-height: 1.5; }
 
+/* ── the route, stretch by stretch ──────────────────────────────────────────
+   One block per ~400 m, length-weighted, in the same colours the map draws the
+   line in. The two have to match: the strip is how you find the bad stretch on
+   the map, and a different palette would make them two separate claims. */
+.strip {
+  display: flex; gap: 2px;
+  height: 12px; border-radius: 6px; overflow: hidden;
+  background: var(--line);
+}
+.strip-part { display: block; min-width: 3px; }
+.strip-caption { margin: 0; font-size: .74rem; color: var(--muted); }
+
+/* The stretch being singled out. Bordered rather than filled: it sits above the
+   model's paragraph, and two filled blocks in a row read as one panel. */
+.worst {
+  margin: 0; padding: .5rem .6rem;
+  font-size: .84rem; line-height: 1.45;
+  border: 1px solid var(--line); border-left: 3px solid var(--bad);
+  border-radius: 8px; background: var(--bg);
+}
+
 .findings { margin: 0; padding-left: 1.05rem; display: flex; flex-direction: column; gap: .25rem; }
 .findings li { font-size: .81rem; color: var(--muted); line-height: 1.45; }
 

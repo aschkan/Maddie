@@ -19,6 +19,8 @@ import "leaflet/dist/leaflet.css";
 import type { LatLng, Route } from "@/lib/osrm";
 import { alwaysOpen, type BBox, type LayerData } from "@/lib/layers";
 import { CRIME_CATEGORIES, type Report } from "@/lib/reports";
+import type { Segment } from "@/lib/segments";
+import { VERDICT_COLOUR } from "@/lib/verdict";
 
 /** The colours the brief names. Crime purple, safe spots pink, lighting yellow. */
 export const CRIME = "#a855f7";
@@ -122,6 +124,16 @@ export interface MapCanvasProps {
   /** Every route OSRM offered. The selected one is drawn on top, in colour. */
   routes: Route[];
   selected: number;
+  /**
+   * The selected route cut into stretches, each with its own verdict.
+   *
+   * Empty while the route is still being read, and then the plain line is
+   * drawn instead — an uncoloured route is "not read yet", which is true,
+   * whereas colouring it all one comfortable shade would not be.
+   */
+  segments: Segment[];
+  /** The stretch worth warning about, if there is one. Drawn with a halo. */
+  highlight: Segment | null;
   onSelectRoute: (index: number) => void;
   centre: LatLng;
   layers: LayerData;
@@ -197,7 +209,7 @@ function FitToRoute({ route }: { route: Route | undefined }) {
 }
 
 export default function MapCanvas({
-  start, end, routes, selected, onSelectRoute, centre, layers, reports,
+  start, end, routes, selected, segments, highlight, onSelectRoute, centre, layers, reports,
   reportMode, onReport, onRemoveReport,
   onPick, onMoveStart, onMoveEnd, onTileError, onView, night,
 }: MapCanvasProps) {
@@ -290,10 +302,36 @@ export default function MapCanvas({
             positions={routes[selected].path.map((p) => [p.lat, p.lng])}
             color="#0b0d12" weight={9} opacity={0.5}
           />
-          <Polyline
-            positions={routes[selected].path.map((p) => [p.lat, p.lng])}
-            color="#7c5cff" weight={5}
-          />
+
+          {/* The stretch the panel names, widened so it can be found by eye.
+              Under the coloured segments, not over them: a halo that hid the
+              verdict colour would replace the answer with a pointer to it. */}
+          {highlight && (
+            <Polyline
+              positions={highlight.path.map((p) => [p.lat, p.lng])}
+              color={VERDICT_COLOUR[highlight.verdict]}
+              weight={17}
+              opacity={0.3}
+            />
+          )}
+
+          {/* Coloured by stretch once the route has been read. Grey stretches
+              are ones OpenStreetMap says too little about — not dark ones. */}
+          {segments.length > 0 ? (
+            segments.map((segment) => (
+              <Polyline
+                key={`seg-${segment.fromM}`}
+                positions={segment.path.map((p) => [p.lat, p.lng])}
+                color={VERDICT_COLOUR[segment.verdict]}
+                weight={5}
+              />
+            ))
+          ) : (
+            <Polyline
+              positions={routes[selected].path.map((p) => [p.lat, p.lng])}
+              color="#7c5cff" weight={5}
+            />
+          )}
         </>
       )}
 

@@ -18,6 +18,7 @@
  * the score and the findings, just without the prose.
  */
 
+import type { Light } from "./daylight.ts";
 import type { Assessment } from "./score.ts";
 import type { RouteFacts } from "./overpass.ts";
 
@@ -78,10 +79,23 @@ Rules:
 - Two or three sentences. Plain, calm, second person. No preamble, no bullet
   points, no markdown.`;
 
+/**
+ * How the light is described to the model.
+ *
+ * Dusk is spelled out rather than left as a word: "twilight" alone invites a
+ * sentence about how pretty it is, and what the reader needs is that the sun is
+ * down and the lighting has started to matter.
+ */
+const LIGHT_WORD: Record<Light, string> = {
+  day: "daylight",
+  twilight: "dusk — the sun is below the horizon, but not far below it",
+  night: "after dark",
+};
+
 function prompt(facts: RouteFacts, assessment: Assessment): string {
   return [
     `Route: ${(facts.lengthM / 1000).toFixed(1)} km, ${facts.samples} points sampled.`,
-    `Time of day: ${assessment.afterDark ? "after dark" : "daylight"}.`,
+    `Time of day: ${LIGHT_WORD[assessment.light]}.`,
     `Lighting: ${facts.litSamples} points on streets mapped lit, ${facts.unlitSamples} mapped unlit,`,
     `  ${facts.unknownLitSamples} with no lighting information at all.`,
     `Street lamps mapped nearby: ${facts.lamps}.`,

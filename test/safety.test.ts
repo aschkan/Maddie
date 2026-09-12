@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { assess, isAfterDark } from "../src/lib/score.ts";
+import { assess } from "../src/lib/score.ts";
 import { computeFacts, overpassQuery } from "../src/lib/overpass.ts";
 import { tiers } from "../src/lib/ai.ts";
 import { boundsAround, distanceM, distanceToSegmentM, pathLengthM, samplePath } from "../src/lib/geo.ts";
@@ -231,11 +231,14 @@ test("every finding is a checkable statement, never a judgement", () => {
   assert.match(result.findings.join(" "), /\d/);
 });
 
-test("after dark is a plain hour check", () => {
-  assert.equal(isAfterDark(23), true);
-  assert.equal(isAfterDark(3), true);
-  assert.equal(isAfterDark(13), false);
-  assert.equal(isAfterDark(6), false);
+test("an hour with no place to stand falls back to the clock, and says so", () => {
+  // `sunDeg: null` is the marker: the light state was guessed from the hour,
+  // not worked out from the sky. Reporting a guess as a sunset is the failure
+  // this field exists to make impossible.
+  const guessed = assess(facts({ litSamples: 30, unknownLitSamples: 10, lamps: 25 }), 23);
+  assert.equal(guessed.light, "night");
+  assert.equal(guessed.sunDeg, null);
+  assert.equal(assess(facts(), 13).light, "day");
 });
 
 /* ------------------------------- the AI tiers ------------------------------- */

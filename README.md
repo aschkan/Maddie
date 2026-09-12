@@ -49,6 +49,40 @@ tag, and an unlit street and an unmapped one look identical in the data. When
 coverage is too thin the page says so and shows no score at all, rather than a
 reassuring number drawn from an empty map.
 
+**The route is scored in stretches, not just as a whole.** One number over a
+4 km walk is an average of a lit high street and the 400 m of unlit park path in
+the middle, and the average is precisely the part you cannot act on. So the same
+counts are re-summed over windows of about 400 m, each window is scored by the
+same function the whole route is, and the line on the map is coloured by what
+each stretch says. The panel names the worst one — *"the worst stretch is the
+508 m along Westerpark Path — 5/100, against 40 for the route as a whole"* —
+when, and only when, one is clearly worse than the rest.
+
+Four hundred metres is not an arbitrary number: the score gives the lit fraction
+full weight at about fifteen known samples, and samples are taken every 25 m, so
+it is the shortest window that can carry a lighting reading at all. A grey
+stretch is one OpenStreetMap says too little about. It is drawn differently from
+a badly lit one on purpose — "nobody mapped this" and "this is dark" are
+different statements, and one of them is not about the street.
+
+**"Dark" is worked out from the sun, not from the clock.** It used to be
+`hour >= 20 || hour < 6`, which is a fact about a clock face: 22:00 in Amsterdam
+in June is broad daylight and was scored as night, and 18:30 in Tehran in
+December is ninety minutes past sunset and was scored as day. Lighting carries
+four times the weight after dark as it does by day, so in both cases the verdict
+turned on the wrong fact. `src/lib/daylight.ts` computes the sun's elevation
+from the NOAA solar equations — arithmetic, no dependency, accurate to about a
+minute of sunrise — and there are three states rather than two: day, civil
+twilight, and night. Dusk is neither of its neighbours, and folding it into
+either is what produced both errors.
+
+The hour you set is read in **your** browser's timezone, and the elevation is
+then exact for the route's own coordinates. Planning a walk in another timezone
+is off by the difference between the two; carrying a timezone database to close
+that gap would cost more than the gap is worth. Where the place is not known at
+all, the old clock rule stands in and the panel says `(by the clock)` rather
+than passing a guess off as a sunset.
+
 ## "Preferred", not "safe"
 
 With two or three ways round on screen, each is read from OpenStreetMap and

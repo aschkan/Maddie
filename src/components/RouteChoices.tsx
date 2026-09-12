@@ -14,13 +14,7 @@ import type { Route } from "@/lib/osrm";
 import type { Assessment } from "@/lib/score";
 import type { Comparison } from "@/lib/compare";
 import { formatDistance, formatDuration } from "@/lib/format";
-
-const VERDICT_LABEL: Record<Assessment["verdict"], string> = {
-  good: "Looks fine",
-  fair: "Mixed",
-  poor: "Take care",
-  unknown: "Not enough map data",
-};
+import { VERDICT_LABEL } from "@/lib/verdict";
 
 interface Props {
   routes: Route[];
