@@ -500,15 +500,22 @@ export class ProxyPool {
    * left to whoever was reading. This says it.
    */
   problem(): string | null {
-    if (this.directWorks) return null;   // nothing to route around
+    /*
+     * A dead entry is worth saying even when everything else works.
+     *
+     * It is bypassed, so nothing is broken — but it costs a probe every sweep
+     * and it sits in the status looking like the cause of whatever else is
+     * wrong. A line left in `.env` for a machine that has gone away should be
+     * reported until it is taken out.
+     */
     if (this.entry && this.entryState.ok === false) {
-      return (
-        `The entry proxy ${this.entry.label} cannot be reached from this server ` +
-        `(${this.entryState.lastError ?? "no connection"}). ` +
-        `Every exit is being tried directly instead — check that this machine is on the same ` +
-        `network as ${this.entry.host}, and that something is listening on port ${this.entry.port}.`
-      );
+      const stale =
+        `OSM_PROXY_ENTRY is set to ${this.entry.label}, which this server cannot reach ` +
+        `(${this.entryState.lastError ?? "no connection"}). It is being ignored. ` +
+        `Remove the line from .env unless the exits really are reachable only through it.`;
+      return this.directWorks ? stale : `${stale} Exits are being tried directly instead.`;
     }
+    if (this.directWorks) return null;   // nothing to route around
     if (this.states.length === 0 && !this.entry) {
       return "No proxies are configured. This server is fetching OpenStreetMap directly.";
     }

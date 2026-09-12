@@ -235,6 +235,24 @@ at dead, and probing them cost a few minutes of every boot to learn it again,
 so it now holds what is known to work. `npm run proxies` re-probes whatever is
 configured.
 
+#### Asking less, before asking from somewhere else
+
+Rate limits are the usual reason the map goes quiet, and the first answer is
+not more exit IPs — it is fewer requests. This server remembers what it
+already fetched: ten minutes for an Overpass query, an hour for an address
+search, a week for a tile. The layer query re-runs every time the map settles
+after a pan, and panning back to where you were is the commonest thing anyone
+does on a map; that used to be a fresh query every time. The cache is bounded
+by bytes, drops the least recently used first, and never stores a 429 or a
+5xx. `x-osm-via: cache` on a reply means it never left the building.
+
+What the proxies are then for: when a request *does* go out and comes back
+429, that limit belongs to the exit IP it went out through, so it is retried
+from another one. The durable fix for a deployment that needs more than the
+public service offers is to host Overpass yourself — that removes the limit
+and the reachability problem in one go, and `OSM_UPSTREAM_OVERPASS` points at
+it.
+
 #### A second hop in front of the list — rarely needed
 
 Only for a network where the proxies in the list are themselves reachable

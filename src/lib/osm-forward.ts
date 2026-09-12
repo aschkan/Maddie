@@ -19,8 +19,26 @@ export interface Service {
   methods: ("GET" | "POST")[];
   /** Cache-Control for the browser. Tiles are the only thing worth caching. */
   cache: string;
+  /**
+   * How long this server remembers a reply, in ms. 0 never caches.
+   *
+   * This is the lever that actually gets under a rate limit: an answer served
+   * from memory is a request that was never made. The values are what the
+   * underlying data is worth — street lighting does not change in ten minutes,
+   * a tile does not change in a week, and an address search for the same three
+   * words has the same answer all day.
+   */
+  ttlMs: number;
   /** Rewrite the tail of the path onto the upstream. */
   suffix?: (parts: string[]) => string;
+}
+
+/** A cache lifetime from the environment, in ms. 0 switches caching off. */
+function ttl(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 /** A comma-separated env override, or the built-in list. */
@@ -40,6 +58,10 @@ export const SERVICES: Record<string, Service> = {
     ]),
     methods: ["POST", "GET"],
     cache: "no-store",
+    // Ten minutes. The layer query re-runs on every pan that settles, and
+    // panning back to where you were is the commonest thing anyone does on a
+    // map — that was a fresh query to a rate-limited service every time.
+    ttlMs: ttl("OSM_CACHE_TTL_OVERPASS_MS", 600_000),
     // The client posts to the base itself, so anything after it is ignored.
     suffix: () => "",
   },
@@ -47,11 +69,17 @@ export const SERVICES: Record<string, Service> = {
     bases: bases("OSM_UPSTREAM_OSRM", ["https://router.project-osrm.org"]),
     methods: ["GET"],
     cache: "no-store",
+    // A route between two fixed points does not change while you move the hour
+    // slider, and dragging a pin back returns to a pair already asked for.
+    ttlMs: ttl("OSM_CACHE_TTL_OSRM_MS", 600_000),
   },
   nominatim: {
     bases: bases("OSM_UPSTREAM_NOMINATIM", ["https://nominatim.openstreetmap.org"]),
     methods: ["GET"],
     cache: "no-store",
+    // Typing an address, deleting a character and retyping it asks the same
+    // question three times. Nominatim's policy is one request a second.
+    ttlMs: ttl("OSM_CACHE_TTL_NOMINATIM_MS", 3_600_000),
   },
   tile: {
     bases: bases("OSM_UPSTREAM_TILE", [
@@ -63,6 +91,9 @@ export const SERVICES: Record<string, Service> = {
     // A tile never changes for a week, and re-fetching one through two proxies
     // is the most expensive way to redraw a pan.
     cache: "public, max-age=604800, immutable",
+    // The browser cache covers one visitor; this covers all of them, and
+    // tiles are the bulk of what goes out.
+    ttlMs: ttl("OSM_CACHE_TTL_TILE_MS", 604_800_000),
   },
 };
 

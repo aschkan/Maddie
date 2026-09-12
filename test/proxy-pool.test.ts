@@ -292,9 +292,10 @@ test("and the entry is reported as the thing that is down", async () => {
   const said = pool.problem();
   assert.ok(said, "a dead entry is a problem worth one sentence");
   assert.match(said, /198\.51\.100\.7:2000/);
-  assert.match(said, /cannot be reached from this server/i);
+  assert.match(said, /cannot reach/i);
   // And it says what happens next, because "working: 0" did not.
-  assert.match(said, /tried directly instead/i);
+  assert.match(said, /being ignored/i);
+  assert.match(said, /remove the line from \.env/i);
 
   const summary = pool.summary();
   assert.equal(summary.entryOk, false);

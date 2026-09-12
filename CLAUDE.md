@@ -109,6 +109,24 @@ nothing else — that was the requirement, and it is also what keeps this
 server's map queries out of the LAN proxy's logs. `test/proxy-chain.test.ts`
 asserts the ORDER of the two CONNECTs for exactly that reason.
 
+**A rate limit going out DIRECTLY must rotate, not be returned.** The
+direct-first path returned whatever came back, a 429 included — so on the
+machine where `directOk` is true every request went straight out, the limit
+came straight back, and the exits were never consulted. `shouldRotate()` is
+checked on that path too now. A per-IP limit is precisely when a different
+exit is worth having.
+
+**The cache is the lever, not the exit list.** `osm-cache.ts` holds what was
+already fetched: ten minutes for an Overpass query (the layer query re-runs on
+every pan that settles, and panning back to where you were is the commonest
+thing anyone does on a map), an hour for an address search, a week for a tile.
+An answer served from memory is a request that was never made, which is a
+better answer to "we are over the limit" than making the same request from
+somewhere else. It is bounded by bytes with least-recently-used eviction —
+an unbounded cache on a long-lived server is a memory leak with a nice name —
+and **a 429 or a 5xx is never stored**, because caching a refusal for ten
+minutes turns one into ten minutes of them.
+
 **Direct first, when direct has been shown to work.** `checkDirect()` probes
 it on every sweep and the forwarder uses it only when `directWorks` is true.
 The two machines this is deployed on differ in exactly this: the one with
@@ -537,6 +555,11 @@ can act on by walking a different way), and is the same data OSRM routed on.
   symptom was `working: 0` about proxies that had never been contacted.
 - **Re-wrapping an error loses its stage.** `new ChainError("request", e.message)`
   keeps the words and drops the one bit of structure the caller acts on.
+- **The direct path must check `shouldRotate` too.** Returning a 429 from it
+  makes the whole proxy list dead weight on exactly the machine that can reach
+  OpenStreetMap but has used up its share of it.
+- **Never cache a non-200.** A stored 429 turns one refusal into a TTL's worth
+  of them, and a stored 500 turns a blip into an outage.
 
 ## Toolchain constraints
 

@@ -27,12 +27,13 @@
 import { NextResponse } from "next/server";
 
 import { requestThrough } from "@/lib/proxy-chain";
+import { cacheKey, osmCache } from "@/lib/osm-cache";
 import { SERVICES, shouldRotate, upstreamUrl, type Service } from "@/lib/osm-forward";
 import { ALLOW_DIRECT, pool, USER_AGENT, type HopState } from "@/lib/proxy-pool";
 
 export const dynamic = "force-dynamic";
 
-async function forward(request: Request, service: Service, parts: string[]): Promise<Response> {
+async function forward(request: Request, service: Service, name: string, parts: string[]): Promise<Response> {
   const url = new URL(request.url);
   if (upstreamUrl(service, parts, url.search) === null) {
     return NextResponse.json({ error: "Bad path." }, { status: 400 });
@@ -51,7 +52,36 @@ async function forward(request: Request, service: Service, parts: string[]): Pro
   const contentType = request.headers.get("content-type");
   if (body && contentType) headers["Content-Type"] = contentType;
 
+  /*
+   * Already have it?
+   *
+   * This is the first thing tried and the reason the rate limit stops being
+   * hit: an answer served from here is a request that was never made, which
+   * is a better answer to "we are over the limit" than making the same
+   * request from somewhere else.
+   */
+  const cache = osmCache();
+  const key = cacheKey(name, method, url.pathname, url.search, body);
+  const stored = cache.get(key, service.ttlMs);
+  if (stored) {
+    const out = new Headers();
+    if (stored.contentType) out.set("content-type", stored.contentType);
+    out.set("cache-control", service.cache);
+    out.set("x-osm-via", "cache");
+    out.set("x-osm-attempts", "0");
+    return new Response(new Uint8Array(stored.body), { status: stored.status, headers: out });
+  }
+
   const proxies = pool();
+
+  const keep = (status: number, headers: Record<string, string>, payload: Buffer) => {
+    cache.set(key, {
+      status,
+      contentType: headers["content-type"] ?? null,
+      body: payload,
+      at: Date.now(),
+    });
+  };
 
   const send = async (state: HopState | null, attempt: number) => {
     const target = upstreamUrl(service, parts, url.search, attempt);
@@ -81,7 +111,17 @@ async function forward(request: Request, service: Service, parts: string[]): Pro
   if (proxies.configured && proxies.directWorks) {
     try {
       const response = await send(null, 0);
-      return reply(response.status, response.headers, response.body, service, "direct", 1);
+      /*
+       * A 429 or a 5xx going out directly is EXACTLY when the proxy list earns
+       * its keep — the limit is per exit IP, and this server's own IP has just
+       * used up its share. Returning it here was the bug: with `directOk` true
+       * every request went straight out, the rate limit came straight back,
+       * and the exits were never consulted at all.
+       */
+      if (!shouldRotate(response.status)) {
+        keep(response.status, response.headers, response.body);
+        return reply(response.status, response.headers, response.body, service, "direct", 1);
+      }
     } catch {
       // Fall through to the proxies — the probe is a few minutes old at most,
       // but "it worked last sweep" is not a promise about this second.
@@ -94,6 +134,7 @@ async function forward(request: Request, service: Service, parts: string[]): Pro
   if (!proxies.configured) {
     try {
       const response = await send(null, 0);
+      keep(response.status, response.headers, response.body);
       return reply(response.status, response.headers, response.body, service, "direct", 1);
     } catch (error) {
       return unreachable(error instanceof Error ? [error.message] : [], []);
@@ -120,12 +161,14 @@ async function forward(request: Request, service: Service, parts: string[]): Pro
   });
 
   if (result.ok) {
+    keep(result.value.status, result.value.headers, result.value.body);
     return reply(result.value.status, result.value.headers, result.value.body, service, result.via, result.attempts);
   }
 
   if (ALLOW_DIRECT) {
     try {
       const response = await send(null, attempt);
+      keep(response.status, response.headers, response.body);
       return reply(response.status, response.headers, response.body, service, "direct", result.tried.length + 1);
     } catch (error) {
       result.reasons.push(`direct: ${error instanceof Error ? error.message : "failed"}`);
@@ -187,7 +230,7 @@ async function handle(request: Request, context: Context): Promise<Response> {
   const { service: name, path } = await context.params;
   const service = SERVICES[name];
   if (!service) return NextResponse.json({ error: "No such service." }, { status: 404 });
-  return forward(request, service, path ?? []);
+  return forward(request, service, name, path ?? []);
 }
 
 export async function GET(request: Request, context: Context): Promise<Response> {
