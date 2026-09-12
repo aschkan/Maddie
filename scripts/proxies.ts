@@ -16,7 +16,11 @@
  *   npm run proxies -- --limit=50   stop after the first 50, for a quick look
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { ProxyPool } from "../src/lib/proxy-pool.ts";
+import { mergeProxyLists, sources, toRecords } from "../src/lib/proxy-sources.ts";
 
 function value(name: string): string | null {
   const prefix = `--${name}=`;
@@ -27,8 +31,54 @@ function pad(text: string, width: number): string {
   return text.length >= width ? text : text + " ".repeat(width - text.length);
 }
 
+/** Download every source, skipping any that will not answer. */
+async function scrape(): Promise<string[]> {
+  const urls = sources();
+  console.log(`scraping    : ${urls.length} source(s)`);
+  const texts: string[] = [];
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(20_000),
+        headers: { "User-Agent": "maddie-proxy-scraper" },
+      });
+      if (!response.ok) {
+        console.log(`   skipped  ${url} -> ${response.status}`);
+        continue;
+      }
+      const text = await response.text();
+      texts.push(text);
+      console.log(`   ok       ${url} -> ${text.split("\n").length} lines`);
+    } catch (error) {
+      // One stale source must not take the run down; that is why there are
+      // several of them.
+      console.log(`   skipped  ${url} -> ${error instanceof Error ? error.message : "failed"}`);
+    }
+  }
+
+  const merged = mergeProxyLists(texts);
+  console.log(`merged      : ${merged.length} unique addresses`);
+  return merged;
+}
+
 async function main(): Promise<number> {
   const proxies = new ProxyPool();
+
+  if (process.argv.includes("--scrape")) {
+    const found = await scrape();
+    if (found.length === 0) {
+      console.log("");
+      console.log("Every source failed. If this box cannot reach GitHub either, run the");
+      console.log("scrape somewhere that can and copy proxies.json across.");
+      return 1;
+    }
+    proxies.states = toRecords(found).map((record) => ({
+      hop: { host: record.ip, port: record.port, label: `${record.ip}:${record.port}` },
+      ok: null, latencyMs: null, lastProbe: 0, lastError: null,
+      failures: 0, restingUntil: 0, inFlight: false, successes: 0,
+    }));
+  }
 
   if (!proxies.entry) {
     console.log("entry proxy : none — hops are reached directly, which is the usual case.");
@@ -94,6 +144,27 @@ async function main(): Promise<number> {
   } else {
     console.log("Put nothing else in the env: the server probes on its own schedule and");
     console.log("keeps this ranking in memory. See /api/osm/status on the running app.");
+  }
+
+  /*
+   * Keep the ones that answered, fastest first.
+   *
+   * Only the working ones: a file of thousands of scraped addresses costs a
+   * probe timeout apiece on every boot to rediscover that they are dead, and
+   * the status page then reports a total that means nothing.
+   */
+  if (process.argv.includes("--save")) {
+    if (working.length === 0) {
+      console.log("");
+      console.log("Nothing worked, so proxies.json is left alone rather than emptied.");
+    } else {
+      const latency = new Map(working.map((state) => [state.hop.label, state.latencyMs ?? 0]));
+      const records = toRecords(working.map((state) => state.hop.label), latency);
+      const file = path.join(process.cwd(), "proxies.json");
+      fs.writeFileSync(file, `${JSON.stringify(records, null, 2)}\n`);
+      console.log("");
+      console.log(`Wrote ${records.length} working ${records.length === 1 ? "proxy" : "proxies"} to ${file}`);
+    }
   }
 
   return working.length > 0 ? 0 : 1;

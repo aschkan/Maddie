@@ -114,6 +114,50 @@ export interface BBox {
 }
 
 /**
+ * How coarse a grid the visible box is snapped onto, for a box this size.
+ *
+ * Six cells across the viewport: fine enough that the padding added by
+ * rounding outward is under a fifth in each direction, coarse enough that
+ * nudging the map does not move you into a new cell.
+ */
+export function gridStep(bbox: BBox): number {
+  const width = Math.max(bbox.east - bbox.west, bbox.north - bbox.south);
+  for (const step of [0.04, 0.02, 0.01, 0.005, 0.0025]) {
+    if (width >= step * 6) return step;
+  }
+  return 0.0025;
+}
+
+/**
+ * Round a visible box OUTWARD onto a fixed grid.
+ *
+ * This is the difference between the map costing one Overpass query and
+ * costing one per pan. The box used to go into the query at five decimal
+ * places — a metre — so every drag of a single pixel produced a different
+ * query string, which is a different question to Overpass, a different cache
+ * key here, and another slot spent against a service that hands out two per
+ * IP. Snapped, a pan inside one cell asks the question that was already
+ * answered, and the answer is already in hand.
+ *
+ * Outward, never inward: the snapped box always contains the visible one, so
+ * nothing on screen is left unqueried.
+ */
+export function snapBox(bbox: BBox, step: number): BBox {
+  // Rounded, because 0.37 / 0.005 lands on 73.99999999999999 and the floor of
+  // that is a cell too far south.
+  const clean = (value: number) => Number(value.toFixed(6));
+  const down = (value: number) => clean(Math.floor(clean(value / step)) * step);
+  const up = (value: number) => clean(Math.ceil(clean(value / step)) * step);
+  return { south: down(bbox.south), west: down(bbox.west), north: up(bbox.north), east: up(bbox.east) };
+}
+
+/** The same snapped box — so the same question, and no reason to ask again. */
+export function sameBox(a: BBox | null, b: BBox | null): boolean {
+  if (!a || !b) return false;
+  return a.south === b.south && a.west === b.west && a.north === b.north && a.east === b.east;
+}
+
+/**
  * One query for every layer that is switched on, over the visible map.
  *
  * Bounded by the screen rather than by the route: these are things to look at

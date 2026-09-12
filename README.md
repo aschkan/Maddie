@@ -238,8 +238,19 @@ configured.
 #### Asking less, before asking from somewhere else
 
 Rate limits are the usual reason the map goes quiet, and the first answer is
-not more exit IPs — it is fewer requests. This server remembers what it
-already fetched: ten minutes for an Overpass query, an hour for an address
+not more exit IPs — it is fewer requests.
+
+The biggest saving is the shape of the question. The visible box used to go
+into the Overpass query at five decimal places — a metre — so dragging the map
+one pixel asked a different question, and a service that hands out two slots
+per IP got a fresh one every time. The box is now rounded outward onto a grid
+about six cells across the screen, so a pan inside one cell asks the question
+that was already answered. Over sixty small pans that is 60 queries before and
+9 after. The page also refuses to re-ask a question it has already asked, and
+when Overpass does say it is limiting us it leaves the layers alone for a
+minute rather than retrying on the next twitch of the map.
+
+On top of that, this server remembers what it already fetched: ten minutes for an Overpass query, an hour for an address
 search, a week for a tile. The layer query re-runs every time the map settles
 after a pan, and panning back to where you were is the commonest thing anyone
 does on a map; that used to be a fresh query every time. The cache is bounded
@@ -274,8 +285,10 @@ was built for claimed `https: false` for every entry, which taken literally
 would mean not one can tunnel.
 
 ```bash
-npm run proxies            # probe them all now and print what works
-npm run proxies -- --all   # including the dead ones and why
+npm run proxies                      # probe the current list and print what works
+npm run proxies -- --all             # including the dead ones and why
+npm run proxies -- --scrape          # download fresh public lists first
+npm run proxies -- --scrape --save   # ...and keep only the ones that answered
 ```
 
 `GET /api/osm/status` says the same thing on the running app, and every

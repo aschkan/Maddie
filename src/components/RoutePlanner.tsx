@@ -32,7 +32,7 @@ import { compareRoutes } from "@/lib/compare";
 import { plannedAt, type Light } from "@/lib/daylight";
 import { isForwarded } from "@/lib/endpoints";
 import type { Place } from "@/lib/geocode";
-import { EMPTY_LAYERS, fetchLayers, type BBox, type LayerData } from "@/lib/layers";
+import { EMPTY_LAYERS, fetchLayers, gridStep, snapBox, type BBox, type LayerData } from "@/lib/layers";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
 import { assess, lightingFor, type When } from "@/lib/score";
@@ -84,6 +84,15 @@ const MIN_LAYER_ZOOM = 14;
 /** Three is what OSRM offers; reading more than that is a slow page. */
 const MAX_ROUTES = 3;
 
+/**
+ * How long to leave the layers alone after Overpass says it is rate limiting.
+ *
+ * A minute is roughly how long its window takes to roll. Asking again on the
+ * next pan just holds the limit open — and spends the slot the route read
+ * needs to say anything at all.
+ */
+const RATE_LIMIT_REST_MS = 60_000;
+
 const THEME_KEY = "maddie.theme.v1";
 
 /**
@@ -127,6 +136,20 @@ export default function RoutePlanner() {
 
   // So a slow reply for an old pair cannot overwrite a newer one.
   const inFlight = useRef<AbortController | null>(null);
+  /**
+   * The layer question already answered — snapped box, kinds, lighting.
+   *
+   * A pan that does not change it asks nothing at all.
+   */
+  const askedFor = useRef<string | null>(null);
+  /**
+   * Do not ask again until this moment.
+   *
+   * Set when Overpass says it is rate limiting us. Retrying into a limit on
+   * every pan is what keeps the limit saturated — and every one of those
+   * attempts also spends a slot the route read needs.
+   */
+  const [quietUntil, setQuietUntil] = useState(0);
 
   /* ── theme ──────────────────────────────────────────────────────────────
      Written onto <html> rather than kept in React alone, because Leaflet's own
@@ -288,15 +311,36 @@ export default function RoutePlanner() {
         if (!view || view.zoom < MIN_LAYER_ZOOM || (spots.length === 0 && !lighting)) {
           setLayers(EMPTY_LAYERS);
           setLayerError(null);
+          askedFor.current = null;
           return;
         }
-        const result = await fetchLayers(view.bbox, spots, lighting, { signal: controller.signal });
+
+        // Still inside the cooling-off period after a rate limit.
+        if (Date.now() < quietUntil) return;
+
+        /*
+         * The visible box, rounded outward onto a grid.
+         *
+         * This is what stops the map costing one Overpass query per pan. The
+         * box went into the query at five decimal places — a metre — so every
+         * drag produced a different question, and a service that hands out two
+         * slots per IP was asked a new one each time. Snapped, most pans ask
+         * the question already answered, and the answer is already here.
+         */
+        const box = snapBox(view.bbox, gridStep(view.bbox));
+        const asking = `${box.south},${box.west},${box.north},${box.east}|${[...spots].sort().join(",")}|${lighting}`;
+        if (asking === askedFor.current) return;
+
+        const result = await fetchLayers(box, spots, lighting, { signal: controller.signal });
         if (controller.signal.aborted) return;
         if (result.ok) {
+          askedFor.current = asking;
           setLayers(result.data);
           setLayerError(null);
         } else if (result.error !== "cancelled") {
           setLayerError(result.error);
+          // Back off rather than asking again on the next twitch of the map.
+          if (/rate limit/i.test(result.error)) setQuietUntil(Date.now() + RATE_LIMIT_REST_MS);
         }
       })();
     }, 600);
@@ -305,7 +349,7 @@ export default function RoutePlanner() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [view, spots, lighting]);
+  }, [view, spots, lighting, quietUntil]);
 
   const centre = useMemo(() => start ?? end ?? AMSTERDAM, [start, end]);
   const visibleReports = useMemo(

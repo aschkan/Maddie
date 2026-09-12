@@ -116,6 +116,18 @@ came straight back, and the exits were never consulted. `shouldRotate()` is
 checked on that path too now. A per-IP limit is precisely when a different
 exit is worth having.
 
+**The layer bbox is SNAPPED onto a grid, and that is what stops the rate
+limit.** It went into the query at five decimal places — a metre — so every
+drag of a single pixel was a different query string: a different question to
+Overpass, a different cache key, another of the two slots it hands out per IP.
+`snapBox`/`gridStep` round the visible box outward onto a six-cells-across
+grid, so a pan inside one cell asks the question already answered. Measured
+over sixty small pans: 60 distinct queries before, 9 after. `RoutePlanner`
+also keeps the last question asked and skips the fetch outright when it has
+not changed, and backs off for a minute when Overpass says it is limiting us
+— retrying into a limit on every pan is what holds it open, and each of those
+attempts spends the slot the route read needs.
+
 **The cache is the lever, not the exit list.** `osm-cache.ts` holds what was
 already fetched: ten minutes for an Overpass query (the layer query re-runs on
 every pan that settles, and panning back to where you were is the commonest
@@ -560,6 +572,12 @@ can act on by walking a different way), and is the same data OSRM routed on.
   OpenStreetMap but has used up its share of it.
 - **Never cache a non-200.** A stored 429 turns one refusal into a TTL's worth
   of them, and a stored 500 turns a blip into an outage.
+- **A bbox at five decimal places is a cache that never hits.** Snap it, or
+  every pan is a fresh query to a service that allows two at a time.
+- **The probe is Overpass, not a generic connectivity check.** A list where 28
+  proxies passed an `api.ipify.org` test had 3 that could fetch Overpass, and
+  two of the failures were proxies intercepting TLS — which an ipify check
+  over the same intercepted connection is perfectly happy with.
 
 ## Toolchain constraints
 
