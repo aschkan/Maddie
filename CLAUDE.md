@@ -109,6 +109,25 @@ nothing else — that was the requirement, and it is also what keeps this
 server's map queries out of the LAN proxy's logs. `test/proxy-chain.test.ts`
 asserts the ORDER of the two CONNECTs for exactly that reason.
 
+**Each machine finds and keeps its OWN proxies.** The domain answers from two
+servers with different egress — that is the whole reason any of this exists —
+so a proxy proven from one is not evidence about the other. `proxies.json` is
+a committed SEED, the same file on both; `.data/proxies.json` is what this
+machine learned, gitignored and per checkout. `loadHops()` reads the learned
+list first and the seed after, and an explicit `OSM_PROXY_LIST` beats both.
+Never write findings back into the committed file: the two servers would
+overwrite each other's answers, and the one that can reach the internet would
+teach the one that cannot.
+
+**The server scrapes on its own, and only when it needs to.** `refill()` is
+`npm run proxies -- --scrape --save` run by the server itself, from `sweep()`,
+and it is gated three ways: not when `directWorks` (that machine needs no
+proxy at all), not above `OSM_PROXY_MIN_WORKING`, and not more than once an
+hour. Only the exits that answered are kept — a list of thousands costs a
+timeout apiece on every boot to rediscover that they are dead, which is what
+the 649-entry file was doing. When this box cannot reach GitHub either, the
+sources are fetched THROUGH an exit that already works.
+
 **A rate limit going out DIRECTLY must rotate, not be returned.** The
 direct-first path returned whatever came back, a 429 included — so on the
 machine where `directOk` is true every request went straight out, the limit

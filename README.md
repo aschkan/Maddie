@@ -264,6 +264,29 @@ public service offers is to host Overpass yourself — that removes the limit
 and the reachability problem in one go, and `OSM_UPSTREAM_OVERPASS` points at
 it.
 
+#### The server keeps its own list, and tops it up by itself
+
+The two machines this answers from have different egress, so they need
+different proxies. `proxies.json` in the repo is a **seed**, the same on both.
+What each machine actually found to work goes in `.data/proxies.json`, which
+is gitignored and per checkout, and is read first on the next boot — so a
+restart is not a cold start, and neither server overwrites the other's
+findings.
+
+When a machine is short of working exits *and* cannot reach OpenStreetMap by
+itself, it goes and looks: it downloads the public lists, probes a couple of
+hundred fresh addresses against Overpass, keeps the ones that answered and
+writes them down. That happens in the background, at most once an hour, and
+not at all on a server that does not need a proxy. If the box cannot reach
+GitHub either, the lists are fetched through an exit that already works.
+
+You can still do it by hand, which is worth doing once on a new box to see
+what happens:
+
+```bash
+npm run proxies -- --scrape --save
+```
+
 #### A second hop in front of the list — rarely needed
 
 Only for a network where the proxies in the list are themselves reachable

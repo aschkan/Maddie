@@ -31,6 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { isEntryFailure, openTunnel, parseHop, parseHopList, requestThrough, type Hop } from "./proxy-chain.ts";
+import { mergeProxyLists, sources, toRecords } from "./proxy-sources.ts";
 
 export interface HopState {
   hop: Hop;
@@ -109,18 +110,46 @@ function envFlag(name: string): boolean {
   return raw === "1" || raw === "true" || raw === "yes";
 }
 
-/** Read the list from a file if one is named, else from the env variable. */
+/**
+ * Where THIS machine keeps the proxies it has found to work.
+ *
+ * Not `proxies.json`, which is committed and therefore the same file on both
+ * servers. The two machines this app answers from have different egress —
+ * that is the whole reason any of this exists — so a proxy proven from one is
+ * not evidence about the other, and a shared file would have them overwriting
+ * each other's findings. `.data/` is gitignored and per checkout.
+ */
+export function learnedFile(): string {
+  const named = process.env.OSM_PROXY_STATE_FILE?.trim();
+  if (named) return path.isAbsolute(named) ? named : path.join(process.cwd(), named);
+  return path.join(process.cwd(), ".data", "proxies.json");
+}
+
+function readList(file: string): Hop[] {
+  try {
+    return parseHopList(fs.readFileSync(file, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The list to start from: what this machine learned, then the committed seed.
+ *
+ * Learned first, because it has been proven here and the seed has only been
+ * proven somewhere. Duplicates collapse in `parseHopList`, and an explicit
+ * `OSM_PROXY_LIST` replaces both — if you named a proxy, you meant it.
+ */
 export function loadHops(): Hop[] {
   const inline = process.env.OSM_PROXY_LIST?.trim();
   if (inline) return parseHopList(inline);
 
-  const file = process.env.OSM_PROXY_LIST_FILE?.trim() || "proxies.json";
-  const full = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
-  try {
-    return parseHopList(fs.readFileSync(full, "utf8"));
-  } catch {
-    return [];
-  }
+  const seedName = process.env.OSM_PROXY_LIST_FILE?.trim() || "proxies.json";
+  const seed = path.isAbsolute(seedName) ? seedName : path.join(process.cwd(), seedName);
+
+  const merged = [...readList(learnedFile()), ...readList(seed)];
+  const seen = new Set<string>();
+  return merged.filter((hop) => (seen.has(hop.label) ? false : (seen.add(hop.label), true)));
 }
 
 /** What is known about one link, checked on its own rather than inferred. */
@@ -152,6 +181,16 @@ export class ProxyPool {
   entryTimeoutMs: number;
   maxAttempts: number;
   budgetMs: number;
+  /** Scraping state, so the status page can say when it last went looking. */
+  scraping: boolean;
+  lastScrape: number;
+  lastScrapeError: string | null;
+  lastScrapeAdded: number;
+  minWorking: number;
+  scrapeIntervalMs: number;
+  scrapeMax: number;
+  scrapeProbeTimeoutMs: number;
+  maxStates: number;
   sweeping: boolean;
   swept: number;
   lastSweep: number;
@@ -183,6 +222,22 @@ export class ProxyPool {
      * pending request and the person reloads. Better to give up and say why.
      */
     this.budgetMs = envNumber("OSM_PROXY_BUDGET_MS", 45_000);
+
+    this.scraping = false;
+    this.lastScrape = 0;
+    this.lastScrapeError = null;
+    this.lastScrapeAdded = 0;
+    /** Below this many working exits, go and look for more. */
+    this.minWorking = envNumber("OSM_PROXY_MIN_WORKING", 3);
+    this.scrapeIntervalMs = envNumber("OSM_PROXY_SCRAPE_INTERVAL_MS", 3_600_000);
+    /** How many fresh addresses to try per round. The lists run to thousands
+     *  and almost all of them are dead; a bounded bite keeps the background
+     *  work to a couple of minutes. */
+    this.scrapeMax = envNumber("OSM_PROXY_SCRAPE_MAX", 200);
+    /** Shorter than a real probe: a scraped candidate is dead until proven
+     *  otherwise, and there are two hundred of them. */
+    this.scrapeProbeTimeoutMs = envNumber("OSM_PROXY_SCRAPE_TIMEOUT_MS", 6_000);
+    this.maxStates = envNumber("OSM_PROXY_MAX_STATES", 400);
     this.sweeping = false;
     this.swept = 0;
     this.lastSweep = 0;
@@ -333,13 +388,13 @@ export class ProxyPool {
   }
 
   /** One probe: the real chain, to a real upstream. */
-  async probe(state: HopState): Promise<void> {
+  async probe(state: HopState, timeoutMs = this.probeTimeoutMs): Promise<void> {
     state.lastProbe = Date.now();
     try {
       const response = await requestThrough(this.probeUrl, {
         entry: this.entryFor(),
         hop: state.hop,
-        timeoutMs: this.probeTimeoutMs,
+        timeoutMs,
         headers: { "User-Agent": USER_AGENT },
       });
       if (response.status >= 200 && response.status < 400) this.succeeded(state, response.ms);
@@ -404,6 +459,152 @@ export class ProxyPool {
     } finally {
       this.sweeping = false;
       this.lastSweep = Date.now();
+    }
+
+    this.save();
+
+    /*
+     * Top up, if this machine actually needs proxies and is short of them.
+     *
+     * Not when it can reach OpenStreetMap by itself — that server needs none
+     * of this — and not more than once an hour, because these lists are
+     * refreshed on the order of hours and probing two hundred dead addresses
+     * is not free.
+     */
+    const working = this.states.filter((state) => state.ok === true).length;
+    if (
+      !this.directWorks &&
+      working < this.minWorking &&
+      Date.now() - this.lastScrape > this.scrapeIntervalMs
+    ) {
+      await this.refill(concurrency);
+    }
+  }
+
+  /**
+   * Fetch one public list.
+   *
+   * Directly if this box can, and otherwise through an exit that already
+   * works — the machine that needs more proxies is often the one that cannot
+   * reach GitHub either, and the one proxy it has is the way to get the rest.
+   */
+  private async fetchList(url: string): Promise<string | null> {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(this.probeTimeoutMs),
+        headers: { "User-Agent": USER_AGENT },
+      });
+      if (response.ok) return await response.text();
+    } catch {
+      // Fall through and try a proxy.
+    }
+
+    const best = rank(this.states, Date.now()).find((state) => state.ok === true);
+    if (!best) return null;
+    try {
+      const response = await requestThrough(url, {
+        entry: this.entryFor(),
+        hop: best.hop,
+        timeoutMs: this.probeTimeoutMs,
+        headers: { "User-Agent": USER_AGENT },
+      });
+      return response.status === 200 ? response.body.toString("utf8") : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Probe a batch, a few at a time, with the entry proxy left in peace. */
+  private async probeBatch(batch: HopState[], concurrency: number, timeoutMs: number): Promise<void> {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const state = batch[next++];
+        if (!state) return;
+        await this.probe(state, timeoutMs);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
+  }
+
+  /**
+   * Go and find more exits, and keep the ones that work.
+   *
+   * This is what `npm run proxies -- --scrape --save` does, run by the server
+   * itself, because the two machines need different answers and neither of
+   * them should need somebody to SSH in and re-run a script when its proxies
+   * die. Only the ones that answered are kept: a list of thousands costs a
+   * timeout apiece on every boot to rediscover that they are dead.
+   */
+  async refill(concurrency = envNumber("OSM_PROXY_PROBE_CONCURRENCY", 12)): Promise<number> {
+    if (this.scraping) return 0;
+    this.scraping = true;
+    this.lastScrape = Date.now();
+    this.lastScrapeAdded = 0;
+
+    try {
+      const texts: string[] = [];
+      for (const url of sources()) {
+        const text = await this.fetchList(url);
+        if (text) texts.push(text);
+      }
+      if (texts.length === 0) {
+        this.lastScrapeError = "no source could be reached";
+        return 0;
+      }
+
+      const known = new Set(this.states.map((state) => state.hop.label));
+      const fresh: HopState[] = [];
+      for (const address of mergeProxyLists(texts)) {
+        if (known.has(address)) continue;
+        const hop = parseHop(address);
+        if (!hop) continue;
+        fresh.push({
+          hop, ok: null, latencyMs: null, lastProbe: 0, lastError: null,
+          failures: 0, restingUntil: 0, inFlight: false, successes: 0,
+        });
+        if (fresh.length >= this.scrapeMax) break;
+      }
+      if (fresh.length === 0) {
+        this.lastScrapeError = "every address found was one already known";
+        return 0;
+      }
+
+      await this.probeBatch(fresh, concurrency, this.scrapeProbeTimeoutMs);
+
+      // Only the ones that answered. The rest are not worth the memory, let
+      // alone the timeout each would cost on the next sweep.
+      const kept = fresh.filter((state) => state.ok === true);
+      this.states = [...this.states, ...kept].slice(0, this.maxStates);
+      this.lastScrapeAdded = kept.length;
+      this.lastScrapeError = kept.length > 0 ? null : `none of ${fresh.length} fresh addresses answered`;
+      this.save();
+      return kept.length;
+    } catch (error) {
+      this.lastScrapeError = (error instanceof Error ? error.message : "failed").slice(0, 200);
+      return 0;
+    } finally {
+      this.scraping = false;
+    }
+  }
+
+  /**
+   * Write what works to this machine's own file, so a restart is not a cold
+   * start. Never the committed seed — that one is shared by both servers.
+   */
+  save(): void {
+    const working = rank(this.states, Date.now()).filter((state) => state.ok === true);
+    if (working.length === 0) return;
+    try {
+      const file = learnedFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const records = toRecords(
+        working.map((state) => state.hop.label),
+        new Map(working.map((state) => [state.hop.label, state.latencyMs ?? 0])),
+      );
+      fs.writeFileSync(file, `${JSON.stringify(records, null, 2)}\n`);
+    } catch {
+      // A read-only checkout still runs; it just starts cold each time.
     }
   }
 
@@ -535,6 +736,10 @@ export class ProxyPool {
     bypassingEntry: boolean;
     directOk: boolean | null;
     directError: string | null;
+    scraping: boolean;
+    lastScrape: number;
+    lastScrapeAdded: number;
+    lastScrapeError: string | null;
     problem: string | null;
     total: number;
     working: number;
@@ -556,6 +761,11 @@ export class ProxyPool {
       // Whether a proxy is needed at all, which is the first thing to know.
       directOk: this.directState.ok,
       directError: this.directState.lastError,
+      // Whether the server is finding its own proxies, and how that went.
+      scraping: this.scraping,
+      lastScrape: this.lastScrape,
+      lastScrapeAdded: this.lastScrapeAdded,
+      lastScrapeError: this.lastScrapeError,
       problem: this.problem(),
       total: this.states.length,
       working: this.states.filter((state) => state.ok === true).length,

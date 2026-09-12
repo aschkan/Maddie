@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 
-import { cooldownMs, ProxyPool, rank, type HopState } from "../src/lib/proxy-pool.ts";
+import { cooldownMs, loadHops, ProxyPool, rank, type HopState } from "../src/lib/proxy-pool.ts";
 import { SERVICES, shouldRotate, upstreamUrl } from "../src/lib/osm-forward.ts";
 
 function state(label: string, over: Partial<HopState> = {}): HopState {
@@ -346,4 +349,88 @@ test("one request stops spending time once its budget is gone", async () => {
   assert.ok(!result.ok);
   assert.equal(result.tried.length, 0, "a spent budget tries nothing further");
   assert.match(result.reasons.join(" "), /gave up after/);
+});
+
+/* ────────────── finding its own proxies, per machine ────────────── */
+
+test("what this machine learned is loaded before the committed seed", () => {
+  // The two servers have different egress, which is the whole reason any of
+  // this exists — so a proxy proven on one is not evidence about the other.
+  // The committed file is a shared seed; `.data/` is this machine's own.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maddie-hops-"));
+  const learned = path.join(dir, "learned.json");
+  const seed = path.join(dir, "seed.json");
+  fs.writeFileSync(learned, JSON.stringify([{ proxy: "http://10.0.0.1:8080" }]));
+  fs.writeFileSync(seed, JSON.stringify([{ proxy: "http://10.0.0.2:8080" }, { proxy: "http://10.0.0.1:8080" }]));
+
+  const before = { ...process.env };
+  try {
+    delete process.env.OSM_PROXY_LIST;
+    process.env.OSM_PROXY_STATE_FILE = learned;
+    process.env.OSM_PROXY_LIST_FILE = seed;
+
+    const hops = loadHops().map((hop) => hop.label);
+    assert.deepEqual(hops, ["10.0.0.1:8080", "10.0.0.2:8080"], "learned first, and no duplicate");
+  } finally {
+    Object.assign(process.env, before);
+    delete process.env.OSM_PROXY_STATE_FILE;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a named OSM_PROXY_LIST still beats both files", () => {
+  const before = { ...process.env };
+  try {
+    process.env.OSM_PROXY_LIST = "10.9.9.9:1234";
+    process.env.OSM_PROXY_STATE_FILE = "/nonexistent/learned.json";
+    assert.deepEqual(loadHops().map((hop) => hop.label), ["10.9.9.9:1234"]);
+  } finally {
+    Object.assign(process.env, before);
+    delete process.env.OSM_PROXY_LIST;
+    delete process.env.OSM_PROXY_STATE_FILE;
+  }
+});
+
+test("only the proxies that answered are written down", () => {
+  // A file of thousands of scraped addresses costs a probe timeout apiece on
+  // every boot to rediscover that they are dead.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maddie-save-"));
+  const file = path.join(dir, "learned.json");
+  const before = { ...process.env };
+  try {
+    process.env.OSM_PROXY_STATE_FILE = file;
+    const pool = new ProxyPool();
+    pool.states = [
+      state("1.1.1.1:8080", { ok: true, latencyMs: 210 }),
+      state("2.2.2.2:8080", { ok: false, lastError: "dead" }),
+      state("3.3.3.3:8080", { ok: null }),
+    ];
+    pool.save();
+
+    const written = JSON.parse(fs.readFileSync(file, "utf8")) as { proxy: string }[];
+    assert.deepEqual(written.map((row) => row.proxy), ["http://1.1.1.1:8080"]);
+  } finally {
+    Object.assign(process.env, before);
+    delete process.env.OSM_PROXY_STATE_FILE;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("nothing working means the last known-good file is left alone", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maddie-save2-"));
+  const file = path.join(dir, "learned.json");
+  fs.writeFileSync(file, JSON.stringify([{ proxy: "http://8.8.8.8:8080" }]));
+  const before = { ...process.env };
+  try {
+    process.env.OSM_PROXY_STATE_FILE = file;
+    const pool = new ProxyPool();
+    pool.states = [state("1.1.1.1:8080", { ok: false })];
+    pool.save();
+    // Emptying it on a bad day would turn one outage into a cold start.
+    assert.match(fs.readFileSync(file, "utf8"), /8\.8\.8\.8/);
+  } finally {
+    Object.assign(process.env, before);
+    delete process.env.OSM_PROXY_STATE_FILE;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
