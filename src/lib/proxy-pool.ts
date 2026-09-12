@@ -160,6 +160,16 @@ export const SCRAPE_PROBE_TIMEOUT_MS = 6_000;
 export const MAX_ATTEMPTS = 4;
 
 /**
+ * How long a request will wait for a busy exit before giving up on one.
+ *
+ * Short. This covers "every good exit is mid-request for a moment", which is
+ * ordinary when a route read is split into pieces. It is not a queue: if
+ * nothing frees up in five seconds the pool is genuinely oversubscribed and
+ * failing is a better answer than a page that hangs.
+ */
+export const BUSY_WAIT_MS = 5_000;
+
+/**
  * A ceiling on ONE request, across all its attempts.
  *
  * Four attempts at a 25s timeout is a hundred seconds, and a page that hangs
@@ -171,22 +181,69 @@ export const BUDGET_MS = 45_000;
 /**
  * Below this many working exits, go and look for more.
  *
- * Eight rather than three, because a route read is now split into chunks that
- * go out in PARALLEL, one exit each — see `chunkPath` in `overpass.ts`. Fewer
- * working exits than chunks means two chunks share an IP, which is the rate
- * limit the split exists to get under.
+ * Eight rather than three, because a route read goes out as several pieces in
+ * parallel and each piece may rotate through several exits — see `piecesFor`
+ * in `overpass.ts`. The split sizes itself down when the pool is thin, so a
+ * shortage degrades rather than failing; this is the number that decides when
+ * to stop degrading and go and find more.
+ *
+ * A live box sat at four working exits with nineteen resting after rate
+ * limits. That is what "short" looks like, and it is well under this.
  */
-export const MIN_WORKING = 8;
+export const MIN_WORKING = 24;
 
-/** Not more than once an hour: these lists refresh on the order of hours. */
+/**
+ * How long between scrapes when the pool is merely below target.
+ *
+ * These lists refresh on the order of hours, so going back sooner mostly
+ * re-probes addresses already known to be dead.
+ */
 export const SCRAPE_INTERVAL_MS = 3_600_000;
-/** How many fresh addresses to try per round. */
-export const SCRAPE_MAX = 400;
-/** A ceiling on the states held in memory. */
-export const MAX_STATES = 400;
+
+/**
+ * How long between scrapes when the pool is actually STARVING.
+ *
+ * Below `STARVING`, an hour is far too long to wait: the page is failing reads
+ * now. The lists will not have changed much, but the addresses this box has
+ * not yet tried from them have not changed either — a round only ever probes a
+ * bounded bite of what it downloads, so going back sooner does find new ones.
+ */
+export const HUNGRY_SCRAPE_INTERVAL_MS = 300_000;
+
+/** Below this many working exits, the pool is starving rather than thin. */
+export const STARVING = 6;
+
+/**
+ * How many requests may go out DIRECTLY at the same time.
+ *
+ * Direct is ONE exit — this server's own IP — however many proxies the pool
+ * has. The forwarder tries it first whenever it works, so without a cap every
+ * piece of a parallel route read leaves from that one address at once, which
+ * is the per-IP limit the split exists to get under. Two, because that is
+ * roughly what Overpass hands out per IP; the rest of the pieces go straight
+ * to a proxy instead of queueing behind it.
+ */
+export const DIRECT_CONCURRENCY = 2;
+/**
+ * How many fresh addresses to try per round.
+ *
+ * Large, because the yield is small. Of a few hundred scraped public proxies a
+ * handful answer Overpass, and a long route split many ways wants dozens of
+ * working exits at once — so the round has to be big enough that "a handful"
+ * is still a useful number.
+ */
+export const SCRAPE_MAX = 1_500;
+
+/**
+ * A ceiling on the states held in memory.
+ *
+ * Only the ones that ANSWERED are kept after a scrape, so this is a bound on
+ * proxies that have worked at least once, not on addresses tried.
+ */
+export const MAX_STATES = 2_000;
 
 /** How many probes at once during a normal sweep. */
-export const PROBE_CONCURRENCY = 24;
+export const PROBE_CONCURRENCY = 40;
 /**
  * How many at once when probing a freshly scraped batch.
  *
@@ -196,7 +253,7 @@ export const PROBE_CONCURRENCY = 24;
  * them twenty-four at a time took minutes; this is the "scan them fast" half
  * of the requirement.
  */
-export const SCRAPE_CONCURRENCY = 60;
+export const SCRAPE_CONCURRENCY = 150;
 
 /** How often the background sweep re-probes everything. */
 export const SWEEP_INTERVAL_MS = 600_000;
@@ -216,14 +273,22 @@ export function seedFile(): string {
 /**
  * Whether a request may go out with NO proxy after every exit has failed.
  *
- * False, and it earns that. The forwarder already tries direct FIRST when
- * `directWorks`, so on the machine that can reach OpenStreetMap this would be
- * a second attempt at something that just failed — and when it failed with a
- * 429 it is this server's own IP that is over the limit, which is precisely
- * what the exits are for. On the machine that cannot reach OpenStreetMap at
- * all it is a guaranteed timeout on the end of every failed request.
+ * Not a constant, and not a variable either — the pool already knows. It is
+ * `directWorks`: try direct again at the end only on the machine where direct
+ * has been probed and works, and never on the one where it is a guaranteed
+ * timeout at the end of every failed request.
+ *
+ * This was briefly a hardcoded `false`, on the reasoning that the forwarder
+ * already tries direct FIRST when `directWorks`, so a second attempt is a
+ * retry of something that just failed. That reasoning is wrong in the case
+ * that matters: the first attempt used ONE mirror, and the retry uses the next
+ * one. With an empty pool — which is the normal state of a list of public
+ * proxies — that second mirror is the only thing standing between a transient
+ * refusal and a failed read.
  */
-export const ALLOW_DIRECT = false;
+export function allowDirectFallback(proxies: ProxyPool): boolean {
+  return proxies.directWorks;
+}
 
 /**
  * Identify the app to the services it queries.
@@ -322,6 +387,10 @@ export class ProxyPool {
   sweeping: boolean;
   swept: number;
   lastSweep: number;
+  /** Which mirror the next request starts on. See `mirrorTurn()`. */
+  private mirror: number;
+  /** How many requests are going out directly right now. See `takeDirect()`. */
+  private directBusy: number;
   private timer: NodeJS.Timeout | null;
 
   constructor() {
@@ -354,7 +423,34 @@ export class ProxyPool {
     this.sweeping = false;
     this.swept = 0;
     this.lastSweep = 0;
+    this.mirror = 0;
+    this.directBusy = 0;
     this.timer = null;
+  }
+
+  /**
+   * A different upstream mirror for each request that asks.
+   *
+   * This exists because of a bug that the parallel route read introduced and
+   * that took a screenshot to see: the four pieces of a route all went out
+   * DIRECTLY, and the direct path always used mirror 0. So four simultaneous
+   * queries arrived at `overpass-api.de` from one IP — which is exactly the
+   * "parallel queries earn a 429" failure the old single-query design existed
+   * to avoid. Two pieces came back, two were refused, and the page showed a
+   * confident score above a red error.
+   *
+   * The limit is per IP PER HOST, so spreading concurrent requests across the
+   * mirrors is what makes the split safe when there is only one IP to go out
+   * from. `upstreamUrl` takes this as its attempt index and wraps, so it can
+   * only ever select from the fixed table — a number from here can no more
+   * name an upstream than a number from the request could.
+   */
+  mirrorTurn(): number {
+    const turn = this.mirror;
+    // Wrapped well below `Number.MAX_SAFE_INTEGER`; the modulo in
+    // `upstreamUrl` does the real selection.
+    this.mirror = (this.mirror + 1) % 1_000_000;
+    return turn;
   }
 
   get configured(): boolean {
@@ -500,6 +596,85 @@ export class ProxyPool {
     return this.entry !== null && this.entryState.ok === false;
   }
 
+  /**
+   * Claim the direct route out, if it works and is not already busy.
+   *
+   * Direct is one exit — this server's own IP — no matter how big the pool is,
+   * and the forwarder reaches for it first whenever it works. Without a count,
+   * every piece of a parallel route read took it at once and they all left from
+   * the same address, which is the per-IP limit the whole split exists to get
+   * under. The pieces that cannot have it go to a proxy, which is the point.
+   *
+   * Returns false when direct is unavailable or full. Always pair a true with
+   * `releaseDirect()`.
+   */
+  takeDirect(): boolean {
+    if (!this.directWorks) return false;
+    if (this.directBusy >= DIRECT_CONCURRENCY) return false;
+    this.directBusy += 1;
+    return true;
+  }
+
+  releaseDirect(): void {
+    this.directBusy = Math.max(0, this.directBusy - 1);
+  }
+
+  /**
+   * How many DISTINCT ways out this server can supply at this moment.
+   *
+   * Working exits that are not resting, plus one for the direct route when
+   * that works. This is what a caller must not ask for more of at once, and it
+   * is reported to the client on every forwarded reply as `x-osm-exits` so the
+   * route read can size its split to what actually exists.
+   *
+   * It exists because a fixed split met a pool that could not carry it. A real
+   * box was running four working exits with nineteen resting after rate
+   * limits, and a route read asking for four pieces at once left the last one
+   * with nothing available at all — reported as "no route out worked", on a
+   * server whose other three pieces had just come back fine.
+   */
+  capacity(): number {
+    const now = Date.now();
+    const free = this.states.filter(
+      (state) => state.ok === true && !state.inFlight && state.restingUntil <= now,
+    ).length;
+    // Direct counts for the slots it has left, not for one and not for many:
+    // it is a single IP that will carry a couple of requests at a time.
+    const direct = this.directWorks ? Math.max(0, DIRECT_CONCURRENCY - this.directBusy) : 0;
+    return free + direct;
+  }
+
+  /**
+   * Wait a moment for a BUSY exit to come free. Never for a resting one.
+   *
+   * The distinction is the whole of it. A hop that is in flight will be back in
+   * seconds and is worth waiting for — with a route read split into pieces,
+   * every good exit being mid-request is an ordinary moment, not a failure. A
+   * hop that is RESTING is one we have already decided not to use: waiting for
+   * its cooldown to expire and then trying it inside the same request is
+   * exactly the retry the cooldown exists to prevent, and it spends the whole
+   * budget doing it. The first version of this did that, and turned two tests
+   * into a thirty-second and a forty-five-second wait for a proxy already known
+   * to be dead.
+   *
+   * So it returns at once when nothing is in flight: everything left is
+   * resting, nothing will become available, and there is nothing to wait for.
+   *
+   * Polled rather than signalled: a waiter queue on every hop is a lot of
+   * machinery to save a few hundred milliseconds on a path that is already
+   * talking to a public proxy.
+   */
+  private async waitForExit(deadline: number): Promise<void> {
+    const cap = Math.min(deadline, Date.now() + BUSY_WAIT_MS);
+    while (Date.now() < cap) {
+      const now = Date.now();
+      if (this.states.some((state) => !state.inFlight && state.restingUntil <= now)) return;
+      // Nothing is coming free. Everything left is resting out a cooldown.
+      if (!this.states.some((state) => state.inFlight)) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
   /** One probe: the real chain, to a real upstream. */
   async probe(state: HopState, timeoutMs = this.probeTimeoutMs): Promise<void> {
     state.lastProbe = Date.now();
@@ -590,7 +765,17 @@ export class ProxyPool {
      * hours, and probing hundreds of dead addresses is not free.
      */
     const working = this.states.filter((state) => state.ok === true).length;
-    if (working < this.minWorking && Date.now() - this.lastScrape > this.scrapeIntervalMs) {
+    /*
+     * Starving is not the same as thin, and it must not wait an hour.
+     *
+     * A long route split many ways wants dozens of exits at once. Below
+     * `STARVING` the page is failing reads right now, and each round only
+     * probes a bounded bite of what it downloads — so going back sooner really
+     * does find addresses this box has not tried yet, rather than re-probing
+     * the same corpses.
+     */
+    const wait = working < STARVING ? HUNGRY_SCRAPE_INTERVAL_MS : this.scrapeIntervalMs;
+    if (working < this.minWorking && Date.now() - this.lastScrape > wait) {
       await this.refill();
     }
   }
@@ -791,8 +976,28 @@ export class ProxyPool {
         rank(this.states, Date.now(), { includeInFlight }).find(
           (candidate) => !used.has(candidate.hop.label),
         );
-      const state = pick(false) ?? pick(true);
-      if (!state) break;
+      let state = pick(false) ?? pick(true);
+      if (!state) {
+        /*
+         * Every exit is busy or resting. Wait for one, do not fail the read.
+         *
+         * This is the case that produced the reported error. With four working
+         * exits and a route split into four pieces, the last piece regularly
+         * found nothing available — `rank()` excludes both in-flight and
+         * resting hops — and `rotate()` returned having tried NOTHING, which
+         * the forwarder could only report as "no route out worked". The pool
+         * was fine; it was momentarily full.
+         *
+         * Bounded by the same deadline as everything else, so a genuinely
+         * empty pool still fails fast rather than hanging the page.
+         */
+        await this.waitForExit(deadline);
+        state = pick(false) ?? pick(true);
+        if (!state) {
+          reasons.push("every exit was busy or resting for the whole budget");
+          break;
+        }
+      }
 
       used.add(state.hop.label);
       state.inFlight = true;

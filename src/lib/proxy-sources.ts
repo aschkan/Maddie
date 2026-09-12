@@ -19,15 +19,41 @@
  * cannot work here.
  */
 
-/** Public lists, HTTP and HTTPS only. A source that 404s is skipped. */
+/**
+ * Public lists, HTTP and HTTPS only. A source that 404s is skipped.
+ *
+ * Long on purpose. The yield from these is small — of a few hundred addresses
+ * a handful answer Overpass — and a long route split many ways wants dozens of
+ * working exits at once, so the way to more working proxies is more lists and
+ * a bigger bite of each, not a longer probe of the same seven.
+ *
+ * Duplicates across lists cost nothing: `mergeProxyLists` collapses them before
+ * anything is probed, and `refill` skips every address already known.
+ *
+ * A source that has gone away is a logged skip, not a failure — which is why
+ * adding one is cheap and removing a dead one is housekeeping rather than a
+ * fix.
+ */
 export const PROXY_SOURCES: string[] = [
+  // proxifly, via a CDN — usually the freshest of these.
   "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.txt",
+  "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/https/data.txt",
+  // The long-standing aggregators.
   "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
   "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+  "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_anonymous/http.txt",
   "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
+  "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/https.txt",
   "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
-  "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/https/data.txt",
+  "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-https.txt",
   "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+  "https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",
+  "https://raw.githubusercontent.com/mmpx12/proxy-list/master/https.txt",
+  "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+  "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt",
+  "https://raw.githubusercontent.com/proxy4parsing/proxy-list/main/http.txt",
+  "https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt",
+  "https://raw.githubusercontent.com/zloi-user/hideip.me/main/https.txt",
 ];
 
 /**

@@ -394,14 +394,19 @@ export function computeFacts(path: LatLng[], elements: OverpassElement[]): Route
  */
 
 /**
- * How many pieces a route is split into, at most.
+ * How many pieces a route may be split into, at most.
  *
- * Four. Not more, because each piece is a whole Overpass query and the point of
- * the exercise is to spend fewer slots overall, not to discover a new way to
- * spend them all at once — and every piece needs its own working exit, which is
- * the thing this deployment is shortest of.
+ * Twelve. It was four, which is the wrong shape of limit: a long walk is
+ * exactly the case that needs spreading, and capping it at four means a 30 km
+ * route asks four enormous queries — each nearer the `out ... 2000` truncation
+ * and nearer Overpass's own timeout — while the pool sits idle.
+ *
+ * What actually bounds the split is the pool, not this: `piecesFor()` sizes it
+ * to the exits the server says it has. This is only the ceiling, and it is here
+ * because a piece is a whole Overpass query with a round trip of its own, so
+ * past a dozen the coordination costs more than the parallelism returns.
  */
-export const MAX_CHUNKS = 4;
+export const MAX_CHUNKS = 12;
 
 /**
  * The shortest piece worth cutting.
@@ -411,6 +416,20 @@ export const MAX_CHUNKS = 4;
  * keep on the long routes, which are also the ones that were timing out.
  */
 export const CHUNK_MIN_M = 1_500;
+
+/**
+ * Roughly how long a piece should be.
+ *
+ * The split is driven by LENGTH as well as by the pool, because the two answer
+ * different questions. The pool says how many queries can be in the air at
+ * once; this says how many the route actually warrants. A 3 km walk gains
+ * nothing from being cut twelve ways even on a box with sixty exits — the
+ * pieces would be 250 m each and the round trips would dominate.
+ *
+ * 2.5 km is a few minutes' walk and comfortably inside what one Overpass query
+ * answers without truncating.
+ */
+export const CHUNK_TARGET_M = 2_500;
 
 /**
  * Cut a route into contiguous pieces of roughly equal length.
@@ -455,6 +474,85 @@ export function chunkPath(path: LatLng[], maxChunks = MAX_CHUNKS): LatLng[][] {
   return chunks;
 }
 
+/*
+ * How many pieces this server can actually carry at once.
+ *
+ * Reported by the forwarder on every reply as `x-osm-exits` — working exits
+ * that are free right now, plus one if the server can reach OpenStreetMap
+ * directly. Remembered here and used to size the NEXT split.
+ *
+ * This exists because a fixed split of four met a box that could not carry it:
+ * four working exits with nineteen resting after rate limits, so the fourth
+ * piece of every route read found nothing available and failed the whole read
+ * with "no route out worked" while the other three came back fine.
+ *
+ * Feeding the number back beats asking for it: no extra request before every
+ * read, and it corrects itself as exits die and fresh ones are scraped.
+ *
+ * It starts optimistic — at what a pool with exits to spare looks like — rather
+ * than at 1. The first read of a session has no reply to learn from, and
+ * starting pessimistic would make the common case permanently slow for anyone
+ * who only ever plans one route.
+ */
+let knownExits = 8;
+
+/** What the server last said it could carry. Exported for the tests. */
+export function exitsAvailable(): number {
+  return knownExits;
+}
+
+/**
+ * How many pieces to actually ask for, given that many exits.
+ *
+ * HALF, rounded up, and the halving is the point. A piece is not one request:
+ * when the exit it went out through fails, it rotates, up to four times. So a
+ * read split as many ways as there are free exits does not use one exit per
+ * piece — it contends for them, and on a pool of mostly-dead public proxies the
+ * unlucky piece spends all four attempts on corpses and fails, which fails the
+ * whole read.
+ *
+ * The numbers that showed this: a real box reported four working exits with
+ * nineteen resting after rate limits. A four-way split there needs up to
+ * sixteen exit-uses from four good proxies at four to eight seconds apiece.
+ * Two pieces down four exits is the same read with room for every piece to
+ * rotate twice.
+ */
+export function piecesFor(exits: number): number {
+  return Math.max(1, Math.min(MAX_CHUNKS, Math.ceil(exits / 2)));
+}
+
+/**
+ * How many pieces THIS route wants, given the pool and its own length.
+ *
+ * The smaller of the two, because they bound different things. A long route on
+ * a starved pool must not ask for more queries than there are exits to carry
+ * them — that is the failure this whole thread started from. A short route on a
+ * healthy pool must not be cut into slivers just because it could be.
+ */
+export function piecesForRoute(lengthM: number, exits: number): number {
+  const byLength = Math.max(1, Math.round(lengthM / CHUNK_TARGET_M));
+  return Math.max(1, Math.min(MAX_CHUNKS, byLength, piecesFor(exits)));
+}
+
+/** Reset what has been learned. Tests only. */
+export function forgetExits(): void {
+  knownExits = 8;
+}
+
+function learnExits(response: Response): void {
+  const raw = response.headers.get("x-osm-exits");
+  if (raw === null) return;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return;
+  /*
+   * Never below 1. Zero exits is a real answer — the pool is empty and the box
+   * cannot go out directly — but a zero-piece split is not a smaller request,
+   * it is no request at all, and the read would fail with nothing tried rather
+   * than failing with a reason.
+   */
+  knownExits = Math.max(0, Math.floor(parsed));
+}
+
 /** What one chunk's query came back with. */
 type ChunkReply =
   | { ok: true; elements: OverpassElement[] }
@@ -481,6 +579,10 @@ async function askOverpass(query: string, base: string, signal?: AbortSignal): P
      * left to try quietly, and the person waiting on the map is told plainly
      * rather than watching a spinner while it is retried behind their back.
      */
+    // Whatever it answered, it said how much this server can carry. The error
+    // replies carry it too — those are exactly when it has changed.
+    learnExits(response);
+
     if (response.status === 429) {
       return fail(await rateLimitMessage(response, "the map data"), { limited: true });
     }
@@ -546,7 +648,15 @@ export async function fetchFacts(
   path: LatLng[],
   options: { base?: string; signal?: AbortSignal } = {},
 ): Promise<{ ok: true; facts: RouteFacts; reads: SampleRead[] } | { ok: false; error: string }> {
-  const chunks = chunkPath(path);
+  /*
+   * Never more pieces than the server has ways out for.
+   *
+   * Asking for four when it can carry two is not four fast pieces, it is two
+   * fast ones and two that find every exit busy — and one piece that cannot be
+   * read fails the whole read, by design. Two pieces down two exits beats four
+   * down two.
+   */
+  const chunks = chunkPath(path, piecesForRoute(pathLengthM(path), knownExits));
   const queries = chunks.map((chunk) => overpassQuery(chunk)).filter((query): query is string => query !== null);
   if (queries.length === 0) return { ok: false, error: "No route to look at." };
 

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  CHUNK_MIN_M, MAX_CHUNKS, chunkPath, computeFacts, fetchFacts, overpassQuery,
+  CHUNK_MIN_M, MAX_CHUNKS, chunkPath, computeFacts, exitsAvailable, fetchFacts, forgetExits,
+  overpassQuery, piecesFor, piecesForRoute,
 } from "../src/lib/overpass.ts";
 import { pathLengthM } from "../src/lib/geo.ts";
 import type { LatLng } from "../src/lib/osrm.ts";
@@ -33,10 +34,29 @@ test("a short route is not cut at all", () => {
   assert.equal(chunkPath(short).length, 1);
 });
 
-test("a long route is cut, and never into more pieces than there are exits for", () => {
-  const long = line(40_000);
-  const chunks = chunkPath(long);
-  assert.equal(chunks.length, MAX_CHUNKS);
+test("a long route is cut, and never past the ceiling", () => {
+  assert.equal(chunkPath(line(400_000)).length, MAX_CHUNKS);
+});
+
+test("a LONGER route is cut into MORE pieces, which is the point", () => {
+  // The reason the ceiling was raised from four. A long walk is exactly the
+  // case that wants spreading; capping it low means a handful of enormous
+  // queries, each nearer Overpass's own timeout and nearer the `out ... 2000`
+  // truncation, while a healthy pool sits idle.
+  const plenty = 40;
+  const short = piecesForRoute(5_000, plenty);
+  const medium = piecesForRoute(15_000, plenty);
+  const long = piecesForRoute(40_000, plenty);
+  assert.ok(short < medium && medium < long, `${short}, ${medium}, ${long} should increase`);
+  assert.equal(long, MAX_CHUNKS);
+});
+
+test("a long route on a starved pool asks for what the pool can carry", () => {
+  // The failure this all started from, as a rule: length says how many pieces
+  // the route warrants, the pool says how many can be in the air at once. The
+  // smaller wins, because one piece that cannot be read fails the whole read.
+  assert.equal(piecesForRoute(40_000, 4), piecesFor(4));
+  assert.equal(piecesForRoute(40_000, 4), 2);
 });
 
 test("the pieces cover the whole route, with no gap between them", () => {
@@ -116,10 +136,12 @@ test("the pieces go out AT ONCE, not one after another", async (t) => {
   }) as typeof fetch;
 
   const path = line(20_000);
+  const expected = piecesForRoute(pathLengthM(path), exitsAvailable());
+  assert.ok(expected > 1, "this route should have been split");
   await fetchFacts(path, { base: "http://example.invalid/overpass" });
   // Serial would peak at one. Parallel is the whole point: the read takes as
   // long as the slowest piece rather than the sum of them.
-  assert.equal(mostAtOnce, MAX_CHUNKS);
+  assert.equal(mostAtOnce, expected);
 });
 
 test("what the pieces bring back is merged, and counted once", async (t) => {
@@ -227,4 +249,168 @@ test("a cancelled read says so, and says nothing else", async (t) => {
   const result = await fetchFacts(line(20_000), { base: "http://example.invalid/overpass" });
   assert.ok(!result.ok);
   assert.equal(result.error, "cancelled");
+});
+
+/* ------------- the split needs somewhere for each piece to go ------------- */
+
+test("there are enough Overpass mirrors for everything that leaves from one IP", async () => {
+  /*
+   * The invariant that broke, narrowed to what it really is.
+   *
+   * Pieces that go out through PROXIES each have their own IP, so they may
+   * share a mirror freely — the limit is per IP per host. The ones that go out
+   * DIRECTLY all leave from this server's single address, and only landing on
+   * different hosts keeps them apart. `DIRECT_CONCURRENCY` is how many of those
+   * there can be at once, so that — not `MAX_CHUNKS` — is what the mirror list
+   * has to cover.
+   */
+  const { SERVICES } = await import("../src/lib/osm-forward.ts");
+  const { DIRECT_CONCURRENCY } = await import("../src/lib/proxy-pool.ts");
+  const overpass = SERVICES.overpass;
+  assert.ok(overpass);
+  assert.ok(
+    overpass.bases.length >= DIRECT_CONCURRENCY,
+    `${DIRECT_CONCURRENCY} direct at once but only ${overpass.bases.length} mirrors`,
+  );
+});
+
+test("only so many requests may go out directly at once", async () => {
+  /*
+   * Direct is ONE exit — this server's own IP — however big the pool is, and
+   * the forwarder reaches for it first whenever it works. Untracked, every
+   * piece of a parallel read took it and they all left from the same address,
+   * which is the per-IP limit the split exists to get under.
+   */
+  const { ProxyPool, DIRECT_CONCURRENCY } = await import("../src/lib/proxy-pool.ts");
+  const proxies = new ProxyPool();
+  proxies.directState = { ok: true, lastError: null, lastCheck: Date.now(), latencyMs: 10 };
+
+  const taken = Array.from({ length: DIRECT_CONCURRENCY + 3 }, () => proxies.takeDirect());
+  assert.equal(taken.filter(Boolean).length, DIRECT_CONCURRENCY);
+
+  // And it is given back, or the lane closes for the life of the process.
+  for (let i = 0; i < DIRECT_CONCURRENCY; i++) proxies.releaseDirect();
+  assert.equal(proxies.takeDirect(), true);
+});
+
+test("a server that cannot go out directly never claims the direct lane", async () => {
+  const { ProxyPool } = await import("../src/lib/proxy-pool.ts");
+  const proxies = new ProxyPool();
+  // `directState` starts unprobed, which counts as "no": the blocked machine
+  // must not pay a timeout per request rediscovering that it is blocked.
+  assert.equal(proxies.takeDirect(), false);
+});
+
+test("concurrent requests are handed different mirrors", async () => {
+  const { ProxyPool } = await import("../src/lib/proxy-pool.ts");
+  const { SERVICES, upstreamUrl } = await import("../src/lib/osm-forward.ts");
+  const overpass = SERVICES.overpass;
+  assert.ok(overpass);
+
+  const proxies = new ProxyPool();
+  // One turn around the list must visit every mirror exactly once.
+  const hosts = Array.from({ length: overpass.bases.length }, () =>
+    upstreamUrl(overpass, [], "", proxies.mirrorTurn()),
+  );
+  assert.equal(new Set(hosts).size, overpass.bases.length, `mirrors repeated: ${hosts.join(", ")}`);
+});
+
+/* ----------- never ask for more pieces than the server can carry ---------- */
+
+test("the split shrinks to what the server says it can carry", async (t) => {
+  /*
+   * The failure this fixes, from a real status page: 4 working exits, 19
+   * resting after rate limits, and a route read asking for 4 pieces at once.
+   * The last piece found nothing available, `rotate()` returned having tried
+   * nothing, and the whole read failed with "no route out worked" while the
+   * other three came back fine.
+   */
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; forgetExits(); });
+  forgetExits();
+
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ elements: [] }), {
+      headers: { "content-type": "application/json", "x-osm-exits": "2" },
+    });
+  }) as typeof fetch;
+
+  const path = line(20_000);
+
+  // The first read has nothing to go on and uses the optimistic default.
+  const optimistic = piecesForRoute(pathLengthM(path), exitsAvailable());
+  assert.ok(optimistic > 1);
+  await fetchFacts(path, { base: "http://example.invalid/overpass" });
+  assert.equal(calls, optimistic);
+  assert.equal(exitsAvailable(), 2, "the reply said how many exits there are");
+
+  // The second sizes itself to what the server just reported — one piece per
+  // two exits, so every piece still has somewhere to rotate to.
+  calls = 0;
+  await fetchFacts(path, { base: "http://example.invalid/overpass" });
+  assert.equal(calls, piecesFor(2), "asked for more pieces than the pool can carry");
+  assert.equal(calls, 1);
+});
+
+test("a server with one way out is read in one piece, not failed", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; forgetExits(); });
+  forgetExits();
+
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ elements: [] }), {
+      headers: { "content-type": "application/json", "x-osm-exits": "0" },
+    });
+  }) as typeof fetch;
+
+  const path = line(20_000);
+  await fetchFacts(path, { base: "http://example.invalid/overpass" });
+
+  calls = 0;
+  const result = await fetchFacts(path, { base: "http://example.invalid/overpass" });
+  // Zero exits is a real answer, but a zero-piece split is not a smaller
+  // request — it is no request at all, and the read must still be attempted.
+  assert.equal(calls, 1);
+  assert.ok(result.ok);
+});
+
+test("an error reply teaches the client too — that is when it matters most", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; forgetExits(); });
+  forgetExits();
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "limited", exitsTried: 0 }), {
+      status: 429,
+      headers: { "content-type": "application/json", "x-osm-exits": "1" },
+    })) as typeof fetch;
+
+  const result = await fetchFacts(line(20_000), { base: "http://example.invalid/overpass" });
+  assert.ok(!result.ok);
+  assert.match(result.error, /rate limit/i);
+  // The pool was down to one exit when it refused us; the next read must not
+  // walk into the same wall with four pieces.
+  assert.equal(exitsAvailable(), 1);
+});
+
+test("a piece is not one request, so the split leaves room to rotate", () => {
+  /*
+   * The arithmetic that failed on a real box: four working exits, nineteen
+   * resting, and a piece that may rotate through four exits before giving up.
+   * Splitting four ways there wants sixteen exit-uses out of four proxies, and
+   * the unlucky piece spends all four attempts on dead ones — which fails the
+   * whole read, because one missing piece does.
+   */
+  assert.equal(piecesFor(4), 2, "four exits is a two-way split, not a four-way one");
+  assert.equal(piecesFor(8), 4);
+  assert.equal(piecesFor(MAX_CHUNKS * 2), MAX_CHUNKS);
+  assert.equal(piecesFor(1), 1);
+  // Zero exits is a real answer, but no request at all is not a smaller one.
+  assert.equal(piecesFor(0), 1);
+  // And it never exceeds the mirror count, whatever the pool reports.
+  assert.equal(piecesFor(1_000), MAX_CHUNKS);
 });

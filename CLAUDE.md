@@ -146,11 +146,12 @@ reach the internet would teach the one that cannot.
 
 **The server scrapes on its own, from the GitHub lists in `proxy-sources.ts`.**
 `refill()` is `npm run proxies -- --scrape --save` run by the server itself, from
-`sweep()`, gated two ways: not above `MIN_WORKING`, and not more than once an
-hour. Only the exits that answered are kept — a list of thousands costs a
-timeout apiece on every boot to rediscover that they are dead, which is what
-the 649-entry file was doing. When this box cannot reach GitHub either, the
-sources are fetched THROUGH an exit that already works.
+`sweep()`, gated two ways: not above `MIN_WORKING`, and not more often than the
+refill interval — an hour normally, five minutes below `STARVING`. Only the
+exits that answered are kept — a list of thousands costs a timeout apiece on
+every boot to rediscover that they are dead, which is what the 649-entry file
+was doing. When this box cannot reach GitHub either, the sources are fetched
+THROUGH an exit that already works.
 
 - **The `directWorks` gate is GONE, and putting it back breaks the rate-limit
   path.** It used to skip the scrape entirely on a machine that could reach
@@ -161,9 +162,12 @@ sources are fetched THROUGH an exit that already works.
 - **`start()` runs on an empty list too.** It used to return early there, which
   made "no proxies yet" permanent on a fresh checkout: nothing swept, so nothing
   scraped, so the list stayed empty.
-- **`MIN_WORKING` is 8 because a route read is split into 4 parallel pieces**
-  and each wants its own exit. Lowering it re-creates the sharing the split
-  exists to avoid.
+- **`MIN_WORKING` is 24, and the appetite is deliberate.** A long route is split
+  many ways, each piece may rotate through several exits, and a rate-limited one
+  rests for a minute — so the cooldown only works with a deep bench behind it.
+  `SCRAPE_MAX` is 1500 a round, probed `SCRAPE_CONCURRENCY` (150) at a time,
+  from seventeen lists. Lowering any of these re-creates the starvation that
+  made a route read fail while three good exits were mid-request.
 
 **A rate limit going out DIRECTLY must rotate, not be returned.** The
 direct-first path returned whatever came back, a 429 included — so on the
@@ -283,9 +287,32 @@ The rules that will be undone by accident:
   from the other direction.
 - **Under `CHUNK_MIN_M` (1.5 km) there is no split.** Four queries to answer
   what one answers as fast is four slots spent for nothing.
-- **`MAX_CHUNKS` is 4 and is bounded by `MIN_WORKING` (8), not by taste.** Every
-  piece wants its own exit; more pieces than exits is the sharing the split
-  exists to avoid.
+- **DIRECT is one exit, and it is COUNTED.** `takeDirect()`/`releaseDirect()`
+  cap it at `DIRECT_CONCURRENCY`. The forwarder reaches for direct first
+  whenever it works, so untracked, every piece of a parallel read left from this
+  server's single IP at once — the per-IP limit the split exists to get under,
+  arrived at from the inside. Pieces that cannot have the lane go straight to a
+  proxy, which is what the pool is for.
+- **The mirror list must cover `DIRECT_CONCURRENCY`, NOT `MAX_CHUNKS`.** Proxied
+  pieces each have their own IP and may share a mirror freely; only the ones
+  leaving directly need different hosts to stay apart.
+- **The pool is GROWN, not the ambition trimmed.** `MIN_WORKING` is 24,
+  `SCRAPE_MAX` is 1500 probed 150 at a time from seventeen lists, and below
+  `STARVING` (6) the refill interval drops from an hour to five minutes. A long
+  route split many ways wants dozens of exits at once and a rate-limited one
+  rests for a minute, so the cooldown only works if there is a deep bench behind
+  it. Shrinking the split is the fallback, not the plan.
+- **The split is SIZED to the route AND to the pool, never fixed.**
+  `piecesForRoute()` takes the smaller of two numbers: length says how many
+  pieces the walk warrants (`CHUNK_TARGET_M`, about 2.5 km apiece, ceiling
+  `MAX_CHUNKS` = 12), and `x-osm-exits` — reported by the forwarder on every
+  reply and halved by `piecesFor()` — says how many can be in the air.
+  The halving is not caution: a piece is not one request, it rotates up to
+  `MAX_ATTEMPTS` times, so a split as wide as the pool oversubscribes it and the
+  unlucky piece spends every attempt on dead proxies — and one missing piece
+  fails the whole read by design. Both numbers were learned from a live status
+  page reading `working: 4, resting: 19`. Never restore a fixed chunk count.
+  `test/overpass-parallel.test.ts` pins all of it.
 - **Routes are still read one at a time.** Parallel WITHIN a route, sequential
   BETWEEN them: three routes at once would be twelve requests in the air.
 
@@ -305,6 +332,17 @@ The rules that will be undone by accident:
 - **Rotate first, then say it.** Both halves are load-bearing. Saying it without
   rotating makes the pool pointless; rotating without saying it leaves the page
   spinning with nothing left to try.
+- **`nothingWorked()` decides which of the two it was, and all three sources
+  count.** A 429 seen only by the DIRECT attempt is still a rate limit. Dropping
+  it is what shipped the bug: with an empty pool `rotate()` returns having tried
+  nothing, so `limited` is false, and the reply became the 502 for "no route out
+  worked" on a server whose network was fine.
+- **A request waits for a BUSY exit but never for a RESTING one.**
+  `waitForExit()` returns the moment nothing is in flight, because everything
+  left is then resting out a cooldown — and waiting for a cooldown to expire so
+  the same request can retry the hop is precisely the retry the cooldown exists
+  to prevent. The first version of this spent the whole 45s budget on a proxy
+  already known to be dead.
 - **A rate limit outranks any other failure in the batch.** It is the temporary
   one, the one that is nobody's fault, and the only one with an action attached.
   Reporting a neighbouring chunk's 502 instead sends the reader to check a

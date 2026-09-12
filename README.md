@@ -366,9 +366,35 @@ Overpass's limit is per IP, so four quarters through four exits are one query
 each rather than four from one address — and the read finishes in the time the
 slowest quarter takes rather than the sum. Nothing here asks for a particular
 proxy: the pool skips a hop that is already carrying a request, so the pieces
-are handed distinct exits on their own, and the pool keeps at least eight
-working ones so there are enough to go round. When there are not, two pieces
-share one, which is no worse than the single query this replaced.
+are handed distinct exits on their own.
+
+**How many pieces is decided by the route and by the pool, not by a constant.**
+Length says how many the walk warrants — about one piece per 2.5 km, up to
+twelve — and every forwarded reply carries `x-osm-exits`, the exits that are
+free right now, which says how many can be in the air. The smaller wins.
+
+The pool's number is halved before use, and that is not caution for its own
+sake: a piece is not one request, because when its exit fails it rotates up to
+four times. A read split as wide as the pool contends with itself, and on a list
+of mostly dead public proxies the unlucky piece spends every attempt on corpses
+and fails — which fails the whole read.
+
+**And direct is one exit, however big the pool is.** The forwarder tries this
+server's own address first whenever it works, so without a cap every piece of a
+parallel read left from that one IP at once — the per-IP limit, reached from the
+inside. Two may take it at a time; the rest go straight to a proxy.
+
+That was not hypothetical. A live status page read `working: 4, resting: 19`,
+and a fixed four-way split there wanted sixteen exit-uses from four proxies at
+four to eight seconds apiece. Two pieces down four exits is the same read with
+room for each to rotate.
+
+**Shrinking the split is the fallback, though — the plan is a bigger pool.** A
+long walk cut twelve ways wants dozens of exits at once, and a rate-limited one
+rests for a minute, so the cooldown only works if there is a deep bench behind
+it. The server keeps going until it has 24 working exits: seventeen public
+lists, up to 1500 fresh addresses a round probed 150 at a time, and when it is
+down to fewer than six it goes back every five minutes instead of every hour.
 
 Three rules make the split safe to have:
 
@@ -399,7 +425,10 @@ that cannot reach the mirrors directly. Four attempts, no more.
 **When all four are refused, the page says that in words rather than failing
 vaguely.** The server answers `429` — not the `502` it uses for "nothing got
 out", which is a different failure and names this server as the broken thing —
-and includes how many exits it spent. The page turns that into:
+and includes how many exits it spent. A 429 seen only on the direct attempt
+counts too: with an empty pool there is nothing to rotate to, and reporting that
+as unreachability is how a rate limit came to print "This server could not reach
+OpenStreetMap" above a route the same page had just scored. The page turns that into:
 
 > We have reached OpenStreetMap's rate limit for the map data. We tried 4
 > different exits and each was refused. Wait about a minute and try again.

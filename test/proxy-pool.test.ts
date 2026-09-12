@@ -498,3 +498,53 @@ test("a rotation that ends in rate limits says so, and one that does not says no
   assert.equal(broken.ok, false);
   assert.equal(broken.ok === false && broken.limited, false, "a dead tunnel is not a rate limit");
 });
+
+/* ---------- what to say when nothing came back: the reported bug ---------- */
+
+test("a rate limit seen only on the DIRECT attempt is still a rate limit", async () => {
+  /*
+   * The bug in the screenshot, in one assertion.
+   *
+   * Four pieces of a route went out at once, all direct because this server can
+   * reach OpenStreetMap; Overpass refused the later ones with 429; the pool of
+   * public proxies had no working exit, so `rotate()` came back having tried
+   * NOTHING — `limited: false`, correctly, because nothing was tried — and the
+   * 429 the direct attempt had already seen was dropped on the floor. The page
+   * printed "This server could not reach OpenStreetMap — no route out worked"
+   * above a route it had just finished scoring 71/100.
+   */
+  const { nothingWorked } = await import("../src/lib/osm-forward.ts");
+
+  assert.equal(
+    nothingWorked({ rotationLimited: false, directStatus: 429, fallbackStatus: null }),
+    "rate-limited",
+    "an empty pool must not turn a rate limit into unreachability",
+  );
+  assert.equal(
+    nothingWorked({ rotationLimited: false, directStatus: null, fallbackStatus: 429 }),
+    "rate-limited",
+    "including when it is the retry at the end that is refused",
+  );
+  assert.equal(
+    nothingWorked({ rotationLimited: true, directStatus: null, fallbackStatus: null }),
+    "rate-limited",
+  );
+});
+
+test("a genuine failure to get out is still reported as one", async () => {
+  // The other half: this must not start calling every failure a rate limit,
+  // which would send the reader to wait a minute while the box has no route
+  // out at all.
+  const { nothingWorked } = await import("../src/lib/osm-forward.ts");
+
+  assert.equal(
+    nothingWorked({ rotationLimited: false, directStatus: null, fallbackStatus: null }),
+    "unreachable",
+    "nothing answered at all",
+  );
+  assert.equal(
+    nothingWorked({ rotationLimited: false, directStatus: 502, fallbackStatus: 503 }),
+    "unreachable",
+    "an upstream being down is not a rate limit",
+  );
+});

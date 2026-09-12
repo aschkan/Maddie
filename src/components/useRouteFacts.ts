@@ -76,9 +76,23 @@ export function useRouteFacts(routes: Route[]): RouteFactsState {
           reads[index] = found.reads;
           setState({ facts: [...facts], reads: [...reads], done: index + 1, error: null });
         } else if (found.error !== "cancelled") {
-          // A failure on one route is not a failure of the page: the ones
-          // already read stay on screen, and the reason is said once.
-          setState({ facts: [...facts], reads: [...reads], done: index + 1, error: found.error });
+          /*
+           * A failure on one route is not a failure of the page: the ones
+           * already read stay on screen, and the reason is said once.
+           *
+           * WHICH route, though. Unattributed, this reads as a statement about
+           * the page — a red "the server could not reach OpenStreetMap" sitting
+           * directly above a finished verdict for a route that was read
+           * perfectly well, which is a contradiction the reader has to resolve
+           * on their own and will resolve by distrusting the verdict.
+           */
+          const which = routes.length > 1 ? `Route ${index + 1} could not be read. ` : "";
+          setState({
+            facts: [...facts],
+            reads: [...reads],
+            done: index + 1,
+            error: `${which}${found.error}`,
+          });
         }
       }
     })();

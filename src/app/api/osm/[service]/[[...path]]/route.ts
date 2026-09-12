@@ -35,8 +35,8 @@ import { NextResponse } from "next/server";
 
 import { requestThrough } from "@/lib/proxy-chain";
 import { cacheKey, osmCache } from "@/lib/osm-cache";
-import { SERVICES, shouldRotate, upstreamUrl, type Service } from "@/lib/osm-forward";
-import { ALLOW_DIRECT, pool, USER_AGENT, type HopState } from "@/lib/proxy-pool";
+import { SERVICES, nothingWorked, shouldRotate, upstreamUrl, type Service } from "@/lib/osm-forward";
+import { allowDirectFallback, pool, USER_AGENT, type HopState } from "@/lib/proxy-pool";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +76,7 @@ async function forward(request: Request, service: Service, name: string, parts: 
     out.set("cache-control", service.cache);
     out.set("x-osm-via", "cache");
     out.set("x-osm-attempts", "0");
+    out.set("x-osm-exits", String(pool().capacity()));
     return new Response(new Uint8Array(stored.body), { status: stored.status, headers: out });
   }
 
@@ -106,6 +107,22 @@ async function forward(request: Request, service: Service, name: string, parts: 
   };
 
   /*
+   * Which mirror this request starts on.
+   *
+   * NOT zero, and that was a real bug. A route read arrives here as up to four
+   * simultaneous requests, and on a server where `directWorks` is true every
+   * one of them goes out directly — from the same IP. With a hardcoded mirror
+   * they all landed on `overpass-api.de` at once, which hands out a couple of
+   * slots per IP, so the last of them were refused: two pieces of the route
+   * came back and one did not, and the page showed a confident score above a
+   * red error saying the server could not reach OpenStreetMap.
+   *
+   * A turn apiece spreads them, because the limit is per IP PER HOST. That is
+   * what makes the parallel split safe on a box with one way out.
+   */
+  const firstMirror = proxies.mirrorTurn();
+
+  /*
    * Straight out first, when that has been SHOWN to work.
    *
    * The two machines this is deployed on differ in exactly this. Sending every
@@ -115,9 +132,19 @@ async function forward(request: Request, service: Service, name: string, parts: 
    * after a probe succeeded, so the blocked machine never pays a timeout to
    * rediscover that it is blocked.
    */
-  if (proxies.configured && proxies.directWorks) {
+  let directSaid: number | null = null;
+  /*
+   * `takeDirect()`, not `directWorks`.
+   *
+   * Direct is ONE exit — this server's own IP — however many proxies the pool
+   * holds, and this used to be taken by every request that wanted it. So the
+   * pieces of a parallel route read all left from the same address at once,
+   * which is the per-IP limit the split exists to get under. The pieces that
+   * cannot have it go straight to a proxy, which is what the pool is for.
+   */
+  if (proxies.configured && proxies.takeDirect()) {
     try {
-      const response = await send(null, 0);
+      const response = await send(null, firstMirror);
       /*
        * A 429 or a 5xx going out directly is EXACTLY when the proxy list earns
        * its keep — the limit is per exit IP, and this server's own IP has just
@@ -127,11 +154,22 @@ async function forward(request: Request, service: Service, name: string, parts: 
        */
       if (!shouldRotate(response.status)) {
         keep(response.status, response.headers, response.body);
-        return reply(response.status, response.headers, response.body, service, "direct", 1);
+        return reply(response.status, response.headers, response.body, service, "direct", 1, proxies.capacity());
       }
+      /*
+       * Remember WHAT it said before falling through.
+       *
+       * Thrown away, this is how a rate limit came to be reported as
+       * unreachability: direct answered 429, the pool had no working exit to
+       * rotate to, and the 502 for "nothing got out" was returned instead —
+       * sending whoever read it to check a network that was fine.
+       */
+      directSaid = response.status;
     } catch {
       // Fall through to the proxies — the probe is a few minutes old at most,
       // but "it worked last sweep" is not a promise about this second.
+    } finally {
+      proxies.releaseDirect();
     }
   }
 
@@ -140,17 +178,19 @@ async function forward(request: Request, service: Service, name: string, parts: 
   // having when it is the VISITOR's network doing the blocking.
   if (!proxies.configured) {
     try {
-      const response = await send(null, 0);
+      const response = await send(null, firstMirror);
       keep(response.status, response.headers, response.body);
-      return reply(response.status, response.headers, response.body, service, "direct", 1);
+      return reply(response.status, response.headers, response.body, service, "direct", 1, proxies.capacity());
     } catch (error) {
-      return unreachable(error instanceof Error ? [error.message] : [], []);
+      return unreachable(error instanceof Error ? [error.message] : [], [], proxies.capacity());
     }
   }
 
   // Each retry changes BOTH the exit and the mirror, because the limit being
-  // worked around is per IP per host.
-  let attempt = 0;
+  // worked around is per IP per host. It starts one past the mirror the direct
+  // attempt just used, so the first proxy does not re-ask the host that has
+  // already refused us.
+  let attempt = firstMirror + 1;
   const result = await proxies.rotate(async (state) => {
     const response = await send(state, attempt++);
     if (shouldRotate(response.status)) {
@@ -169,48 +209,85 @@ async function forward(request: Request, service: Service, name: string, parts: 
 
   if (result.ok) {
     keep(result.value.status, result.value.headers, result.value.body);
-    return reply(result.value.status, result.value.headers, result.value.body, service, result.via, result.attempts);
+    return reply(result.value.status, result.value.headers, result.value.body, service, result.via, result.attempts, proxies.capacity());
   }
 
   /*
-   * Every exit refused with a rate limit — say THAT, not "nothing got out".
+   * One more go, straight out, on a mirror nothing has tried yet.
    *
-   * This is the honest end of the rotation. The request has been through as
-   * many different exit IPs as the pool could give it and every one of them
-   * came back 429, so there is nothing left to try quietly and the page should
-   * stop spinning and tell the person what happened. A 502 here would be a lie
-   * with a cost: it names this server as the broken thing and sends whoever is
-   * debugging at the proxy list, which just did its job four times.
+   * This is the retry that saves the read on the machine this actually runs
+   * on, where the pool of public proxies is usually empty and direct is the
+   * only way out. It is NOT a repeat of the direct attempt at the top: that
+   * one used `firstMirror`, this one uses the mirror after everything the
+   * rotation touched, and the refusal being worked around is per host.
+   *
+   * Only where direct has been probed and works. On the blocked machine this
+   * would be a guaranteed timeout on the end of every failed request, which is
+   * why it is `directWorks` rather than a flag somebody has to know to set.
+   */
+  let fallbackSaid: number | null = null;
+  const haveDirect = allowDirectFallback(proxies) && proxies.takeDirect();
+  if (haveDirect) {
+    try {
+      const response = await send(null, attempt + 1);
+      if (!shouldRotate(response.status)) {
+        keep(response.status, response.headers, response.body);
+        return reply(response.status, response.headers, response.body, service, "direct", result.tried.length + 1, proxies.capacity());
+      }
+      fallbackSaid = response.status;
+      result.reasons.push(`direct: answered ${response.status}`);
+    } catch (error) {
+      result.reasons.push(`direct: ${error instanceof Error ? error.message : "failed"}`);
+    } finally {
+      proxies.releaseDirect();
+    }
+  }
+
+  /*
+   * Rate limited — say THAT, not "nothing got out".
+   *
+   * Three ways to arrive here and they are one situation: every exit came back
+   * 429, or the direct attempt did, or the direct retry did. The last two are
+   * the common case on this deployment, because a list of public proxies is
+   * usually empty of working ones and `rotate()` then returns having tried
+   * nothing at all.
+   *
+   * Losing that distinction is what produced the error this fixes. Direct
+   * answered 429, the pool had no exit to rotate to, and the reply was the 502
+   * for "no route out worked" — so the page reported unreachability for a
+   * server whose network was fine, above a route it had just finished scoring.
    *
    * `exitsTried` is what turns the client's sentence from "we are being rate
-   * limited" into "we tried four exits and each was refused", which is the
-   * difference between a suggestion and an explanation.
+   * limited" into "we tried four exits and each was refused". Zero exits is an
+   * honest answer too: the helper then simply says the limit was reached.
    */
-  if (result.limited) {
+  const outcome = nothingWorked({
+    rotationLimited: result.limited,
+    directStatus: directSaid,
+    fallbackStatus: fallbackSaid,
+  });
+  if (outcome === "rate-limited") {
     return NextResponse.json(
       {
-        error: "OpenStreetMap is rate limiting us, from every exit we tried.",
+        error: "OpenStreetMap is rate limiting us.",
         exitsTried: result.tried.length,
         tried: result.tried,
         reasons: result.reasons.slice(0, 6),
       },
       // Never cached: storing a refusal for the service's TTL turns one minute
       // of rate limiting into ten. `keep()` is deliberately not called here.
-      { status: 429, headers: { "cache-control": "no-store", "x-osm-attempts": String(result.tried.length) } },
+      {
+        status: 429,
+        headers: {
+          "cache-control": "no-store",
+          "x-osm-attempts": String(result.tried.length),
+          "x-osm-exits": String(proxies.capacity()),
+        },
+      },
     );
   }
 
-  if (ALLOW_DIRECT) {
-    try {
-      const response = await send(null, attempt);
-      keep(response.status, response.headers, response.body);
-      return reply(response.status, response.headers, response.body, service, "direct", result.tried.length + 1);
-    } catch (error) {
-      result.reasons.push(`direct: ${error instanceof Error ? error.message : "failed"}`);
-    }
-  }
-
-  return unreachable(result.reasons, result.tried);
+  return unreachable(result.reasons, result.tried, proxies.capacity());
 }
 
 function reply(
@@ -220,6 +297,7 @@ function reply(
   service: Service,
   via: string,
   attempts: number,
+  exits: number,
 ): Response {
   const out = new Headers();
   const type = headers["content-type"];
@@ -229,6 +307,17 @@ function reply(
   // watching when the page is slow — see /api/osm/status for the rest.
   out.set("x-osm-via", via);
   out.set("x-osm-attempts", String(attempts));
+  /*
+   * How many distinct ways out this server can supply at once.
+   *
+   * The client sizes its route split by this. A fixed split met a pool that
+   * could not carry it — four pieces asked of a box with four working exits,
+   * nineteen of them resting after rate limits — and the piece that found
+   * nothing available failed the whole read. Feeding the number back on every
+   * reply is what keeps the two ends in step without an extra request, and it
+   * self-corrects as exits die and are found.
+   */
+  out.set("x-osm-exits", String(exits));
   return new Response(new Uint8Array(body), { status, headers: out });
 }
 
@@ -240,7 +329,7 @@ function reply(
  * blank reply. The client turns this into "could not reach OpenStreetMap",
  * which is true either way, and the detail is here for whoever is debugging.
  */
-function unreachable(reasons: string[], tried: string[]): Response {
+function unreachable(reasons: string[], tried: string[], exits: number): Response {
   return NextResponse.json(
     {
       error: "No route out reached OpenStreetMap.",
@@ -248,7 +337,7 @@ function unreachable(reasons: string[], tried: string[]): Response {
       reasons: reasons.slice(0, 6),
       hint: "Check /api/osm/status. If every hop failed at CONNECT with 403, the entry proxy is refusing CONNECT to non-443 ports — that is its ACL, not the list.",
     },
-    { status: 502, headers: { "cache-control": "no-store" } },
+    { status: 502, headers: { "cache-control": "no-store", "x-osm-exits": String(exits) } },
   );
 }
 

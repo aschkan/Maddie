@@ -124,6 +124,38 @@ export function upstreamUrl(service: Service, parts: string[], search: string, a
   return `${base.replace(/\/+$/, "")}${path}${search}`;
 }
 
+/**
+ * What to tell the client when nothing came back, in one testable place.
+ *
+ * The distinction it exists to keep: **rate limited** is temporary, is nobody's
+ * fault and has an action attached (wait a minute); **unreachable** says this
+ * server could not get out at all and sends whoever reads it to check the
+ * network and the proxy list. Answering the second when the first is true is a
+ * shipped bug, not a wording preference — it was reported as "This server could
+ * not reach OpenStreetMap — no route out worked" on a box whose network was
+ * fine, sitting above a route the same page had just finished scoring.
+ *
+ * How it happened: the route read goes out as several simultaneous requests,
+ * all of them direct on a server that can reach OpenStreetMap. Overpass refused
+ * the later ones with 429. The pool of public proxies had no working exit, so
+ * `rotate()` returned having tried nothing at all — `limited: false`, because
+ * nothing was tried — and the 429 the DIRECT attempt had seen was thrown away.
+ *
+ * So all three sources count, and any of them saying 429 makes it a rate limit.
+ */
+export function nothingWorked(seen: {
+  /** `rotate()` saw at least one exit refused with 429. */
+  rotationLimited: boolean;
+  /** What the direct-first attempt answered, if it was made and answered. */
+  directStatus: number | null;
+  /** What the direct retry at the end answered, if it was made and answered. */
+  fallbackStatus: number | null;
+}): "rate-limited" | "unreachable" {
+  if (seen.rotationLimited) return "rate-limited";
+  if (seen.directStatus === 429 || seen.fallbackStatus === 429) return "rate-limited";
+  return "unreachable";
+}
+
 /** Status codes worth asking a different exit about. */
 export function shouldRotate(status: number): boolean {
   // 429 rate limited, 403 some proxies inject, 5xx upstream or gateway.
