@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { cooldownMs, rank, type HopState } from "../src/lib/proxy-pool.ts";
+import net from "node:net";
+
+import { cooldownMs, ProxyPool, rank, type HopState } from "../src/lib/proxy-pool.ts";
 import { SERVICES, shouldRotate, upstreamUrl } from "../src/lib/osm-forward.ts";
 
 function state(label: string, over: Partial<HopState> = {}): HopState {
@@ -247,4 +249,100 @@ test("the first exit that answers is the one used, and it is named", async () =>
     assert.equal(result.via, "slow:1");
     assert.equal(result.attempts, 2);
   }
+});
+
+/* ─────────────────── the entry proxy, and who gets blamed ────────────────── */
+
+test("an entry that cannot be reached is not the exit's fault", async () => {
+  // The bug this pins, from a real status page: every one of 649 hops failed
+  // with "no TCP connection to 192.168.11.165:2000", all 649 were marked dead
+  // and 536 were left resting — for a fault none of them had, through a LAN
+  // proxy none of them was ever reached through. The list then reported
+  // `working: 0` about proxies it had never tried.
+  const pool = new ProxyPool();
+  pool.entry = { host: "192.168.11.165", port: 2000, label: "192.168.11.165:2000" };
+  pool.states = [state("1.1.1.1:8080")];
+  // An unreachable LAN address would otherwise burn the nine-second default.
+  pool.probeTimeoutMs = 400;
+  pool.entryTimeoutMs = 400;
+
+  const exit = pool.states[0];
+  assert.ok(exit);
+  await pool.probe(exit);
+
+  // Nothing was learned about the exit, so nothing may be held against it.
+  assert.notEqual(exit.ok, false, "the exit was blamed for the entry");
+  assert.equal(exit.restingUntil, 0, "the exit was rested for the entry");
+  assert.equal(exit.failures, 0);
+
+  // And what WAS learned is recorded against the thing that failed.
+  assert.equal(pool.entryState.ok, false);
+  assert.match(pool.entryState.lastError ?? "", /192\.168\.11\.165:2000/);
+});
+
+test("and the entry is reported as the thing that is down", async () => {
+  const pool = new ProxyPool();
+  pool.entry = { host: "192.168.11.165", port: 2000, label: "192.168.11.165:2000" };
+  pool.states = [state("1.1.1.1:8080")];
+  pool.entryTimeoutMs = 400;
+
+  await pool.checkEntry();
+  assert.equal(pool.entryState.ok, false);
+
+  const said = pool.problem();
+  assert.ok(said, "a dead entry is a problem worth one sentence");
+  assert.match(said, /192\.168\.11\.165:2000/);
+  assert.match(said, /cannot be reached from this server/i);
+  // And it says what happens next, because "working: 0" did not.
+  assert.match(said, /tried directly instead/i);
+
+  const summary = pool.summary();
+  assert.equal(summary.entryOk, false);
+  assert.equal(summary.bypassingEntry, true);
+  assert.equal(summary.problem, said);
+});
+
+test("with the entry down, the provided list is used DIRECTLY", async () => {
+  // The whole point. An entry that is the only way out is an assumption, and
+  // enforcing it against a dead entry turns 649 proxies into none.
+  const pool = new ProxyPool();
+  pool.entry = { host: "192.168.11.165", port: 2000, label: "192.168.11.165:2000" };
+  pool.states = [state("1.1.1.1:8080")];
+
+  assert.equal(pool.entryFor()?.label, "192.168.11.165:2000", "used while it is believed up");
+
+  pool.entryState = { ok: false, lastError: "no TCP connection", lastCheck: Date.now(), latencyMs: null };
+  assert.equal(pool.entryFor(), null, "and stepped over once it is known down");
+  assert.equal(pool.bypassingEntry, true);
+});
+
+test("a live entry is used, and is not reported as a problem", async () => {
+  const server = net.createServer((socket) => socket.destroy());
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const port = (server.address() as net.AddressInfo).port;
+
+  const pool = new ProxyPool();
+  pool.entry = { host: "127.0.0.1", port, label: `127.0.0.1:${port}` };
+  pool.states = [state("1.1.1.1:8080")];
+  try {
+    assert.equal(await pool.checkEntry(), true);
+    assert.equal(pool.entryState.ok, true);
+    assert.equal(pool.bypassingEntry, false);
+    assert.equal(pool.entryFor()?.port, port);
+    assert.equal(pool.problem(), null);
+  } finally {
+    server.close();
+  }
+});
+
+test("one request stops spending time once its budget is gone", async () => {
+  const pool = new ProxyPool();
+  pool.states = [state("1.1.1.1:8080"), state("2.2.2.2:8080"), state("3.3.3.3:8080")];
+  pool.maxAttempts = 3;
+  pool.budgetMs = 0;   // already spent
+
+  const result = await pool.rotate(async () => ({ done: true as const, value: "never" }));
+  assert.ok(!result.ok);
+  assert.equal(result.tried.length, 0, "a spent budget tries nothing further");
+  assert.match(result.reasons.join(" "), /gave up after/);
 });

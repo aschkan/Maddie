@@ -30,7 +30,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { parseHop, parseHopList, requestThrough, type Hop } from "./proxy-chain.ts";
+import { isEntryFailure, openTunnel, parseHop, parseHopList, requestThrough, type Hop } from "./proxy-chain.ts";
 
 export interface HopState {
   hop: Hop;
@@ -123,13 +123,25 @@ export function loadHops(): Hop[] {
   }
 }
 
+/** What is known about the entry proxy, which is checked on its own. */
+export interface EntryState {
+  /** null until it has been checked. */
+  ok: boolean | null;
+  lastError: string | null;
+  lastCheck: number;
+  latencyMs: number | null;
+}
+
 export class ProxyPool {
   entry: Hop | null;
+  entryState: EntryState;
   states: HopState[];
   probeUrl: string;
   timeoutMs: number;
   probeTimeoutMs: number;
+  entryTimeoutMs: number;
   maxAttempts: number;
+  budgetMs: number;
   sweeping: boolean;
   swept: number;
   lastSweep: number;
@@ -137,6 +149,7 @@ export class ProxyPool {
 
   constructor() {
     this.entry = parseHop(process.env.OSM_PROXY_ENTRY ?? "");
+    this.entryState = { ok: null, lastError: null, lastCheck: 0, latencyMs: null };
     this.states = loadHops().map((hop) => ({
       hop, ok: null, latencyMs: null, lastProbe: 0, lastError: null,
       failures: 0, restingUntil: 0, inFlight: false, successes: 0,
@@ -148,7 +161,17 @@ export class ProxyPool {
     this.timeoutMs = envNumber("OSM_PROXY_TIMEOUT_MS", 25_000);
     // Shorter than a real request: a probe exists to find dead entries fast.
     this.probeTimeoutMs = envNumber("OSM_PROXY_PROBE_TIMEOUT_MS", 9_000);
+    // The entry is a LAN address: it answers at once or it is not there.
+    this.entryTimeoutMs = envNumber("OSM_PROXY_ENTRY_TIMEOUT_MS", 4_000);
     this.maxAttempts = Math.max(1, envNumber("OSM_PROXY_ATTEMPTS", 4));
+    /*
+     * A ceiling on ONE request, across all its attempts.
+     *
+     * Four attempts at a 25s timeout is a hundred seconds, and a page that
+     * hangs for a hundred seconds has already failed — the browser shows a
+     * pending request and the person reloads. Better to give up and say why.
+     */
+    this.budgetMs = envNumber("OSM_PROXY_BUDGET_MS", 45_000);
     this.sweeping = false;
     this.swept = 0;
     this.lastSweep = 0;
@@ -198,12 +221,67 @@ export class ProxyPool {
     state.restingUntil = Date.now() + LIMIT_REST_MS;
   }
 
+  /**
+   * Is the entry proxy even there? One plain TCP connect, nothing else.
+   *
+   * This exists because the answer used to be buried. With the entry down,
+   * every one of 649 hops failed with the same sentence — "no TCP connection
+   * to 192.168.11.165:2000" — and the status page reported `working: 0` and
+   * eight identical sample failures, which reads as "the proxy list is dead"
+   * when the list was never tried. One connect, up front, names the machine
+   * that is actually unreachable.
+   *
+   * Short timeout: this is a LAN address. Either it answers immediately or it
+   * is not there.
+   */
+  async checkEntry(): Promise<boolean> {
+    if (!this.entry) {
+      this.entryState = { ok: null, lastError: null, lastCheck: Date.now(), latencyMs: null };
+      return true;
+    }
+    const started = Date.now();
+    try {
+      const socket = await openTunnel(this.entry.host, this.entry.port, {
+        entry: null, hop: null, timeoutMs: this.entryTimeoutMs,
+      });
+      socket.destroy();
+      this.entryState = { ok: true, lastError: null, lastCheck: started, latencyMs: Date.now() - started };
+      return true;
+    } catch (error) {
+      this.entryState = {
+        ok: false,
+        lastError: (error instanceof Error ? error.message : "failed").slice(0, 200),
+        lastCheck: started,
+        latencyMs: null,
+      };
+      return false;
+    }
+  }
+
+  /**
+   * The entry to actually use for a request.
+   *
+   * Null once the entry has been found unreachable, which means the hops are
+   * tried DIRECTLY instead. The entry exists because the exits are assumed to
+   * be reachable only through it — but that is an assumption, and enforcing it
+   * against a dead entry turns a list of 649 proxies into a list of zero. If
+   * some of them can be reached from here without it, the chain still works;
+   * if none can, the attempts fail as they would have anyway.
+   */
+  entryFor(): Hop | null {
+    return this.entryState.ok === false ? null : this.entry;
+  }
+
+  get bypassingEntry(): boolean {
+    return this.entry !== null && this.entryState.ok === false;
+  }
+
   /** One probe: the real chain, to a real upstream. */
   async probe(state: HopState): Promise<void> {
     state.lastProbe = Date.now();
     try {
       const response = await requestThrough(this.probeUrl, {
-        entry: this.entry,
+        entry: this.entryFor(),
         hop: state.hop,
         timeoutMs: this.probeTimeoutMs,
         headers: { "User-Agent": USER_AGENT },
@@ -211,6 +289,16 @@ export class ProxyPool {
       if (response.status >= 200 && response.status < 400) this.succeeded(state, response.ms);
       else this.failed(state, `probe answered ${response.status}`);
     } catch (error) {
+      /*
+       * An entry failure is NOT this hop's fault — it was never contacted.
+       * Marking it bad here is what blacklisted the whole list and left 536 of
+       * them resting for a fault they had no part in.
+       */
+      if (isEntryFailure(error)) {
+        this.entryState.ok = false;
+        this.entryState.lastError = (error instanceof Error ? error.message : "failed").slice(0, 200);
+        return;
+      }
       this.failed(state, error instanceof Error ? error.message : "probe failed");
     }
   }
@@ -226,6 +314,16 @@ export class ProxyPool {
     if (this.sweeping || this.states.length === 0) return;
     this.sweeping = true;
     this.swept = 0;
+
+    /*
+     * The entry first, once.
+     *
+     * Sweeping 649 hops through an entry that is not answering costs 649
+     * timeouts and teaches nothing — and used to mark all of them dead. If it
+     * is down, `entryFor()` now returns null and the sweep goes on WITHOUT it,
+     * which is the only way the provided list gets tried at all.
+     */
+    await this.checkEntry();
 
     // Known-good first, so a sweep that is interrupted has still refreshed the
     // hops the app is actually using.
@@ -280,8 +378,13 @@ export class ProxyPool {
     // exit will say no through it again; that is not a reason to think less of
     // the exit.
     const used = new Set<string>();
+    const deadline = Date.now() + this.budgetMs;
 
     for (let n = 0; n < this.maxAttempts; n++) {
+      if (Date.now() >= deadline) {
+        reasons.push(`gave up after ${this.budgetMs}ms`);
+        break;
+      }
       const state = rank(this.states, Date.now()).find((candidate) => !used.has(candidate.hop.label));
       if (!state) break;
 
@@ -308,8 +411,21 @@ export class ProxyPool {
         else if (outcome.fault === "limit") this.limited(state, outcome.reason);
         reasons.push(`${state.hop.label}: ${outcome.reason}`);
       } catch (error) {
-        // Nothing came back at all: that IS the hop.
         const reason = error instanceof Error ? error.message : "failed";
+        /*
+         * Unless it was the ENTRY that could not be reached, in which case
+         * this hop was never contacted and every remaining one will fail the
+         * same way. Stop, rather than spending the whole budget rediscovering
+         * that the LAN proxy is down 649 times.
+         */
+        if (isEntryFailure(error)) {
+          this.entryState.ok = false;
+          this.entryState.lastError = reason.slice(0, 200);
+          reasons.push(`entry ${this.entry?.label ?? ""}: ${reason}`);
+          state.inFlight = false;
+          break;
+        }
+        // Nothing came back at all: that IS the hop.
         this.failed(state, reason);
         reasons.push(`${state.hop.label}: ${reason}`);
       } finally {
@@ -320,8 +436,37 @@ export class ProxyPool {
     return { ok: false, tried, reasons };
   }
 
+  /**
+   * The one sentence worth reading, or null when nothing is obviously wrong.
+   *
+   * The status page used to answer with `working: 0` and eight identical
+   * failures, and working out that they all named the same LAN address was
+   * left to whoever was reading. This says it.
+   */
+  problem(): string | null {
+    if (this.entry && this.entryState.ok === false) {
+      return (
+        `The entry proxy ${this.entry.label} cannot be reached from this server ` +
+        `(${this.entryState.lastError ?? "no connection"}). ` +
+        `Every exit is being tried directly instead — check that this machine is on the same ` +
+        `network as ${this.entry.host}, and that something is listening on port ${this.entry.port}.`
+      );
+    }
+    if (this.states.length === 0 && !this.entry) {
+      return "No proxies are configured. This server is fetching OpenStreetMap directly.";
+    }
+    if (this.states.length > 0 && this.states.every((state) => state.ok === false)) {
+      return "Every proxy in the list has failed. Nothing here can reach OpenStreetMap.";
+    }
+    return null;
+  }
+
   summary(): {
     entry: string | null;
+    entryOk: boolean | null;
+    entryError: string | null;
+    bypassingEntry: boolean;
+    problem: string | null;
     total: number;
     working: number;
     untested: number;
@@ -334,6 +479,12 @@ export class ProxyPool {
     const now = Date.now();
     return {
       entry: this.entry?.label ?? null,
+      // Checked on its own, so "the entry is down" is never inferred from 649
+      // identical hop failures.
+      entryOk: this.entryState.ok,
+      entryError: this.entryState.lastError,
+      bypassingEntry: this.bypassingEntry,
+      problem: this.problem(),
       total: this.states.length,
       working: this.states.filter((state) => state.ok === true).length,
       untested: this.states.filter((state) => state.ok === null).length,

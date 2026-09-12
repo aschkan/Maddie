@@ -248,6 +248,28 @@ proxy is the problem.** A Squid-style proxy allows `CONNECT` to port 443 and
 nothing else out of the box, and these hops are on 8080, 999, 3128. Both
 `npm run proxies` and `/api/osm/status` call that case out by name.
 
+### When the entry proxy is the thing that is down
+
+Everything goes out through `OSM_PROXY_ENTRY`, so if that one machine is not
+reachable, every proxy in the list fails with the same message. That used to
+read as "the whole list is dead" — `total: 649, working: 0, resting: 536` —
+when in truth not one of them had been contacted.
+
+So the entry is checked on its own, with a single TCP connect, and
+`/api/osm/status` leads with a sentence rather than a table:
+
+> The entry proxy 192.168.11.165:2000 cannot be reached from this server (no
+> TCP connection within 4000ms). Every exit is being tried directly instead —
+> check that this machine is on the same network as 192.168.11.165, and that
+> something is listening on port 2000.
+
+Two things follow from that. A failure to reach the entry is never held against
+an exit, so the list is not blacklisted for somebody else's fault. And the
+exits are then tried **directly**, without the entry: it is there because the
+exits are assumed to be reachable only through it, and when it is gone that
+assumption is worth testing rather than enforcing. If they cannot be reached
+directly either, those attempts fail as they would have done anyway.
+
 ### On rotating exits and rate limits
 
 A request that comes back rate limited is retried from a different exit and a

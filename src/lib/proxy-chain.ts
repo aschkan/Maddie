@@ -175,6 +175,22 @@ class ChainError extends Error {
   }
 }
 
+/**
+ * Which link of the chain gave up, for a caller that has to apportion blame.
+ *
+ * `"entry"` is the one that matters: it means no TCP socket to the LAN proxy
+ * could be opened at all, so the exit named in the same breath was never
+ * contacted and nothing whatsoever was learned about it.
+ */
+export function chainStage(error: unknown): string | null {
+  return error instanceof ChainError ? error.stage : null;
+}
+
+/** True when the failure was reaching the entry proxy, not the exit. */
+export function isEntryFailure(error: unknown): boolean {
+  return chainStage(error) === "entry";
+}
+
 function connectTcp(host: string, port: number, timeoutMs: number): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host, port });
@@ -275,7 +291,23 @@ export async function openTunnel(
   const first = entry ?? hop;
   if (!first) return connectTcp(host, port, timeoutMs);
 
-  const socket = await connectTcp(first.host, first.port, timeoutMs);
+  /*
+   * Failing to reach the ENTRY says nothing about the exit.
+   *
+   * Everything goes through the entry when one is configured, so an entry that
+   * is down fails every hop in the list with the same message — and the caller,
+   * seeing a throw per hop, marked all 649 of them dead and rested them. That
+   * is hundreds of proxies blacklisted for a fault none of them had, and the
+   * pool then reports "working: 0" about a list it never tested. The stage is
+   * tagged here so the pool can tell the two apart.
+   */
+  const socket = await connectTcp(first.host, first.port, timeoutMs).catch((error: unknown) => {
+    if (entry && first === entry) {
+      const why = error instanceof Error ? error.message : "failed";
+      throw new ChainError("entry", why);
+    }
+    throw error;
+  });
   try {
     if (entry && hop) {
       // Link one: out to the public proxy through the LAN one.
@@ -475,7 +507,16 @@ export async function requestThrough(target: string, options: ThroughRequest): P
       () => fail(new ChainError("request", `nothing came back from ${url.hostname} within ${options.timeoutMs}ms`)),
       options.timeoutMs,
     );
-    request.on("error", (error: Error) => fail(new ChainError("request", error.message)));
+    /*
+     * Keep the stage when the error already has one.
+     *
+     * Re-wrapping everything as "request" here threw away the one fact the
+     * caller needed: that the failure was the ENTRY proxy and not this hop.
+     * Only the message survived, so the pool saw an ordinary failure per hop
+     * and retired all 649 of them for a LAN proxy being down.
+     */
+    request.on("error", (error: Error) =>
+      fail(error instanceof ChainError ? error : new ChainError("request", error.message)));
 
     if (body) request.write(body);
     request.end();

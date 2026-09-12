@@ -14,6 +14,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const proxies = pool();
+  // Check the entry on the way past: it is one TCP connect to a LAN address,
+  // and it is the answer most of the time this page is being read.
+  await proxies.checkEntry();
   const summary = proxies.summary();
 
   const failures = proxies.states

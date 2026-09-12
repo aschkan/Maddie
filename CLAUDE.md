@@ -109,6 +109,36 @@ nothing else — that was the requirement, and it is also what keeps this
 server's map queries out of the LAN proxy's logs. `test/proxy-chain.test.ts`
 asserts the ORDER of the two CONNECTs for exactly that reason.
 
+**A dead ENTRY must not condemn the list.** Everything goes through the entry
+when one is configured, so an unreachable entry fails every hop with the same
+sentence — and the pool used to mark all of them dead and rest them. A real
+status page read `total: 649, working: 0, resting: 536` with eight identical
+failures, all of them "no TCP connection to 192.168.11.165:2000": hundreds of
+proxies blacklisted for a fault none of them had, about a list that had never
+been tried. The rules now:
+
+- **`checkEntry()` probes the entry on its own**, one plain TCP connect, before
+  each sweep and whenever `/api/osm/status` is read. One answer, about the one
+  machine, instead of 649 identical ones about the wrong machines.
+- **An entry failure is tagged `stage: "entry"` and never charged to the hop.**
+  `isEntryFailure()` is the check. The hop was not contacted, so nothing was
+  learned about it — the same rule the pool already applies to an upstream
+  saying no, one layer further down.
+- **`request.on("error")` must PRESERVE an existing `ChainError`.** It used to
+  re-wrap everything as `stage: "request"`, which threw away the only fact the
+  caller needed and is why the entry could not be told apart in the first place.
+- **With the entry down, the list is used DIRECTLY.** `entryFor()` returns null
+  and the hops are tried without it. The entry exists because the exits are
+  *assumed* reachable only through it — that is an assumption, and enforcing it
+  against a dead entry turns 649 proxies into none. If the exits cannot be
+  reached directly either, those attempts fail as they would have anyway.
+- **`summary().problem` is one sentence** naming the machine that is actually
+  unreachable and what to check. Working it out from `working: 0` was left to
+  the reader, and the reader concluded the proxy list was broken.
+- **`OSM_PROXY_BUDGET_MS` caps ONE request across all its attempts** (45s).
+  Four attempts at a 25-second timeout is a hundred seconds, and a page that
+  hangs for a hundred seconds has already failed.
+
 The upstream comes from a fixed table in `osm-forward.ts` and can never be
 named by the request. A forwarder whose target is a query parameter is an open
 proxy, and an open proxy on a public server is somebody's problem within a day.
@@ -482,6 +512,11 @@ can act on by walking a different way), and is the same data OSRM routed on.
   not `pchar`.
 - **`/api/assess` and `/api/reports` are never routed through `/api/osm/*`.**
   Same-origin already; there is nothing to reach around.
+- **An unreachable entry proxy is not 649 dead exits.** Tag the stage, check the
+  entry on its own, and bypass it rather than blacklisting the list. The
+  symptom was `working: 0` about proxies that had never been contacted.
+- **Re-wrapping an error loses its stage.** `new ChainError("request", e.message)`
+  keeps the words and drops the one bit of structure the caller acts on.
 
 ## Toolchain constraints
 

@@ -57,7 +57,9 @@ async function forward(request: Request, service: Service, parts: string[]): Pro
     const target = upstreamUrl(service, parts, url.search, attempt);
     if (!target) throw new Error("no upstream configured");
     return await requestThrough(target, {
-      entry: proxies.entry,
+      // `entryFor()`, not `entry`: null once the LAN proxy has been found
+      // unreachable, which is what lets the list be tried at all.
+      entry: proxies.entryFor(),
       hop: state?.hop ?? null,
       timeoutMs: proxies.timeoutMs,
       method,
