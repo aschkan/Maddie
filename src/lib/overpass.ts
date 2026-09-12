@@ -553,6 +553,41 @@ function learnExits(response: Response): void {
   knownExits = Math.max(0, Math.floor(parsed));
 }
 
+/**
+ * How many times a piece that failed is asked again.
+ *
+ * Three rounds, and this is the number that makes splitting survivable. A piece
+ * is read through a public proxy; a public proxy fails often. Even at a
+ * generous 95% per piece, a seven-way split succeeds only about seven times in
+ * ten — and one missing piece fails the whole read, by design. Retrying only
+ * the pieces that failed turns that into about 999 in 1000, at the cost of one
+ * extra round trip on the unlucky ones.
+ *
+ * A rate limit is NOT retried here; see `fetchFacts`.
+ */
+export const PIECE_ROUNDS = 3;
+
+/**
+ * How long to wait before asking the failed pieces again.
+ *
+ * Enough for the exits that just failed to be marked and stepped over, and for
+ * the ones carrying the pieces that succeeded to come free. Not so long that
+ * the page feels stuck: three rounds costs a second and a half at worst.
+ */
+export const PIECE_RETRY_MS = 500;
+
+/**
+ * A ceiling on the whole read, retries included.
+ *
+ * The server already caps ONE request at 45 seconds across all its exits.
+ * Three rounds of that is over two minutes, and a page that spins for two
+ * minutes has already failed — the person reloads, which starts the whole
+ * thing again and takes another set of exits with it. So the rounds stop when
+ * the clock runs out and the read reports what it could not get, which is both
+ * faster and truer than a spinner.
+ */
+export const READ_BUDGET_MS = 60_000;
+
 /** What one chunk's query came back with. */
 type ChunkReply =
   | { ok: true; elements: OverpassElement[] }
@@ -661,34 +696,73 @@ export async function fetchFacts(
   if (queries.length === 0) return { ok: false, error: "No route to look at." };
 
   const base = options.base ?? DEFAULT_OVERPASS;
-  const replies = await Promise.all(queries.map((query) => askOverpass(query, base, options.signal)));
-
-  // A cancelled read is not a failure to report; the caller has moved on.
-  if (replies.some((reply) => !reply.ok && reply.cancelled)) return { ok: false, error: "cancelled" };
 
   /*
-   * A rate limit outranks any other failure in the batch.
+   * Ask for every piece; then ask again for the ones that did not come back.
    *
-   * It is the one that is temporary, the one that is nobody's fault, and the
-   * one with an action attached — wait a minute. Reporting a neighbouring
-   * chunk's 502 instead would send the reader to check a server that is fine.
+   * Retrying only the failures is what makes the split survivable, and leaving
+   * it out was a real bug: a 16 km walk cut seven ways failed as a whole
+   * because one piece got a 502, while the other six sat there read and
+   * discarded. A piece goes out through a public proxy and a public proxy
+   * fails often — at a per-piece success rate that looks fine, a seven-way
+   * split does not.
+   *
+   * The correctness rule underneath is unchanged, and is why this retries
+   * rather than salvaging: a stretch that was never fetched has no ways under
+   * it, so every sample along it reads as "no lighting information" and the
+   * map draws it grey with "nobody has mapped this" — a claim about
+   * OpenStreetMap that would be false. Answering for six sevenths of a walk is
+   * wrong about the seventh, silently. So: ask again, and only give up when a
+   * piece has genuinely refused several times.
    */
-  const limited = replies.find((reply) => !reply.ok && reply.limited);
-  if (limited && !limited.ok) return { ok: false, error: limited.error };
+  const replies: ChunkReply[] = queries.map(() => ({
+    ok: false, error: "not asked yet", limited: false, cancelled: false,
+  }));
 
-  /*
-   * One piece missing fails the whole read, deliberately.
-   *
-   * The alternative — counting what came back — is worse than it looks: the
-   * unfetched stretch has no ways under it, so every sample along it counts as
-   * having no lighting information, and the map draws it grey with "nobody has
-   * mapped this". That is a claim about OpenStreetMap, and it would be false.
-   * A read that declines to answer costs a retry; one that quietly answers for
-   * three quarters of a walk is wrong about the quarter that matters.
-   */
+  const deadline = Date.now() + READ_BUDGET_MS;
+
+  for (let round = 0; round < PIECE_ROUNDS; round++) {
+    const pending = replies.flatMap((reply, index) => (reply.ok ? [] : [index]));
+    if (pending.length === 0) break;
+
+    // Out of time. The first round always runs — a read that gives up before
+    // asking anything would report a failure it never actually had.
+    if (round > 0 && Date.now() >= deadline) break;
+
+    if (round > 0) {
+      // Long enough for the exits that just failed to be marked and stepped
+      // over, and for the ones that succeeded to come free.
+      await new Promise((resolve) => setTimeout(resolve, PIECE_RETRY_MS));
+      if (options.signal?.aborted) return { ok: false, error: "cancelled" };
+    }
+
+    const fresh = await Promise.all(
+      pending.map((index) => askOverpass(queries[index] as string, base, options.signal)),
+    );
+    pending.forEach((index, n) => { replies[index] = fresh[n] as ChunkReply; });
+
+    // A cancelled read is not a failure to report; the caller has moved on.
+    if (replies.some((reply) => !reply.ok && reply.cancelled)) return { ok: false, error: "cancelled" };
+
+    /*
+     * A rate limit ends it now, without spending the remaining rounds.
+     *
+     * By the time one reaches here the server has already rotated this request
+     * through every exit it has — that is what the 429 means. Asking again a
+     * moment later asks the same exhausted pool the same question, and holds
+     * the limit open while the reader waits. It is also the one failure with
+     * something to tell them: wait about a minute.
+     */
+    const limited = replies.find((reply) => !reply.ok && reply.limited);
+    if (limited && !limited.ok) return { ok: false, error: limited.error };
+  }
+
   const failed = replies.find((reply) => !reply.ok);
   if (failed && !failed.ok) {
-    const part = replies.length > 1 ? ` (one of ${replies.length} parts of the route)` : "";
+    const part =
+      replies.length > 1
+        ? ` (one of ${replies.length} parts of the route, after ${PIECE_ROUNDS} tries)`
+        : "";
     return { ok: false, error: `${failed.error}${part}` };
   }
 

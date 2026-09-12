@@ -282,9 +282,26 @@ The rules that will be undone by accident:
   the elements are fetched, never about how they are counted — a per-piece count
   summed afterwards would be a second implementation of the scoring, and
   `test/overpass-parallel.test.ts` pins that a split read equals an unsplit one.
-- **One missing piece fails the WHOLE read.** Answering for three quarters and
-  reporting the fourth as unmapped is the grey-notch failure again, arrived at
-  from the other direction.
+- **A piece that fails is ASKED AGAIN — only then does the read fail.**
+  `PIECE_ROUNDS` (3) re-asks just the pieces that did not come back; the ones
+  that did are never re-fetched. Leaving this out was a shipped bug: a 16 km
+  walk cut seven ways failed as a whole because ONE piece got a 502, while the
+  other six sat read and discarded. A piece goes out through a public proxy and
+  a public proxy fails often — at a per-piece success rate that looks fine, a
+  seven-way split does not.
+- **One missing piece still fails the WHOLE read, once the retries are spent.**
+  Answering for six sevenths and reporting the seventh as unmapped is the
+  grey-notch failure again, arrived at from the other direction. Retrying is the
+  fix; salvaging a partial read is not.
+- **A rate limit is NOT retried.** A 429 means the server already rotated
+  through every exit it has, so asking again a moment later asks the same
+  exhausted pool the same question and holds the limit open while the reader
+  waits. It ends the read at once, with the sentence that has an action in it.
+- **`READ_BUDGET_MS` (60s) caps the whole read, retries included.** The server
+  already caps ONE request at 45s; three rounds of that is over two minutes, and
+  a page that spins for two minutes has already failed — the person reloads,
+  which starts again and takes another set of exits with it. The first round
+  always runs, or the read would report a failure it never had.
 - **Under `CHUNK_MIN_M` (1.5 km) there is no split.** Four queries to answer
   what one answers as fast is four slots spent for nothing.
 - **DIRECT is one exit, and it is COUNTED.** `takeDirect()`/`releaseDirect()`

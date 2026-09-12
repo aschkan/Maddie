@@ -406,8 +406,15 @@ Three rules make the split safe to have:
   the same `readRoute` as before. Two corridors both return the ways around the
   vertex they share; counting a lamp twice because the route happened to be cut
   beside it would make the score depend on where the cut fell.
-* **One missing piece fails the whole read.** Answering for three quarters of a
-  walk and silently reporting the fourth as unmapped is worse than a retry.
+* **A piece that fails is asked again**, up to three rounds, and only the pieces
+  that failed — the ones already read are never re-fetched. Without that, a
+  16 km walk cut seven ways failed as a whole the first time any one piece got
+  a 502, with the other six read and thrown away. A rate limit is the exception:
+  a 429 means every exit has already been tried, so it ends the read at once
+  rather than holding the limit open.
+* **One missing piece still fails the whole read**, once the retries are spent.
+  Answering for six sevenths of a walk and silently reporting the seventh as
+  unmapped is worse than saying so. The whole read is capped at a minute.
 
 Short routes — under 1.5 km — are not cut at all. Four queries to answer what
 one answers as fast is four slots spent for nothing.

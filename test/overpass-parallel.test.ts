@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   CHUNK_MIN_M, MAX_CHUNKS, chunkPath, computeFacts, exitsAvailable, fetchFacts, forgetExits,
-  overpassQuery, piecesFor, piecesForRoute,
+  overpassQuery, piecesFor, piecesForRoute, PIECE_ROUNDS,
 } from "../src/lib/overpass.ts";
 import { pathLengthM } from "../src/lib/geo.ts";
 import type { LatLng } from "../src/lib/osrm.ts";
@@ -221,22 +221,37 @@ test("a rate limit is reported as one, and outranks any other failure", async (t
   assert.match(result.error, /4 different exits/);
 });
 
-test("one missing piece fails the whole read rather than answering for the rest", async (t) => {
-  // Counting what came back would leave the unfetched stretch with no ways
-  // under it — reported as "nobody has mapped this", drawn grey, and wrong.
+test("a piece that never comes back fails the whole read, after several tries", async (t) => {
+  /*
+   * The correctness rule, and it survives the retries.
+   *
+   * Counting what came back would leave the unfetched stretch with no ways
+   * under it — every sample there reads "no lighting information", the map
+   * draws it grey with "nobody has mapped this", and that is a claim about
+   * OpenStreetMap which would be false. So the read declines rather than
+   * answering for six sevenths of a walk and being silently wrong about the
+   * seventh.
+   */
   const original = globalThis.fetch;
-  t.after(() => { globalThis.fetch = original; });
+  t.after(() => { globalThis.fetch = original; forgetExits(); });
+  forgetExits();
 
-  let call = 0;
+  let calls = 0;
   globalThis.fetch = (async () => {
-    call += 1;
-    return call === 2 ? new Response("", { status: 500 }) : jsonReply([]);
+    calls += 1;
+    return new Response("", { status: 500 });
   }) as typeof fetch;
 
-  const result = await fetchFacts(line(20_000), { base: "http://example.invalid/overpass" });
+  const path = line(20_000);
+  const pieces = piecesForRoute(pathLengthM(path), exitsAvailable());
+  const result = await fetchFacts(path, { base: "http://example.invalid/overpass" });
+
   assert.ok(!result.ok);
   assert.match(result.error, /answered 500/);
-  assert.match(result.error, /one of 4 parts/);
+  assert.match(result.error, new RegExp(`one of ${pieces} parts`));
+  assert.match(result.error, new RegExp(`after ${PIECE_ROUNDS} tries`));
+  // Every piece, every round — and no more than that.
+  assert.equal(calls, pieces * PIECE_ROUNDS);
 });
 
 test("a cancelled read says so, and says nothing else", async (t) => {
@@ -413,4 +428,68 @@ test("a piece is not one request, so the split leaves room to rotate", () => {
   assert.equal(piecesFor(0), 1);
   // And it never exceeds the mirror count, whatever the pool reports.
   assert.equal(piecesFor(1_000), MAX_CHUNKS);
+});
+
+/* ------------- a piece that fails is asked again, not given up on --------- */
+
+test("a piece that fails once is retried, and the read succeeds", async (t) => {
+  /*
+   * The bug this fixes, from a screenshot: a 16 km walk cut seven ways failed
+   * as a whole because ONE piece got a 502, while the other six sat there read
+   * and discarded. A piece goes out through a public proxy and a public proxy
+   * fails often — at a per-piece success rate that looks fine, a seven-way
+   * split does not.
+   */
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; forgetExits(); });
+  forgetExits();
+
+  let calls = 0;
+  let failedOnce = false;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    if (!failedOnce) { failedOnce = true; return new Response("", { status: 502 }); }
+    return new Response(JSON.stringify({ elements: [] }), {
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  const path = line(20_000);
+  const pieces = piecesForRoute(pathLengthM(path), exitsAvailable());
+  assert.ok(pieces > 1, "this route should have been split");
+
+  const result = await fetchFacts(path, { base: "http://example.invalid/overpass" });
+  assert.ok(result.ok, "one flaky piece must not fail the whole read");
+  // Every piece once, plus the one retry. Only the failure is re-asked; the
+  // pieces that came back are not thrown away and fetched again.
+  assert.equal(calls, pieces + 1);
+});
+
+test("a rate limit ends the read at once, without spending the retries", async (t) => {
+  /*
+   * A 429 means the server already rotated this request through every exit it
+   * has. Asking again a moment later asks the same exhausted pool the same
+   * question and holds the limit open while the reader waits — and it is the
+   * one failure with something to tell them: wait about a minute.
+   */
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; forgetExits(); });
+  forgetExits();
+
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: "limited", exitsTried: 4 }), {
+      status: 429,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  const path = line(20_000);
+  const pieces = piecesForRoute(pathLengthM(path), exitsAvailable());
+  const result = await fetchFacts(path, { base: "http://example.invalid/overpass" });
+
+  assert.ok(!result.ok);
+  assert.match(result.error, /rate limit/i);
+  assert.equal(calls, pieces, "a rate limit must not be retried");
 });
