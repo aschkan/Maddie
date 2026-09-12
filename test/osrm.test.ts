@@ -264,13 +264,31 @@ test("an aborted request is not shown to the user as a failure", async () => {
   }
 });
 
-test("an unreachable routing service says so plainly", async () => {
+test("an unreachable routing service names the end that was actually asked", async () => {
+  // Routing goes through this server by default, so a request that got no
+  // answer at all did not get one from HERE. Saying "could not reach the
+  // routing service from this browser" sends whoever is debugging past the
+  // machine that is actually broken.
   const original = globalThis.fetch;
   globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
   try {
     const result = await fetchRoutes(AMSTERDAM, DAM_SQUARE);
     assert.ok(!result.ok);
-    assert.match(result.error, /Could not reach the routing service/);
+    assert.match(result.error, /could not reach this server/i);
+    assert.match(result.error, /routing service/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("and a 502 from it is this server failing, not OSRM answering", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("{}", { status: 502 })) as typeof fetch;
+  try {
+    const result = await fetchRoutes(AMSTERDAM, DAM_SQUARE);
+    assert.ok(!result.ok);
+    assert.match(result.error, /\/api\/osm\/status/);
+    assert.doesNotMatch(result.error, /answered 502/);
   } finally {
     globalThis.fetch = original;
   }

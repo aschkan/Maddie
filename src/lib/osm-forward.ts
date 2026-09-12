@@ -67,6 +67,30 @@ export const SERVICES: Record<string, Service> = {
 };
 
 /**
+ * What RFC 3986 allows in a path segment without encoding.
+ *
+ * `pchar`: unreserved, sub-delims, `:` and `@`. The sub-delims are the point —
+ * OSRM takes its coordinates as ONE segment, `lon,lat;lon,lat`, and parses that
+ * segment itself rather than letting a URL library decode it first. Running it
+ * through `encodeURIComponent` gives `4.89%2C52.37%3B4.90%2C52.38`, which OSRM
+ * reads literally and refuses with a 400 — so forwarded routing failed while
+ * forwarded tiles and search worked, which looks like "routing is broken"
+ * rather than like an encoding bug.
+ */
+const PCHAR = /^[A-Za-z0-9\-._~!$&'()*+,;=:@]*$/;
+
+/**
+ * Encode a path segment, leaving alone anything that never needed encoding.
+ *
+ * Next has already decoded these, so a segment holding a literal `%` or a space
+ * is encoded whole; everything a map service actually sends passes through
+ * byte for byte.
+ */
+function safeSegment(part: string): string {
+  return PCHAR.test(part) ? part : encodeURIComponent(part);
+}
+
+/**
  * Build the upstream URL. Pure, and the only place a request influences it.
  *
  * Every path segment is checked: `..` climbing out of the service's base would
@@ -78,7 +102,7 @@ export function upstreamUrl(service: Service, parts: string[], search: string, a
   }
   const base = service.bases[attempt % service.bases.length];
   if (!base) return null;
-  const tail = service.suffix ? service.suffix(parts) : parts.map(encodeURIComponent).join("/");
+  const tail = service.suffix ? service.suffix(parts) : parts.map(safeSegment).join("/");
   const path = tail ? `/${tail}` : "";
   return `${base.replace(/\/+$/, "")}${path}${search}`;
 }

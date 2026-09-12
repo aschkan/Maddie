@@ -7,6 +7,7 @@
  * where a tag is only a proxy for what was asked for, the note says so.
  */
 
+import { endpoint, forwarderFailure, unreachableMessage } from "./endpoints.ts";
 import type { LatLng } from "./osrm.ts";
 
 export interface SpotKind {
@@ -258,8 +259,7 @@ export function spotKind(id: string): SpotKind | undefined {
   return BY_ID.get(id);
 }
 
-export const DEFAULT_OVERPASS =
-  process.env.NEXT_PUBLIC_OVERPASS_URL ?? "https://overpass-api.de/api/interpreter";
+export const DEFAULT_OVERPASS = endpoint("overpass");
 
 export async function fetchLayers(
   bbox: BBox,
@@ -283,12 +283,14 @@ export async function fetchLayers(
     if (response.status === 429) {
       return { ok: false, error: "OpenStreetMap is rate limiting us. Wait a moment, then pan again." };
     }
+    const ours = forwarderFailure("overpass", response.status);
+    if (ours) return { ok: false, error: ours };
     if (!response.ok) return { ok: false, error: `OpenStreetMap answered ${response.status}.` };
     return { ok: true, data: parseLayers(await response.json()) };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, error: "cancelled" };
     }
-    return { ok: false, error: "Could not reach OpenStreetMap to load these layers." };
+    return { ok: false, error: unreachableMessage("overpass", "OpenStreetMap") + " The layers are not loaded." };
   }
 }

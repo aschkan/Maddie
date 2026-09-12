@@ -18,9 +18,16 @@ import "leaflet/dist/leaflet.css";
 
 import type { LatLng, Route } from "@/lib/osrm";
 import { alwaysOpen, type BBox, type LayerData } from "@/lib/layers";
+import { endpoint } from "@/lib/endpoints";
 import { CRIME_CATEGORIES, type Report } from "@/lib/reports";
 import type { Segment } from "@/lib/segments";
 import { VERDICT_COLOUR } from "@/lib/verdict";
+
+/**
+ * Where the tiles come from — this server by default, which is the only answer
+ * that works on both machines the domain resolves to. See `endpoints.ts`.
+ */
+const TILE_URL = endpoint("tile");
 
 /** The colours the brief names. Crime purple, safe spots pink, lighting yellow. */
 export const CRIME = "#a855f7";
@@ -295,7 +302,7 @@ export default function MapCanvas({
         // and a map whose background silently fails to load is the worst
         // possible way to render a page about walking somewhere after dark.
         className={night ? "tiles-night" : ""}
-        url={process.env.NEXT_PUBLIC_TILE_URL ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png"}
+        url={TILE_URL}
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         maxZoom={19}
         eventHandlers={{

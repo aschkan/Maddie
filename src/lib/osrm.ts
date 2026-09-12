@@ -7,6 +7,8 @@
  * uptime promise — so `OSRM_URL` points somewhere else the moment this matters.
  */
 
+import { endpoint, forwarderFailure, unreachableMessage } from "./endpoints.ts";
+
 /** A point the way Leaflet says it: latitude first. */
 export interface LatLng {
   lat: number;
@@ -21,14 +23,15 @@ export interface Route {
 }
 
 /**
- * The OSRM server to ask.
+ * The OSRM server to ask — this server's forwarder by default.
  *
- * `NEXT_PUBLIC_` because the browser makes this request, so the value has to be
- * inlined at build time — a server-only variable would arrive as `undefined`
- * here and silently fall back to the demo server.
+ * `NEXT_PUBLIC_OSRM_URL` overrides it and is the right answer for a real
+ * deployment, which should be pointing at its own OSRM. It has to carry the
+ * `NEXT_PUBLIC_` prefix because the browser makes this request, so the value is
+ * inlined at build time; a server-only variable arrives here as `undefined` and
+ * falls back without saying so.
  */
-export const DEFAULT_OSRM =
-  process.env.NEXT_PUBLIC_OSRM_URL ?? "https://router.project-osrm.org";
+export const DEFAULT_OSRM = endpoint("osrm");
 
 /**
  * Profiles the public demo server actually answers for.
@@ -142,6 +145,8 @@ export function parseRoutes(reply: unknown): { ok: true; routes: Route[] } | { o
  * says which it is and what to do about it.
  */
 function describeStatus(status: number, profile: Profile): string {
+  const ours = forwarderFailure("osrm", status);
+  if (ours) return ours;
   if (status === 429) return "The public routing server is rate limiting us. Wait a moment and try again.";
   if (status === 400 && profile !== "driving") {
     return `The routing server would not plan a ${profile === "walking" ? "walking" : "cycling"} route. ` +
@@ -170,7 +175,7 @@ export async function fetchRoutes(
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, error: "cancelled" };
     }
-    return { ok: false, error: "Could not reach the routing service from this browser." };
+    return { ok: false, error: unreachableMessage("osrm", "the routing service") };
   }
   return parseRoutes(reply);
 }
