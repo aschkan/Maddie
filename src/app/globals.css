@@ -47,14 +47,6 @@
   /* Nothing interactive is ever smaller than this. A 30px button is a button
      you miss, and on this page the one you hit instead might be Report. */
   --tap: 44px;
-  /* Navigating. The accent this app already uses, not a borrowed green — the
-     navigation view is the same product as the panel behind it and should look
-     like it. The instruction still has to be readable at a glance over a map of
-     unknown colour, which is what the solid accent fill and white text buy. */
-  --nav-banner: var(--accent);
-  --nav-ink: var(--accent-text);
-  --nav-then: var(--panel);
-  --stop: var(--bad);
 
   /* The sheet's three stops. `--peek` is what stays on screen collapsed; the
      other two are percentages of the viewport, kept as bare numbers so that
@@ -702,189 +694,34 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Navigating — the trip, under way
+   Handing the walk to a navigation app
 
-   A mode, not a panel. The trip card, the sheet and the tab bar are all gone
-   while this is up, because the person reading it is walking, holding the phone
-   in one hand, probably at night, and there are exactly three things worth any
-   screen: what to do next, how far is left, and how to stop.
+   There is no in-app navigation view. Spoken directions, rerouting, a lock
+   screen and somebody else's battery budget are not worth rebuilding, and a
+   person walking home at night is better served by the app they already know.
+   What this app is for is which way round to go, and that travels with the
+   link — see `src/lib/handoff.ts`.
 
-   It is built out of THIS app's parts, deliberately. The first version was a
-   green banner and a white slab across the bottom — which is Google Maps, in
-   Maddie's clothes, and it read as a different product bolted on. Everything
-   here is now the same card the trip card and the verdict cards are: `--panel`,
-   a hairline, `--r-lg`, `--shadow-2`, floating over the map with a gutter.
-
-   Written at 360px like everything above it, and anchored to the safe-area
-   insets rather than the viewport edge — on a phone with a notch or a home bar
-   the instruction would otherwise sit under the hardware.
+   So this is one button, and it is the primary action on the page: the accent
+   fill every other primary control here uses, full width, well over the tap
+   minimum. It is pressed once, outdoors, possibly in a hurry.
    ──────────────────────────────────────────────────────────────────────────── */
 
-/* The one primary action on the planning panel, and the app's own primary
-   button — the same accent fill every other primary control uses. */
-.start-trip {
-  width: 100%;
-  min-height: calc(var(--tap) + 8px);
-  margin-top: .2rem;
-  border-radius: var(--r-md);
-  background: var(--accent);
-  color: var(--accent-text);
-  font-size: 1.02rem;
-  font-weight: 680;
-  box-shadow: var(--shadow-2);
-}
-.start-trip:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
-.start-trip span { margin-right: .35rem; font-size: .9em; }
-
-/* Handing the walk to another app. Secondary to Start — an outline rather than
-   a fill — because the safety read does not travel with it. */
 .hand-off {
   display: flex; align-items: center; justify-content: center;
   width: 100%;
-  min-height: var(--tap);
-  margin-top: .1rem;
-  border: 1px solid var(--line);
+  min-height: calc(var(--tap) + 8px);
+  margin-top: .2rem;
+  border: none;
   border-radius: var(--r-md);
-  background: var(--button);
-  color: var(--text);
-  font-size: .95rem; font-weight: 620;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 1.02rem; font-weight: 680;
   text-decoration: none;
-}
-.hand-off:hover { background: var(--button-hover); }
-.hand-off span { margin-right: .4rem; color: var(--accent); }
-
-/* The shared card. Identical treatment to `.trip-card`, on purpose. */
-.nav-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
-  pointer-events: auto;
 }
-
-.nav-top {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  z-index: 1200;
-  display: flex; flex-direction: column; gap: .5rem;
-  padding: calc(env(safe-area-inset-top) + .6rem) calc(env(safe-area-inset-right) + .6rem)
-           0 calc(env(safe-area-inset-left) + .6rem);
-  pointer-events: none;   /* the map underneath stays draggable */
-}
-
-.nav-row { display: flex; align-items: center; gap: .7rem; padding: .7rem .8rem; }
-/* The accent carries the instruction rather than a filled slab behind it. A
-   solid block of colour at the top of a dark map is the loudest thing on the
-   screen, and what needs to be loud is the words. */
-.nav-glyph {
-  flex: none;
-  width: 2.4rem; height: 2.4rem;
-  display: grid; place-items: center;
-  border-radius: var(--r-md);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 1.5rem; line-height: 1;
-}
-.nav-say { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
-/* Street names are long, and the page must never scroll sideways. */
-.nav-say strong { font-size: 1.08rem; font-weight: 660; line-height: 1.25; overflow-wrap: anywhere; }
-.nav-say small { color: var(--muted); font-size: .82rem; }
-
-/* The one after, as a second row of the same card — one thought, not two
-   floating shapes. */
-.nav-then {
-  margin: 0;
-  padding: .5rem .8rem .55rem;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: .86rem; line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.nav-then-label { color: var(--muted); font-weight: 640; margin-right: .3rem; }
-.nav-then-glyph { color: var(--accent); margin-right: .25rem; }
-
-/* Notes under the card: the verdict idiom this app already uses everywhere —
-   a panel with the verdict's colour down the left edge. */
-.nav-note {
-  margin: 0;
-  padding: .55rem .75rem;
-  border-radius: var(--r-md);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--verdict, var(--line));
-  color: var(--text);
-  font-size: .85rem; line-height: 1.4;
-  box-shadow: var(--shadow-1);
-  pointer-events: auto;
-}
-.nav-note strong { color: var(--verdict, var(--text)); }
-.nav-off {
-  border-left-color: var(--bad);
-  background: var(--bad-bg);
-  color: var(--bad-text);
-}
-
-.nav-bottom {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  z-index: 1200;
-  padding: 0 calc(env(safe-area-inset-right) + .6rem)
-           calc(env(safe-area-inset-bottom) + .6rem) calc(env(safe-area-inset-left) + .6rem);
-  pointer-events: none;
-}
-.nav-bar {
-  display: flex; align-items: center; gap: .6rem;
-  padding: .6rem .65rem .6rem .9rem;
-}
-.nav-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .05rem; }
-.nav-eta { font-size: 1.4rem; font-weight: 700; line-height: 1.15; }
-.nav-left small { color: var(--muted); font-size: .78rem; }
-
-.nav-recentre, .nav-exit {
-  flex: none;
-  min-height: var(--tap);
-  padding: 0 1rem;
-  border-radius: 999px;
-  font-size: .92rem; font-weight: 620;
-}
-.nav-recentre { background: var(--button); color: var(--text); border: 1px solid var(--line); }
-.nav-recentre span { margin-right: .25rem; }
-/* Stopping has to be findable without looking for it — the app's own red,
-   which is the colour it uses for everything that undoes something. */
-.nav-exit { background: var(--bad); color: #fff; padding: 0 1.3rem; }
-.nav-exit:hover:not(:disabled) { filter: brightness(1.06); background: var(--bad); }
-
-/* The map is the whole page while navigating, so the tool cluster rides above
-   the bottom card rather than above a sheet that is no longer there. */
-.app[data-nav="on"] .map-tools { bottom: calc(env(safe-area-inset-bottom) + 5.6rem); }
-.app[data-nav="on"] .map { flex: 1; }
-
-/* ── the tilted map ────────────────────────────────────────────────────────
-   MapLibre, mounted only while navigating. It fills the same box the Leaflet
-   map does, because the two are mounted alternately and the furniture floating
-   over them does not know or care which is underneath. */
-.navmap { position: absolute; inset: 0; height: 100%; width: 100%; }
-.navmap canvas { outline: none; }
-.navmap .maplibregl-ctrl-bottom-right,
-.navmap .maplibregl-ctrl-bottom-left { bottom: calc(env(safe-area-inset-bottom) + 4.4rem); }
-.navmap .maplibregl-ctrl-attrib { font-size: .68rem; }
-
-/* The walker. A DOM marker, so a 55° pitch does not squash it into an ellipse
-   and shrink it with distance the way a drawn circle would. */
-.navmap-me {
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  background: #2f6bff;
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 6px rgba(47, 107, 255, .22), var(--shadow-1);
-}
-
-/* The attribution rides above the bottom card rather than half under it. It is
-   a licence condition, not decoration, so it is moved and never hidden. */
-.app[data-nav="on"] .leaflet-bottom { bottom: calc(env(safe-area-inset-bottom) + 4.4rem); }
-
-/* The stretch already walked, faded rather than recoloured — see MapCanvas. */
-.leaflet-container .walked { pointer-events: none; }
+.hand-off:hover { filter: brightness(1.08); }
+.hand-off span { margin-right: .4rem; font-size: .9em; }
 
 /* ────────────────────────────────────────────────────────────────────────────
    From a tablet up: the sheet stops being a sheet and becomes a sidebar. The
@@ -921,32 +758,8 @@ input[type="range"]::-moz-range-thumb {
      live inside a scrolling box, or the suggestions list gets clipped by it. */
   .trip { max-width: 27rem; padding: 1rem; }
 
-  /*
-   * Navigating on a wide screen.
-   *
-   * The instruction is a column, not a banner across the whole window. Stretched
-   * to 1200px it puts the arrow and the street name a hand's width apart with
-   * nothing in between, and the eye has to travel the screen to read four words.
-   * Capped at the same measure the trip card uses, so the two read as one app.
-   */
-  .nav-top { max-width: 27rem; padding: 1rem; }
-  .nav-bottom {
-    left: auto;
-    width: min(27rem, 100%);
-    padding: 0 1rem 1rem;
-  }
   /* No sheet to ride above at this width — the panel is beside the map. */
   .map-tools, .app[data-snap] .map-tools { bottom: calc(env(safe-area-inset-bottom) + 1.6rem); display: flex; }
-
-  /*
-   * …except while navigating, when there IS something to ride above again: the
-   * bar floats bottom-right at this width and lands on the zoom buttons.
-   *
-   * After the rule above and carrying `[data-snap]` as well, because `data-snap`
-   * is always present — an equally specific rule later in the file was winning,
-   * and the buttons sat underneath the bar.
-   */
-  .app[data-nav="on"][data-snap] .map-tools { bottom: 8.2rem; }
   .reporting-banner, .app[data-snap] .reporting-banner { bottom: 1.6rem; display: block; }
   .leaflet-bottom { bottom: 0; }
 }

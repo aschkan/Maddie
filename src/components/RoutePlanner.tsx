@@ -23,11 +23,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import BottomSheet, { type Snap } from "@/components/BottomSheet";
 import FilterPanel from "@/components/FilterPanel";
-import Navigation from "@/components/Navigation";
 import RouteChoices from "@/components/RouteChoices";
 import SafetyPanel from "@/components/SafetyPanel";
 import TripCard from "@/components/TripCard";
-import { useNavigation } from "@/components/useNavigation";
 import { useReports } from "@/components/useReports";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import { compareRoutes } from "@/lib/compare";
@@ -35,8 +33,7 @@ import { plannedAt, type Light } from "@/lib/daylight";
 import { isForwarded } from "@/lib/endpoints";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, gridStep, snapBox, type BBox, type LayerData } from "@/lib/layers";
-import { googleMapsLink } from "@/lib/handoff";
-import { milestones, progressOn } from "@/lib/navigation";
+import { MAX_WAYPOINTS, googleMapsLink } from "@/lib/handoff";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
 import { assess, lightingFor, type When } from "@/lib/score";
@@ -47,18 +44,6 @@ import { VERDICT_CLASS, VERDICT_LABEL } from "@/lib/verdict";
 const MapCanvas = dynamic(() => import("@/components/MapCanvas"), {
   ssr: false,
   loading: () => <div className="map-loading">Loading the map…</div>,
-});
-
-/**
- * The tilted navigation map. MapLibre, and only while navigating.
- *
- * `ssr: false` for the same reason as the Leaflet one — it touches `window`
- * while the module is still evaluating — and dynamic so the planning page never
- * pays for a megabyte of WebGL renderer it has no use for.
- */
-const NavMap = dynamic(() => import("@/components/NavMap"), {
-  ssr: false,
-  loading: () => <div className="map-loading">Bringing up the navigation map…</div>,
 });
 
 const AMSTERDAM: LatLng = { lat: 52.3728, lng: 4.8936 };
@@ -145,29 +130,6 @@ export default function RoutePlanner() {
   const [reportMode, setReportMode] = useState(false);
   const [reportCategory, setReportCategory] = useState<string>(CRIME_CATEGORIES[0]?.id ?? "other");
   const { reports, backend, error: reportError, add, remove, clearExamples } = useReports();
-
-  /*
-   * ── navigating ──────────────────────────────────────────────────────────
-   *
-   * One flag, because it changes the whole page rather than a corner of it:
-   * the trip card, the sheet and the tabs all leave, and the map becomes the
-   * only thing. `follow` is separate and can be broken by a drag — see
-   * `FollowMe` in `MapCanvas`, which is where the give-up is bound.
-   */
-  const [navigating, setNavigating] = useState(false);
-  const [following, setFollowing] = useState(true);
-  /**
-   * Why the tilted map is not being used, when it is not.
-   *
-   * Null means it is. Anything else means the vector basemap could not be
-   * reached or could not be trusted, and navigation is running on the flat
-   * Leaflet map instead — which is the whole point of keeping that path alive:
-   * one of the two machines this is deployed on cannot reach the internet, and
-   * a navigation view that is a blank rectangle there would be worse than a
-   * flat one that works.
-   */
-  const [flatReason, setFlatReason] = useState<string | null>(null);
-  const { fix, error: locationError, waiting: locating } = useNavigation(navigating);
 
   const [view, setView] = useState<{ bbox: BBox; zoom: number } | null>(null);
   const [layers, setLayers] = useState<LayerData>(EMPTY_LAYERS);
@@ -336,93 +298,6 @@ export default function RoutePlanner() {
   const worst = useMemo(() => worstStretch(segments, chosenScore), [segments, chosenScore]);
   const worstLine = useMemo(() => describeWorst(worst, chosenScore), [worst, chosenScore]);
 
-  /* ── where the walk has got to ───────────────────────────────────────── */
-
-  const chosenRoute = routes[selected];
-
-  /*
-   * The instructions, put on the line once per route rather than once per fix.
-   *
-   * Snapping every maneuver onto the polyline is a few hundred distance
-   * calculations; doing it on every position update would be that many times a
-   * second for an answer that cannot have changed.
-   */
-  const marks = useMemo(
-    () => (chosenRoute ? milestones(chosenRoute.steps, chosenRoute.path) : []),
-    [chosenRoute],
-  );
-
-  const progress = useMemo(
-    () => (navigating && chosenRoute && fix ? progressOn(chosenRoute, marks, fix) : null),
-    [navigating, chosenRoute, marks, fix],
-  );
-
-  /**
-   * The stretch being walked through right now.
-   *
-   * Looked up by distance along the route, which is the same measurement the
-   * position was snapped into — matching on the nearest segment by straight
-   * line would pick the wrong one wherever the route doubles back on itself.
-   */
-  const here = useMemo(() => {
-    const alongM = progress?.on?.alongM;
-    if (alongM === undefined) return null;
-    return segments.find((segment) => alongM >= segment.fromM && alongM <= segment.toM) ?? null;
-  }, [segments, progress]);
-
-  /*
-   * Starting is only offered when there is something to navigate.
-   *
-   * It does not wait for the safety read: the turns come from the router and
-   * are ready as soon as the route is, and making somebody stand on a corner
-   * waiting for Overpass before they can set off would be the wrong trade.
-   */
-  const canStart = Boolean(chosenRoute && chosenRoute.path.length > 1);
-
-  /**
-   * The same walk, handed to Google Maps.
-   *
-   * Not a link to the destination — that would throw away the whole
-   * contribution, because Google would plan the fastest route, which is the one
-   * this app exists to disagree with. Our route goes with it as waypoints; see
-   * `handoff.ts` for how few of them there can be and what that costs.
-   */
-  const handoff = useMemo(
-    () => (chosenRoute ? googleMapsLink(chosenRoute.path, profile) : null),
-    [chosenRoute, profile],
-  );
-
-  const startTrip = useCallback(() => {
-    setNavigating(true);
-    setFollowing(true);
-    // A fresh attempt at the tilted map each trip: the reason it failed last
-    // time was probably a dead exit, and the pool has moved on since.
-    setFlatReason(null);
-    // The sheet is hidden while navigating; leaving it open means it is in the
-    // way the moment the walk ends.
-    setSnap("peek");
-  }, []);
-
-  const endTrip = useCallback(() => {
-    setNavigating(false);
-    setFollowing(true);
-  }, []);
-
-  /*
-   * Changing the plan ends the trip.
-   *
-   * Editing A or B, or picking a different way round, while a navigation view
-   * is following the old line would leave the banner giving instructions for a
-   * route that is no longer on screen. There is no safe way to reconcile those,
-   * so the trip stops and has to be started again — deliberately, by the
-   * person, who is the one who knows what they meant.
-   */
-  useEffect(() => {
-    // In the IIFE like every other setState in this file: the React Compiler
-    // lint rejects one reached synchronously from an effect body.
-    void (async () => { setNavigating(false); })();
-  }, [start, end, profile, selected]);
-
   /* ── the layers over the visible map ─────────────────────────────────── */
   const zoomedOut = view !== null && view.zoom < MIN_LAYER_ZOOM;
 
@@ -517,6 +392,19 @@ export default function RoutePlanner() {
 
   const next = start === null ? "A" : end === null ? "B" : null;
   const chosen = routes[selected];
+
+  /**
+   * The same walk, handed to Google Maps. This is how you navigate it.
+   *
+   * Not a link to the destination — that would throw away the whole
+   * contribution, because Google would plan the fastest route, which is the one
+   * this app exists to disagree with. Our route goes with it as waypoints; see
+   * `handoff.ts` for how few of them there can be and what that costs.
+   */
+  const handoff = useMemo(
+    () => (chosen ? googleMapsLink(chosen.path, profile) : null),
+    [chosen, profile],
+  );
   const chosenAssessment = assessments[selected] ?? null;
   const activeLayers = spots.length + (lighting ? 1 : 0);
 
@@ -548,64 +436,31 @@ export default function RoutePlanner() {
   return (
     /* The stop is on the frame, not just the sheet: the map's own buttons and
        the reporting banner have to move out from under the panel with it. */
-    <div className="app" data-snap={snap} data-nav={navigating ? "on" : "off"}>
+    <div className="app" data-snap={snap}>
       <main className={reportMode ? "map reporting" : "map"}>
-        {/*
-          * Two map libraries, mounted ALTERNATELY and never together.
-          *
-          * Planning is Leaflet and raster tiles: flat, cheap, identical on
-          * every machine. Navigating is MapLibre and vector tiles, because a
-          * raster tile cannot be tilted — the labels tilt with it. Having both
-          * alive at once would be two renderers each believing it owns the
-          * viewport, which is a class of bug not worth inviting.
-          *
-          * `flatReason` is the way back. When the vector basemap cannot be
-          * reached or cannot be trusted, navigation runs on the Leaflet map
-          * instead — one of the two machines this is deployed on cannot reach
-          * the internet at all, and a blank rectangle there would be a worse
-          * navigation view than a flat one that works.
-          */}
-        {navigating && chosenRoute && flatReason === null ? (
-          <NavMap
-            route={chosenRoute}
-            segments={segments}
-            me={fix}
-            travelledM={progress?.on?.alongM ?? null}
-            follow={following}
-            onFollowBroken={() => setFollowing(false)}
-            onUnavailable={setFlatReason}
-            night={night}
-          />
-        ) : (
-          <MapCanvas
-            start={start}
-            end={end}
-            routes={routes}
-            selected={selected}
-            segments={segments}
-            highlight={worst}
-            sheetSnap={snap}
-            onSelectRoute={setSelected}
-            centre={centre}
-            layers={layers}
-            reports={visibleReports}
-            reportMode={reportMode}
-            onReport={dropReport}
-            onRemoveReport={remove}
-            onPick={pick}
-            onMoveStart={setStart}
-            onMoveEnd={setEnd}
-            onTileError={() => setTilesFailed(true)}
-            onView={setView}
-            night={night}
-            me={navigating ? fix : null}
-            travelledM={progress?.on?.alongM ?? null}
-            follow={navigating && following}
-            onFollowBroken={() => setFollowing(false)}
-          />
-        )}
+        <MapCanvas
+          start={start}
+          end={end}
+          routes={routes}
+          selected={selected}
+          segments={segments}
+          highlight={worst}
+          sheetSnap={snap}
+          onSelectRoute={setSelected}
+          centre={centre}
+          layers={layers}
+          reports={visibleReports}
+          reportMode={reportMode}
+          onReport={dropReport}
+          onRemoveReport={remove}
+          onPick={pick}
+          onMoveStart={setStart}
+          onMoveEnd={setEnd}
+          onTileError={() => setTilesFailed(true)}
+          onView={setView}
+          night={night}
+        />
 
-        {!navigating && (
         <TripCard
           start={start} end={end}
           startText={startText} endText={endText}
@@ -617,29 +472,14 @@ export default function RoutePlanner() {
           next={next}
           night={night} onNight={setNight}
         />
-        )}
 
-        {navigating && (
-          <Navigation
-            progress={progress}
-            here={here}
-            following={following}
-            onRecentre={() => setFollowing(true)}
-            onExit={endTrip}
-            locationError={locationError}
-            waiting={locating}
-            flatReason={flatReason}
-          />
-        )}
-
-        {reportMode && !navigating && (
+        {reportMode && (
           <p className="reporting-banner">
             Tapping the map adds a report — not a route point.
           </p>
         )}
       </main>
 
-      {!navigating && (
       <BottomSheet
         snap={snap}
         onSnap={setSnap}
@@ -744,18 +584,14 @@ export default function RoutePlanner() {
               </div>
             )}
 
-            {/* The one big button on the page, and the only primary action.
-                Below the summary rather than above it, because the numbers are
-                what somebody reads before deciding to set off. */}
-            {canStart && !busy && (
-              <button type="button" className="start-trip" onClick={startTrip}>
-                <span aria-hidden="true">▶</span> Start
-              </button>
-            )}
             {/*
-              * The other way to walk it: someone else's navigation, following
-              * our route. Secondary to Start, because the safety read — the
-              * reason to have planned here at all — does not travel with it.
+              * How you actually walk it. THE primary action on the page.
+              *
+              * The in-app navigation view that used to sit above this is gone:
+              * spoken directions, rerouting, a lock screen and a battery budget
+              * are not worth rebuilding, and somebody walking home at night is
+              * better served by the app they already know. What this app is for
+              * is which way round to go — and that part travels, as waypoints.
               */}
             {handoff && !busy && (
               <>
@@ -769,24 +605,21 @@ export default function RoutePlanner() {
                 </a>
                 <p className="hint">
                   {handoff.waypoints > 0
-                    ? <>Google gets this route as <strong>{handoff.waypoints} waypoint{handoff.waypoints === 1 ? "" : "s"}</strong>, which is
-                       as many as its links allow — enough to hold the shape
-                       {handoff.driftM > 25 ? <> to within about {handoff.driftM} m</> : null}, not
-                       enough to reproduce it exactly.</>
+                    ? <>Google gets <strong>this</strong> route, not its own — pinned to{" "}
+                       <strong>{handoff.waypoints} waypoint{handoff.waypoints === 1 ? "" : "s"}</strong>
+                       {handoff.waypoints >= MAX_WAYPOINTS
+                         ? <>, which is all its links allow</>
+                         : <> at the corners where the two would otherwise differ</>}
+                       {handoff.driftM > 25
+                         ? <>. That holds the shape to within about {handoff.driftM} m, not exactly.</>
+                         : <>.</>}</>
                     : <>This route is straight enough that Google will draw the same line unprompted.</>}
-                  {" "}It navigates and reroutes properly, and it talks. What it cannot do is any of
-                  the safety read — the lit stretches and the one worth taking care on stay here.
+                  {" "}It navigates, reroutes and talks. What it cannot do is the safety read — the
+                  lit stretches and the one worth taking care on stay here, so read those first.
                 </p>
               </>
             )}
 
-            {canStart && chosenRoute && chosenRoute.steps.length === 0 && (
-              <p className="hint">
-                This route came back without turn instructions, so navigation will follow the line
-                without naming the turns. A self-hosted OSRM sends them; the public demo server does
-                not always.
-              </p>
-            )}
           </>
         )}
 
@@ -836,7 +669,6 @@ export default function RoutePlanner() {
           />
         )}
       </BottomSheet>
-      )}
     </div>
   );
 }

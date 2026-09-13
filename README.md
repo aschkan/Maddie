@@ -111,69 +111,35 @@ that gap would cost more than the gap is worth. Where the place is not known at
 all, the old clock rule stands in and the panel says `(by the clock)` rather
 than passing a guess off as a sunset.
 
-## Starting the walk
+## Walking it — Google Maps does the navigating
 
-Under the route summary there is one button: **Start**. It turns the page into
-a navigation view — the trip card, the panel and the tabs all leave, and the map
-becomes the whole screen with three things over it:
+Under the route summary there is one button: **Navigate in Google Maps**. It
+opens Google's turn-by-turn — with *this* route, not Google's.
 
-* the **next instruction**, with how far to it, and a smaller "Then …" line for
-  the one after;
-* the **bottom bar** — time left, distance left, the clock time you would
-  arrive, and **Exit**;
-* the **caution line**, when the stretch you are walking through right now is
-  one the map says to take care on. That is the part no other navigation app
-  has, and it is the reason this one exists.
+That distinction is the whole feature. A link to the destination would hand the
+problem straight back to the router this app exists to disagree with: Google
+plans the fastest way, and the point of Maddie is that the fastest way is not
+always the one worth walking. So the route travels with the link, as waypoints.
 
-The map follows you and zooms in. Drag it and it stops following — pulling the
-view back under somebody's finger is the most infuriating thing a navigation
-view can do — and a **Recentre** button appears until you want it back.
+* **Up to nine of them** — the documented ceiling of Google's URL scheme, above
+  which the link is rejected outright rather than degrading.
+* **Spent on the corners, not spread evenly.** Even spacing burns waypoints on
+  long straights where Google would go the same way unprompted, and leaves
+  nothing for the one turn where the two routes part company. The route is
+  simplified with Douglas–Peucker, which keeps exactly those corners.
+* **The panel says what was lost.** Nine points approximate a route, they do not
+  reproduce it, so it reports how many waypoints went and roughly how far the
+  simplified shape strays from the real one.
 
-Some deliberate choices, because each is a trade:
+**Why not navigate in the page?** There was an in-app navigation view — tilted,
+heading-up, MapLibre — and it was removed. Spoken directions, rerouting, a lock
+screen and somebody else's battery budget are not worth rebuilding, and a person
+walking home at night is better served by the app they already know. What this
+app is for is deciding *which way round to go*, and that part travels.
 
-* **Turn instructions come from the router.** `steps=true` asks OSRM for them
-  and they arrive with the route. A server that does not send them still
-  navigates: the line is followed, there is just no turn banner, and the panel
-  says so rather than looking broken.
-* **Refusing to share your location is a perfectly good answer** on a page about
-  walking home after dark. The route, the turns and the safety read all still
-  work — the map simply does not follow you.
-* **Off-route is judged generously** (45 m). A phone's fix drifts tens of metres
-  between buildings, and a walker legitimately uses either pavement and cuts
-  corners the router drew square. An alert that cries wolf on every narrow
-  street is one that gets ignored on the night it is right.
-* **The position is a dot with an accuracy ring, never a pin.** A pin points at
-  a spot and claims a precision a phone does not have; the ring is the only
-  honest thing on screen about how well it knows.
-* **Editing the plan ends the trip.** Changing A, B, the travel mode or the
-  chosen route while the banner is giving instructions for the old line cannot
-  be reconciled, so it stops and you start it again.
-* **The map tilts and turns with you.** Navigation runs on
-  [MapLibre](https://maplibre.org) with vector tiles from
-  [OpenFreeMap](https://openfreemap.org) — free, no key, no signup — because a
-  raster tile is a picture and cannot be tilted without the labels tilting too.
-  Planning stays on Leaflet: it is flat, cheap and identical everywhere, and it
-  has no use for a GPU renderer. The two are never mounted at once.
-  * The map turns so your **direction of travel is up**, taken from the route
-    ahead rather than the phone's compass — a compass is absent or wild while
-    you are standing still, which is exactly when you look at the screen.
-  * The stretch colouring comes with it. A navigation map that draws one blue
-    line has thrown away the only thing this app knows that a road atlas does not.
-  * **If the vector tiles cannot be reached, navigation runs on the flat map**
-    and says so. That is not a nicety: one of the two servers this is deployed
-    on cannot reach the internet at all, and a blank rectangle would be a worse
-    navigation view than a flat one that works.
-* **Or hand the walk to Google Maps.** Under Start there is a second button that
-  opens Google's navigation — with *this* route, not Google's. Ours travels as
-  waypoints, up to the nine its links allow, spent on the corners where the two
-  would otherwise part company rather than on the straights. Google then does
-  the things worth not rebuilding: spoken directions, rerouting, a lock screen.
-  What it cannot do is the safety read, and the button says so — the lit
-  stretches and the one worth taking care on stay here.
-* **There is no rerouting and no voice.** Going off route says so and offers to
-  plan again from where you are; it does not silently replan, because a route
-  that changes under you at night is worse than one that tells you it no longer
-  applies. Neither is hard to add — they are simply not there yet.
+**What does not travel is the safety read.** The lit stretches, the stretch worth
+taking care on, the verdict — those stay here, which is why the button says so
+and why it sits under the read rather than above it. Look first, then walk.
 
 ## "Preferred", not "safe"
 
@@ -683,6 +649,7 @@ always acts on the machine serving it.
 | Address search | [Nominatim](https://nominatim.org) | no |
 | Street data | [Overpass](https://overpass-api.de) over OpenStreetMap | no |
 | The sentence | the Liara gateway, OpenAI-compatible | yes, and it is in the source |
+| Turn-by-turn | [Google Maps](https://developers.google.com/maps/documentation/urls/get-started), by link — this app never navigates | no |
 
 The first four are fetched **by the browser** — through this server, but the
 browser asks. There is exactly one API route for the model, and it exists for

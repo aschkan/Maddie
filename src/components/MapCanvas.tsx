@@ -11,14 +11,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Circle, CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents,
+  CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import type { LatLng, Route } from "@/lib/osrm";
-import type { Fix } from "@/lib/navigation";
-import { distanceM } from "@/lib/geo";
 import { alwaysOpen, type BBox, type LayerData } from "@/lib/layers";
 import { endpoint } from "@/lib/endpoints";
 import { CRIME_CATEGORIES, type Report } from "@/lib/reports";
@@ -163,24 +161,6 @@ export interface MapCanvasProps {
   onMoveStart: (point: LatLng) => void;
   onMoveEnd: (point: LatLng) => void;
   onTileError: () => void;
-  /**
-   * Where the device says it is, while navigating. Null when not.
-   *
-   * Drawn as a dot with an accuracy ring rather than a pin: a pin points AT a
-   * spot and claims a precision a phone does not have, and the ring is the one
-   * honest thing on screen about how well it knows.
-   */
-  me: Fix | null;
-  /**
-   * How far along the route the walk has got, in metres. Null when not
-   * navigating. What is behind you is drawn faded, so the line ahead reads as
-   * the instruction and the line behind as history.
-   */
-  travelledM: number | null;
-  /** Keep the map on `me` rather than wherever it was panned to. */
-  follow: boolean;
-  /** Fires when a drag moves the map away from the walker. */
-  onFollowBroken: () => void;
   /** Fires after panning or zooming settles, with the new visible box. */
   onView: (view: { bbox: BBox; zoom: number }) => void;
   night: boolean;
@@ -302,52 +282,10 @@ function KeepSized() {
   return null;
 }
 
-/**
- * Keep the walker on screen while navigating, and let go when they take over.
- *
- * Two behaviours in one place because they are the same rule from both sides.
- * While `follow` is on the map is moved to each new fix. The moment a person
- * DRAGS the map, following stops — pulling the view back under their finger a
- * second later is the single most infuriating thing a navigation view can do,
- * and it is what happens when the only signal is "the centre moved".
- *
- * So the give-up is bound to `dragstart`, which only a person can cause, and
- * never to `moveend`, which this component causes itself.
- */
-function FollowMe({ me, follow, onBroken }: { me: Fix | null; follow: boolean; onBroken: () => void }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!follow) return;
-    const give = () => onBroken();
-    map.on("dragstart", give);
-    return () => { map.off("dragstart", give); };
-  }, [map, follow, onBroken]);
-
-  const lat = me?.point.lat;
-  const lng = me?.point.lng;
-
-  useEffect(() => {
-    if (!follow || lat === undefined || lng === undefined) return;
-    /*
-     * `setView`, not `panTo`, and at a zoom of its own.
-     *
-     * Navigating is a different question from planning — the useful frame is
-     * the next hundred metres, not the whole trip — so entering the mode zooms
-     * in. `Math.max` rather than a fixed level, because someone who has zoomed
-     * FURTHER in to read a doorway number should keep it.
-     */
-    map.setView([lat, lng], Math.max(map.getZoom(), 17), { animate: true });
-  }, [map, follow, lat, lng]);
-
-  return null;
-}
-
 export default function MapCanvas({
   start, end, routes, selected, segments, highlight, sheetSnap, onSelectRoute, centre, layers, reports,
   reportMode, onReport, onRemoveReport,
   onPick, onMoveStart, onMoveEnd, onTileError, onView, night,
-  me, travelledM, follow, onFollowBroken,
 }: MapCanvasProps) {
   const [map, setMap] = useState<L.Map | null>(null);
   const [fitToken, setFitToken] = useState(0);
@@ -365,40 +303,6 @@ export default function MapCanvas({
     () => new Map(CRIME_CATEGORIES.map((c) => [c.id, c.label])),
     [],
   );
-
-  /**
-   * The part of the route already walked, as its own line.
-   *
-   * Cut by distance rather than by vertex index, and the cut point is
-   * interpolated — a route has a vertex every few tens of metres, so snapping
-   * the fade to the nearest one makes it lurch backwards and forwards by half a
-   * block as you walk, which reads as the position being wrong.
-   */
-  const route = routes[selected];
-  const walked = useMemo(() => {
-    if (travelledM === null || !route || route.path.length < 2) return [];
-    const out: LatLng[] = [];
-    let run = 0;
-    for (let i = 0; i < route.path.length; i++) {
-      const here = route.path[i];
-      const previous = route.path[i - 1];
-      if (!here) continue;
-      if (i > 0 && previous) {
-        const leg = distanceM(previous, here);
-        if (run + leg >= travelledM) {
-          const t = leg === 0 ? 0 : (travelledM - run) / leg;
-          out.push({
-            lat: previous.lat + (here.lat - previous.lat) * t,
-            lng: previous.lng + (here.lng - previous.lng) * t,
-          });
-          break;
-        }
-        run += leg;
-      }
-      out.push(here);
-    }
-    return out;
-  }, [route, travelledM]);
 
   return (
     <>
@@ -440,10 +344,7 @@ export default function MapCanvas({
       <ClickToPick onPick={reportMode ? onReport : onPick} />
       <KeepSized />
       <WatchView onView={onView} />
-      {/* While navigating the map belongs to the walker, so the route is not
-          re-fitted underneath them. */}
-      {travelledM === null && <FitToRoute route={routes[selected]} token={fitToken} sheet={sheetSnap} />}
-      <FollowMe me={me} follow={follow} onBroken={onFollowBroken} />
+      <FitToRoute route={routes[selected]} token={fitToken} sheet={sheetSnap} />
 
       {/* ── lighting ─────────────────────────────────────────────────────── */}
       {layers.litWays.map((way) => (
@@ -566,46 +467,6 @@ export default function MapCanvas({
           </Marker>
         );
       })}
-
-      {/* ── the walk so far ──────────────────────────────────────────────
-          Drawn OVER the route in the page's own background colour at partial
-          opacity, which fades whatever the segment underneath was coloured
-          without needing a second copy of the safety colouring to keep in
-          step. What is ahead stays exactly as bright as it was. */}
-      {travelledM !== null && walked.length > 1 && (
-        <Polyline
-          positions={walked.map((p) => [p.lat, p.lng])}
-          className="walked"
-          color={night ? "#0b1020" : "#f6f7fb"}
-          weight={9}
-          opacity={0.7}
-          interactive={false}
-        />
-      )}
-
-      {/* ── where the device says you are ────────────────────────────────
-          A dot and a ring, never a pin. A pin points at a spot and claims a
-          precision a phone does not have; the ring is the accuracy the device
-          reported, and it is the one honest thing on screen about how well it
-          knows. */}
-      {me && (
-        <>
-          {typeof me.accuracyM === "number" && me.accuracyM > 0 && (
-            <Circle
-              center={[me.point.lat, me.point.lng]}
-              radius={Math.min(me.accuracyM, 120)}
-              pathOptions={{ color: "#2f6bff", fillColor: "#2f6bff", fillOpacity: 0.12, weight: 1, opacity: 0.4 }}
-              interactive={false}
-            />
-          )}
-          <CircleMarker
-            center={[me.point.lat, me.point.lng]}
-            radius={7}
-            pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#2f6bff", fillOpacity: 1 }}
-            interactive={false}
-          />
-        </>
-      )}
 
       {start && (
         <Marker
