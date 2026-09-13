@@ -86,7 +86,11 @@ test("the cooldown grows with consecutive failures, and stops growing", () => {
 /* ------------------------------- forwarding -------------------------------- */
 
 test("only the services in the table can be reached", () => {
-  assert.deepEqual(Object.keys(SERVICES).sort(), ["nominatim", "osrm", "overpass", "tile"]);
+  // Pinned so that growing the table is a decision, not a line that slipped in:
+  // every entry is a host this server will fetch on a visitor's behalf.
+  // `vector` is the navigation view's tile source (OpenFreeMap) — reached only
+  // by the MapLibre style, never by the four services the browser resolves.
+  assert.deepEqual(Object.keys(SERVICES).sort(), ["nominatim", "osrm", "overpass", "tile", "vector"]);
   for (const service of Object.values(SERVICES)) {
     assert.ok(service.bases.length > 0);
     for (const base of service.bases) assert.match(base, /^https?:\/\//);

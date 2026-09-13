@@ -48,6 +48,18 @@ const MapCanvas = dynamic(() => import("@/components/MapCanvas"), {
   loading: () => <div className="map-loading">Loading the map…</div>,
 });
 
+/**
+ * The tilted navigation map. MapLibre, and only while navigating.
+ *
+ * `ssr: false` for the same reason as the Leaflet one — it touches `window`
+ * while the module is still evaluating — and dynamic so the planning page never
+ * pays for a megabyte of WebGL renderer it has no use for.
+ */
+const NavMap = dynamic(() => import("@/components/NavMap"), {
+  ssr: false,
+  loading: () => <div className="map-loading">Bringing up the navigation map…</div>,
+});
+
 const AMSTERDAM: LatLng = { lat: 52.3728, lng: 4.8936 };
 
 const PROFILE_LABEL: Record<Profile, string> = {
@@ -143,6 +155,17 @@ export default function RoutePlanner() {
    */
   const [navigating, setNavigating] = useState(false);
   const [following, setFollowing] = useState(true);
+  /**
+   * Why the tilted map is not being used, when it is not.
+   *
+   * Null means it is. Anything else means the vector basemap could not be
+   * reached or could not be trusted, and navigation is running on the flat
+   * Leaflet map instead — which is the whole point of keeping that path alive:
+   * one of the two machines this is deployed on cannot reach the internet, and
+   * a navigation view that is a blank rectangle there would be worse than a
+   * flat one that works.
+   */
+  const [flatReason, setFlatReason] = useState<string | null>(null);
   const { fix, error: locationError, waiting: locating } = useNavigation(navigating);
 
   const [view, setView] = useState<{ bbox: BBox; zoom: number } | null>(null);
@@ -358,6 +381,9 @@ export default function RoutePlanner() {
   const startTrip = useCallback(() => {
     setNavigating(true);
     setFollowing(true);
+    // A fresh attempt at the tilted map each trip: the reason it failed last
+    // time was probably a dead exit, and the pool has moved on since.
+    setFlatReason(null);
     // The sheet is hidden while navigating; leaving it open means it is in the
     // way the moment the walk ends.
     setSnap("peek");
@@ -510,32 +536,60 @@ export default function RoutePlanner() {
        the reporting banner have to move out from under the panel with it. */
     <div className="app" data-snap={snap} data-nav={navigating ? "on" : "off"}>
       <main className={reportMode ? "map reporting" : "map"}>
-        <MapCanvas
-          start={start}
-          end={end}
-          routes={routes}
-          selected={selected}
-          segments={segments}
-          highlight={worst}
-          sheetSnap={snap}
-          onSelectRoute={setSelected}
-          centre={centre}
-          layers={layers}
-          reports={visibleReports}
-          reportMode={reportMode}
-          onReport={dropReport}
-          onRemoveReport={remove}
-          onPick={pick}
-          onMoveStart={setStart}
-          onMoveEnd={setEnd}
-          onTileError={() => setTilesFailed(true)}
-          onView={setView}
-          night={night}
-          me={navigating ? fix : null}
-          travelledM={progress?.on?.alongM ?? null}
-          follow={navigating && following}
-          onFollowBroken={() => setFollowing(false)}
-        />
+        {/*
+          * Two map libraries, mounted ALTERNATELY and never together.
+          *
+          * Planning is Leaflet and raster tiles: flat, cheap, identical on
+          * every machine. Navigating is MapLibre and vector tiles, because a
+          * raster tile cannot be tilted — the labels tilt with it. Having both
+          * alive at once would be two renderers each believing it owns the
+          * viewport, which is a class of bug not worth inviting.
+          *
+          * `flatReason` is the way back. When the vector basemap cannot be
+          * reached or cannot be trusted, navigation runs on the Leaflet map
+          * instead — one of the two machines this is deployed on cannot reach
+          * the internet at all, and a blank rectangle there would be a worse
+          * navigation view than a flat one that works.
+          */}
+        {navigating && chosenRoute && flatReason === null ? (
+          <NavMap
+            route={chosenRoute}
+            segments={segments}
+            me={fix}
+            travelledM={progress?.on?.alongM ?? null}
+            follow={following}
+            onFollowBroken={() => setFollowing(false)}
+            onUnavailable={setFlatReason}
+            night={night}
+          />
+        ) : (
+          <MapCanvas
+            start={start}
+            end={end}
+            routes={routes}
+            selected={selected}
+            segments={segments}
+            highlight={worst}
+            sheetSnap={snap}
+            onSelectRoute={setSelected}
+            centre={centre}
+            layers={layers}
+            reports={visibleReports}
+            reportMode={reportMode}
+            onReport={dropReport}
+            onRemoveReport={remove}
+            onPick={pick}
+            onMoveStart={setStart}
+            onMoveEnd={setEnd}
+            onTileError={() => setTilesFailed(true)}
+            onView={setView}
+            night={night}
+            me={navigating ? fix : null}
+            travelledM={progress?.on?.alongM ?? null}
+            follow={navigating && following}
+            onFollowBroken={() => setFollowing(false)}
+          />
+        )}
 
         {!navigating && (
         <TripCard
@@ -560,6 +614,7 @@ export default function RoutePlanner() {
             onExit={endTrip}
             locationError={locationError}
             waiting={locating}
+            flatReason={flatReason}
           />
         )}
 

@@ -374,6 +374,82 @@ export function asClause(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
+/**
+ * Compass bearing from one point to another, in degrees clockwise from north.
+ *
+ * The same flattened approximation the rest of this file uses. Over the tens of
+ * metres a heading is taken across, the error against a proper great-circle
+ * bearing is far below what a phone's compass reports anyway.
+ */
+export function bearingBetween(a: LatLng, b: LatLng): number {
+  const scale = Math.cos((a.lat * Math.PI) / 180);
+  const dx = (b.lng - a.lng) * scale;
+  const dy = b.lat - a.lat;
+  if (dx === 0 && dy === 0) return 0;
+  const deg = (Math.atan2(dx, dy) * 180) / Math.PI;
+  return (deg + 360) % 360;
+}
+
+/** How far ahead to look when taking a heading off the route. */
+export const HEADING_LOOKAHEAD_M = 35;
+
+/**
+ * Which way the route is going at a point along it.
+ *
+ * This, and NOT the device's compass, is what turns the navigation map.
+ *
+ * A phone's `heading` is only meaningful while moving and is absent or wild
+ * when standing still — at a crossing, waiting to cross, which is exactly when
+ * somebody looks at the screen. Spinning the whole map because the handset
+ * turned in a pocket is worse than useless; it is disorienting at the moment
+ * orientation matters most.
+ *
+ * The route's own direction is stable, is available before the first step is
+ * taken, and answers the question actually being asked — which way am I about
+ * to walk. It looks ahead rather than at the current segment so the map begins
+ * turning into a corner before the corner, the way a driver's eyes do.
+ */
+export function headingOnPath(
+  path: readonly LatLng[],
+  alongM: number,
+  lookaheadM: number = HEADING_LOOKAHEAD_M,
+): number | null {
+  if (path.length < 2) return null;
+
+  const at = pointAt(path, alongM);
+  const ahead = pointAt(path, alongM + lookaheadM);
+  if (!at || !ahead) return null;
+  // At the very end there is nothing ahead to aim at; keep the last real
+  // heading by looking backwards instead of snapping to north.
+  if (at.lat === ahead.lat && at.lng === ahead.lng) {
+    const behind = pointAt(path, Math.max(0, alongM - lookaheadM));
+    return behind ? bearingBetween(behind, at) : null;
+  }
+  return bearingBetween(at, ahead);
+}
+
+/** The point a given distance along a path, interpolated between vertices. */
+export function pointAt(path: readonly LatLng[], alongM: number): LatLng | null {
+  if (path.length === 0) return null;
+  const first = path[0];
+  if (!first) return null;
+  if (alongM <= 0) return first;
+
+  let run = 0;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1];
+    const b = path[i];
+    if (!a || !b) continue;
+    const leg = distanceM(a, b);
+    if (run + leg >= alongM) {
+      const t = leg === 0 ? 0 : (alongM - run) / leg;
+      return { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t };
+    }
+    run += leg;
+  }
+  return path[path.length - 1] ?? null;
+}
+
 /** The clock time you would arrive, given the seconds left. */
 export function arrivalAt(remainingS: number, now: Date = new Date()): Date {
   return new Date(now.getTime() + Math.max(0, remainingS) * 1000);

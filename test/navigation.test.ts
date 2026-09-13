@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   ARRIVED_M, MANEUVER_NEAR_M, OFF_ROUTE_M, arrivalAt, asClause, distanceCue, instructionFor,
-  isOffRoute, locateOnPath, maneuverGlyph, milestones, progressOn,
+  bearingBetween, headingOnPath, isOffRoute, locateOnPath, maneuverGlyph, milestones, pointAt,
+  progressOn,
 } from "../src/lib/navigation.ts";
 import { distanceM } from "../src/lib/geo.ts";
 import type { LatLng, Route, Step } from "../src/lib/osrm.ts";
@@ -274,4 +275,62 @@ test("a poor fix does not raise the off-route warning through progressOn", () =>
 
   const sure = progressOn(r, marks, { point: east(400, 90), accuracyM: 8 });
   assert.equal(sure.offRoute, true);
+});
+
+/* ------------------------------- heading ---------------------------------- */
+
+test("a bearing is degrees clockwise from north", () => {
+  const here = east(0);
+  assert.ok(Math.abs(bearingBetween(here, east(100)) - 90) < 1, "east is 90");
+  assert.ok(Math.abs(bearingBetween(here, east(-100)) - 270) < 1, "west is 270");
+  assert.ok(Math.abs(bearingBetween(here, east(0, 100)) - 0) < 1, "north is 0");
+  assert.ok(Math.abs(bearingBetween(here, east(0, -100)) - 180) < 1, "south is 180");
+  // The same point twice is not a direction; it must not be NaN.
+  assert.equal(bearingBetween(here, here), 0);
+});
+
+test("the map is turned by the ROUTE's direction, not the device compass", () => {
+  /*
+   * A phone's heading is only meaningful while moving, and is absent or wild
+   * standing still — at a crossing, waiting to cross, which is exactly when
+   * somebody looks at the screen. Spinning the map because the handset turned
+   * in a pocket is disorienting at the moment orientation matters most.
+   */
+  const path = line(1_000);
+  const heading = headingOnPath(path, 400);
+  assert.ok(heading !== null);
+  assert.ok(Math.abs(heading - 90) < 2, `this route runs east, got ${heading}`);
+});
+
+test("it looks AHEAD, so the map turns into a corner before the corner", () => {
+  // East for 500 m, then due north.
+  const corner: LatLng[] = [east(0), east(500), { lat: LAT + 500 / 111_320, lng: east(500).lng }];
+  const beforeCorner = headingOnPath(corner, 480, 100);
+  assert.ok(beforeCorner !== null);
+  assert.ok(beforeCorner > 5 && beforeCorner < 85, `should already be swinging north, got ${beforeCorner}`);
+});
+
+test("at the very end it keeps the last real heading rather than snapping north", () => {
+  const path = line(1_000);
+  const atEnd = headingOnPath(path, 1_000);
+  assert.ok(atEnd !== null);
+  assert.ok(Math.abs(atEnd - 90) < 2, `expected to still face east, got ${atEnd}`);
+});
+
+test("a path with nothing to aim along has no heading, rather than zero", () => {
+  // Zero is a direction — due north — and reporting it for "we do not know"
+  // would turn the map to face north at the moment the data ran out.
+  assert.equal(headingOnPath([], 0), null);
+  assert.equal(headingOnPath([east(0)], 0), null);
+});
+
+test("a point along the path is interpolated, not snapped to a vertex", () => {
+  // Snapping would make the camera lurch between vertices as you walk.
+  const path = line(1_000);
+  const mid = pointAt(path, 250);
+  assert.ok(mid);
+  assert.ok(Math.abs(distanceM(path[0]!, mid) - 250) < 3);
+  assert.deepEqual(pointAt(path, -50), path[0]);
+  assert.deepEqual(pointAt(path, 99_999), path[path.length - 1]);
+  assert.equal(pointAt([], 0), null);
 });

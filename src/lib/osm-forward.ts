@@ -66,6 +66,34 @@ export const SERVICES: Record<string, Service> = {
     // question three times. Nominatim's policy is one request a second.
     ttlMs: 3_600_000,
   },
+  /*
+   * Vector tiles, for the navigation view only.
+   *
+   * MapLibre needs vector tiles to tilt and rotate; the raster tiles the rest
+   * of the app uses are flat pictures and cannot be. OpenFreeMap serves them
+   * free with no key, no signup and no request limit — which is the same deal
+   * every other upstream here is on, and the reason it was picked over the
+   * providers that want an API key.
+   *
+   * ONE service for the whole host, because a MapLibre style pulls four
+   * different shapes of thing from it — the style JSON, the tile PBFs, the
+   * glyph ranges for labels and the sprite sheet for icons. They share a host,
+   * so they share an entry, and the catch-all path handles the rest.
+   *
+   * ⚠ The style JSON contains ABSOLUTE URLs back to this host. Handing it to
+   * MapLibre unmodified would send the browser straight to OpenFreeMap for
+   * everything except the style itself, which is exactly the bypass this
+   * forwarder exists to prevent — and would blank the map on the machine that
+   * cannot reach the internet. `rewriteStyle` in `vector.ts` is what stops it.
+   */
+  vector: {
+    bases: ["https://tiles.openfreemap.org"],
+    methods: ["GET"],
+    // Same reasoning as the raster tiles: they do not change, and a vector tile
+    // re-fetched through two proxies is the most expensive way to redraw a pan.
+    cache: "public, max-age=604800, immutable",
+    ttlMs: 604_800_000,
+  },
   tile: {
     bases: [
       "https://tile.openstreetmap.org",

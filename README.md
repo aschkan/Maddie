@@ -148,6 +148,21 @@ Some deliberate choices, because each is a trade:
 * **Editing the plan ends the trip.** Changing A, B, the travel mode or the
   chosen route while the banner is giving instructions for the old line cannot
   be reconciled, so it stops and you start it again.
+* **The map tilts and turns with you.** Navigation runs on
+  [MapLibre](https://maplibre.org) with vector tiles from
+  [OpenFreeMap](https://openfreemap.org) — free, no key, no signup — because a
+  raster tile is a picture and cannot be tilted without the labels tilting too.
+  Planning stays on Leaflet: it is flat, cheap and identical everywhere, and it
+  has no use for a GPU renderer. The two are never mounted at once.
+  * The map turns so your **direction of travel is up**, taken from the route
+    ahead rather than the phone's compass — a compass is absent or wild while
+    you are standing still, which is exactly when you look at the screen.
+  * The stretch colouring comes with it. A navigation map that draws one blue
+    line has thrown away the only thing this app knows that a road atlas does not.
+  * **If the vector tiles cannot be reached, navigation runs on the flat map**
+    and says so. That is not a nicety: one of the two servers this is deployed
+    on cannot reach the internet at all, and a blank rectangle would be a worse
+    navigation view than a flat one that works.
 * **There is no rerouting and no voice.** Going off route says so and offers to
   plan again from where you are; it does not silently replan, because a route
   that changes under you at night is worse than one that tells you it no longer

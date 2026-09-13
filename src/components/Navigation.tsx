@@ -37,6 +37,15 @@ export interface NavigationProps {
   locationError: string | null;
   /** True after asking for a position and before the first one arrives. */
   waiting: boolean;
+  /**
+   * Why the tilted map is not in use, when it is not. Null when it is.
+   *
+   * Said out loud rather than swallowed: the flat map is a real fallback, not a
+   * failure, and somebody who expected the view to lean and finds it flat
+   * should know the difference between "this deployment cannot reach the
+   * vector tiles" and "the feature is broken".
+   */
+  flatReason: string | null;
 }
 
 /** The clock time of arrival, in the viewer's own timezone and format. */
@@ -46,7 +55,7 @@ function clockAt(seconds: number): string {
 }
 
 export default function Navigation({
-  progress, here, following, onRecentre, onExit, locationError, waiting,
+  progress, here, following, onRecentre, onExit, locationError, waiting, flatReason,
 }: NavigationProps) {
   const next = progress?.next?.step ?? null;
   const after = progress?.after?.step ?? null;
@@ -112,6 +121,12 @@ export default function Navigation({
 
         {waiting && !progress && <p className="nav-note">Waiting for a position…</p>}
         {locationError && <p className="nav-note nav-off">{locationError}</p>}
+        {flatReason && (
+          <p className="nav-note">
+            Navigating on the flat map — the tilted one needs vector tiles this server could not
+            reach ({flatReason}). Everything else works the same.
+          </p>
+        )}
       </div>
 
       {/* ── how far, and how to stop ───────────────────────────────────────

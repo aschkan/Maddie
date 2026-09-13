@@ -21,6 +21,10 @@ short list of things that will bite you while editing.
 - `src/lib/navigation.ts` — where you are on the route and what to do next.
   Pure, tested. **The turn-by-turn arithmetic lives here, not in the component.**
 - `src/components/Navigation.tsx` — the navigation view: banner and bottom bar.
+- `src/components/NavMap.tsx` — the TILTED map. **MapLibre, not Leaflet**, and
+  mounted only while navigating.
+- `src/lib/vector.ts` — the vector basemap, and the style rewriting that keeps
+  it behind this server's forwarder. Pure, tested.
 - `src/components/useNavigation.ts` — the geolocation watch, and nothing else.
 - `src/lib/verdict.ts` — how a verdict is written and coloured, in one place.
 - `src/lib/compare.ts` — which route is preferred, and when to say none is.
@@ -371,6 +375,62 @@ The rules that will be undone by accident:
 - **The 429 is NEVER cached.** `keep()` is deliberately not called on that path,
   and `osm-cache.ts` refuses a non-200 anyway — storing a refusal for the
   service's TTL turns one minute of rate limiting into ten.
+
+## Two map libraries, mounted alternately
+
+**Planning is Leaflet with raster tiles. Navigating is MapLibre with vector
+tiles.** They are never alive at the same time — two renderers each believing
+they own the viewport is a class of bug not worth inviting.
+
+The reason for the second one is not novelty: a raster tile is a picture and
+cannot be tilted, because the labels tilt with it and stop being readable. A
+navigation view that leans into the direction of travel needs vector tiles and a
+GPU, which is MapLibre. Planning needs none of that and should not pay for it.
+
+- **`maplibre-gl` is imported DYNAMICALLY, inside `NavMap`.** A megabyte of
+  WebGL renderer and its stylesheet must never reach the planning page. The same
+  goes for its types: `NavMap` writes out the handful of methods it uses rather
+  than importing the real ones, because a static type import pulls the module
+  into the build graph and defeats the point.
+- **The style's URLs are REWRITTEN before MapLibre sees them.** A MapLibre style
+  is mostly absolute URLs — the tiles, the glyph ranges behind every label, the
+  sprite sheet behind every icon. Handed over unmodified it fetches the style
+  through the forwarder and then goes straight to the upstream for all the rest:
+  the exact bypass the forwarder exists to prevent, and a blank map on the
+  machine that cannot reach the internet. `rewriteStyle` walks the whole object
+  rather than naming fields, because `sources` can hold a tiles array or a
+  TileJSON `url` or both, and `sprite` is a string in one version and a list in
+  another — naming fields means missing one the day upstream changes shape.
+- **`stillReachesOut` CHECKS the result rather than trusting it.** A missed URL
+  fails invisibly on the machine with working internet and blanks the map on the
+  one that needed the forwarder. When the check fails, navigation falls back to
+  the flat map.
+- **The flat fallback is load-bearing, not a nicety.** One of the two machines
+  cannot reach the internet at all. A navigation view that is a blank rectangle
+  there is worse than a flat one that works, so `onUnavailable` drops back to
+  Leaflet and the view says why in a sentence.
+- **The source is OpenFreeMap** — free, no key, no signup, no request limit,
+  which is the deal every other upstream here is on. This app has one secret and
+  is not gaining a second for a basemap.
+- **The safety colouring survives the move.** Each stretch keeps the colour its
+  verdict has on the flat map, read from the same `VERDICT_COLOUR` table. A
+  navigation map that draws one blue line has thrown away the only thing this
+  app knows that a road atlas does not.
+- **The heading comes from the ROUTE, never the device compass.**
+  `headingOnPath` looks ahead along the line. A phone's heading is absent or
+  wild standing still — at a crossing, waiting to cross, which is exactly when
+  somebody looks at the screen — and spinning the map because the handset turned
+  in a pocket is disorienting at the moment orientation matters most.
+- **`NAV_PITCH` is 55° and the range is pinned by a test.** Past about 60° the
+  horizon comes into frame and the far half of the screen is a smear of
+  two-pixel labels; under about 40° it reads as a flat map that happens to be
+  crooked.
+- **`data-bearing` and `data-pitch` on the container are deliberate.** "The map
+  is not turning" is a report that otherwise arrives with no way to tell whether
+  the bearing is wrong, the position is stale, or the tilt never applied.
+- **Rotation by hand is off** (`dragRotate`, `pitchWithRotate`). A walker does
+  not need to spin the map, and a stray two-finger twist while it is following
+  is only confusing.
 
 ## Navigating — a mode, not a panel
 

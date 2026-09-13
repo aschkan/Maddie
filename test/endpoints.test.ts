@@ -79,7 +79,17 @@ test("and the forwarder has no service that could reach one", () => {
     const name = own.split("/").pop() ?? "";
     assert.equal(SERVICES[name], undefined, `"${name}" must not be a forwarded service`);
   }
-  assert.deepEqual(Object.keys(SERVICES).sort(), ["nominatim", "osrm", "overpass", "tile"]);
+  /*
+   * The whole list, pinned. Growing it is meant to be a decision somebody made
+   * on purpose rather than a line that slipped in — every entry is a host this
+   * server will fetch on a visitor's behalf.
+   *
+   * `vector` is the navigation view's tile source (OpenFreeMap). It is NOT one
+   * of the four services the browser resolves through `endpoints.ts`; it is
+   * reached only by the style MapLibre loads, which is why it appears here and
+   * not in `FORWARD`.
+   */
+  assert.deepEqual(Object.keys(SERVICES).sort(), ["nominatim", "osrm", "overpass", "tile", "vector"]);
 });
 
 test("every forwarded endpoint is same-origin and under /api/osm/", () => {

@@ -842,6 +842,26 @@ input[type="range"]::-moz-range-thumb {
 .app[data-nav="on"] .map-tools { bottom: calc(env(safe-area-inset-bottom) + 5.6rem); }
 .app[data-nav="on"] .map { flex: 1; }
 
+/* ── the tilted map ────────────────────────────────────────────────────────
+   MapLibre, mounted only while navigating. It fills the same box the Leaflet
+   map does, because the two are mounted alternately and the furniture floating
+   over them does not know or care which is underneath. */
+.navmap { position: absolute; inset: 0; height: 100%; width: 100%; }
+.navmap canvas { outline: none; }
+.navmap .maplibregl-ctrl-bottom-right,
+.navmap .maplibregl-ctrl-bottom-left { bottom: calc(env(safe-area-inset-bottom) + 4.4rem); }
+.navmap .maplibregl-ctrl-attrib { font-size: .68rem; }
+
+/* The walker. A DOM marker, so a 55° pitch does not squash it into an ellipse
+   and shrink it with distance the way a drawn circle would. */
+.navmap-me {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: #2f6bff;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 6px rgba(47, 107, 255, .22), var(--shadow-1);
+}
+
 /* The attribution rides above the bottom card rather than half under it. It is
    a licence condition, not decoration, so it is moved and never hidden. */
 .app[data-nav="on"] .leaflet-bottom { bottom: calc(env(safe-area-inset-bottom) + 4.4rem); }
