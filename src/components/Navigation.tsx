@@ -65,77 +65,84 @@ export default function Navigation({
 
   return (
     <>
-      {/* ── what to do next ──────────────────────────────────────────────── */}
+      {/* ── what to do next ────────────────────────────────────────────────
+          ONE card, the same one the trip card and the verdict cards are: a
+          panel, a hairline, the app's radius and shadow. The instruction and
+          the one after it are two rows of it rather than two floating shapes,
+          because they are one thought — and because a pill hanging off the
+          corner of a green slab is somebody else's product, not this one. */}
       <div className="nav-top">
-        <div className="nav-banner" aria-live="polite">
-          <span className="nav-glyph" aria-hidden="true">
-            {arrived ? "◎" : maneuverGlyph(next)}
-          </span>
-          <span className="nav-say">
-            <strong>{arrived ? "You have arrived" : instructionFor(next)}</strong>
-            {!arrived && progress?.toNextM !== null && progress?.toNextM !== undefined && (
-              <small>{distanceCue(progress.toNextM)}</small>
-            )}
-          </span>
+        <div className="nav-card" aria-live="polite">
+          <div className="nav-row">
+            <span className="nav-glyph" aria-hidden="true">
+              {arrived ? "◎" : maneuverGlyph(next)}
+            </span>
+            <span className="nav-say">
+              <strong>{arrived ? "You have arrived" : instructionFor(next)}</strong>
+              {!arrived && progress?.toNextM !== null && progress?.toNextM !== undefined && (
+                <small>{distanceCue(progress.toNextM)}</small>
+              )}
+            </span>
+          </div>
+
+          {!arrived && after && (
+            <p className="nav-then">
+              <span className="nav-then-label">Then</span>
+              <span className="nav-then-glyph" aria-hidden="true">{maneuverGlyph(after)}</span>
+              {asClause(instructionFor(after))}
+            </p>
+          )}
         </div>
 
-        {!arrived && after && (
-          <p className="nav-then">
-            {/* `asClause`, not `.toLowerCase()`: the latter takes the street name
-                with it, and "onto prinsengracht" is the one word a walker
-                actually matches against a sign. */}
-            <span aria-hidden="true">{maneuverGlyph(after)}</span> Then {asClause(instructionFor(after))}
-          </p>
-        )}
-
         {/* One line, and only when it is the kind of stretch worth naming. The
-            verdict's own colour, so it reads the same here as on the line. */}
+            verdict's own colour down the left edge — the same way every other
+            verdict on this page is shown. */}
         {caution && !arrived && (
-          <p className={`nav-caution ${VERDICT_CLASS[caution.verdict]}`}>
-            {VERDICT_LABEL[caution.verdict]} along here
+          <p className={`nav-note ${VERDICT_CLASS[caution.verdict]}`}>
+            <strong>{VERDICT_LABEL[caution.verdict]}</strong> along here
             {caution.streets[0] ? ` — ${caution.streets[0]}` : ""}
           </p>
         )}
 
         {progress?.offRoute && !arrived && (
-          <p className="nav-caution nav-off">
+          <p className="nav-note nav-off">
             You are off the planned route. Head back to the line, or exit and plan again from here.
           </p>
         )}
 
-        {waiting && !progress && (
-          <p className="nav-caution">Waiting for a position…</p>
-        )}
-        {locationError && (
-          <p className="nav-caution nav-off">{locationError}</p>
-        )}
+        {waiting && !progress && <p className="nav-note">Waiting for a position…</p>}
+        {locationError && <p className="nav-note nav-off">{locationError}</p>}
       </div>
 
-      {/* ── how far, and how to stop ─────────────────────────────────────── */}
-      <div className="nav-bar">
-        <div className="nav-left">
-          <span className="nav-eta">
-            {progress ? formatDuration(progress.remainingS) : "—"}
-          </span>
-          <small>
-            {progress
-              ? `${formatDistance(progress.remainingM)} · ${clockAt(progress.remainingS)}`
-              : "waiting for a position"}
-          </small>
-        </div>
+      {/* ── how far, and how to stop ───────────────────────────────────────
+          A floating card with a gutter under it, not a slab welded to the
+          bottom edge. Everything else on this page floats over the map; a bar
+          that does not is the one element that looks bolted on. */}
+      <div className="nav-bottom">
+        <div className="nav-card nav-bar">
+          <div className="nav-left">
+            <span className="nav-eta">{progress ? formatDuration(progress.remainingS) : "—"}</span>
+            <small>
+              {progress
+                ? `${formatDistance(progress.remainingM)} · ${clockAt(progress.remainingS)}`
+                : "waiting for a position"}
+            </small>
+          </div>
 
-        {/* Only offered once it is useful — while the map is already on the
-            walker there is nothing to recentre. */}
-        {!following && (
-          <button type="button" className="nav-recentre" onClick={onRecentre}>
-            <span aria-hidden="true">◎</span> Recentre
+          {/* Only offered once it is useful — while the map is already on the
+              walker there is nothing to recentre. */}
+          {!following && (
+            <button type="button" className="nav-recentre" onClick={onRecentre}>
+              <span aria-hidden="true">◎</span> Recentre
+            </button>
+          )}
+
+          <button type="button" className="nav-exit" onClick={onExit}>
+            {arrived ? "Done" : "Exit"}
           </button>
-        )}
-
-        <button type="button" className="nav-exit" onClick={onExit}>
-          {arrived ? "Done" : "Exit"}
-        </button>
+        </div>
       </div>
+
     </>
   );
 }

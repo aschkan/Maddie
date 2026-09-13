@@ -33,6 +33,26 @@ import type { LatLng, Route, Step } from "./osrm.ts";
  */
 export const OFF_ROUTE_M = 45;
 
+/**
+ * Off-route is judged against what the device actually knows.
+ *
+ * A fix carries its own uncertainty, and phones report hundreds of metres of it
+ * between buildings, indoors, and on a cold start — which is most of a walk
+ * through a dense city at night. Comparing a 120 m offset against a 45 m
+ * threshold while the device is only sure to ±100 m announces that somebody has
+ * left the route on the evidence that it does not know where they are.
+ *
+ * That was on screen: a walker standing on the boulevard their route runs
+ * along, inside an accuracy circle wider than the street, being told they had
+ * gone wrong. So the accuracy is subtracted before the comparison — the
+ * question becomes "are they off the route by more than the error bar", which
+ * is the only version of it the data can answer.
+ */
+export function isOffRoute(offM: number, accuracyM: number | null | undefined): boolean {
+  const slack = typeof accuracyM === "number" && Number.isFinite(accuracyM) ? Math.max(0, accuracyM) : 0;
+  return offM - slack > OFF_ROUTE_M;
+}
+
 /** Close enough to the destination to call it arrived. */
 export const ARRIVED_M = 25;
 
@@ -230,7 +250,7 @@ export function progressOn(route: Route, marks: readonly Milestone[], fix: Fix):
     remainingM,
     remainingS: Math.round(route.seconds * fraction),
     offM: on.offM,
-    offRoute: on.offM > OFF_ROUTE_M,
+    offRoute: isOffRoute(on.offM, fix.accuracyM),
     arrived,
     next,
     after,

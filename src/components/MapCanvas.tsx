@@ -276,6 +276,33 @@ function FitToRoute({ route, token, sheet }: { route: Route | undefined; token: 
 }
 
 /**
+ * Tell Leaflet when its container changed shape.
+ *
+ * Leaflet caches the container's size and only re-measures on a window resize.
+ * Nothing else here resizes the window — but entering navigation removes the
+ * sidebar, and the map's element grows into the space without Leaflet noticing.
+ * The result is tiles that stop dead partway across, with a band of empty
+ * container beside them, which looks exactly like a half-loaded map.
+ *
+ * A `ResizeObserver` on the container catches every cause of it — the sidebar
+ * going, the sheet being dragged, a desktop window resize, an on-screen
+ * keyboard — rather than one prop being watched and the next one being missed.
+ */
+function KeepSized() {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    // `animate: false` — a size correction is not a movement to watch.
+    const observer = new ResizeObserver(() => map.invalidateSize({ animate: false }));
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [map]);
+
+  return null;
+}
+
+/**
  * Keep the walker on screen while navigating, and let go when they take over.
  *
  * Two behaviours in one place because they are the same rule from both sides.
@@ -411,6 +438,7 @@ export default function MapCanvas({
       />
 
       <ClickToPick onPick={reportMode ? onReport : onPick} />
+      <KeepSized />
       <WatchView onView={onView} />
       {/* While navigating the map belongs to the walker, so the route is not
           re-fitted underneath them. */}

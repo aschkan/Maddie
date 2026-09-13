@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   ARRIVED_M, MANEUVER_NEAR_M, OFF_ROUTE_M, arrivalAt, asClause, distanceCue, instructionFor,
-  locateOnPath, maneuverGlyph, milestones, progressOn,
+  isOffRoute, locateOnPath, maneuverGlyph, milestones, progressOn,
 } from "../src/lib/navigation.ts";
 import { distanceM } from "../src/lib/geo.ts";
 import type { LatLng, Route, Step } from "../src/lib/osrm.ts";
@@ -245,4 +245,33 @@ test("a 'Then …' clause lowers only the first word, never the street name", ()
   // makes it unreadable.
   assert.equal(asClause("N7 exit ahead"), "N7 exit ahead");
   assert.equal(asClause(""), "");
+});
+
+test("off-route is judged against the accuracy the device reported", () => {
+  /*
+   * On screen once: a walker standing on the boulevard their route runs along,
+   * inside an accuracy circle wider than the street, being told they had gone
+   * wrong. Comparing a 120 m offset against a 45 m threshold while the device
+   * is only sure to ±100 m announces somebody has left the route on the
+   * evidence that it does not know where they are.
+   */
+  assert.equal(isOffRoute(120, 100), false, "within the error bar is not off-route");
+  assert.equal(isOffRoute(120, 10), true, "a good fix 120 m out really is off-route");
+  // No accuracy reported at all: the raw threshold, as before.
+  assert.equal(isOffRoute(OFF_ROUTE_M + 1, null), true);
+  assert.equal(isOffRoute(OFF_ROUTE_M - 1, undefined), false);
+  // Nonsense from the device must not turn the check off entirely.
+  assert.equal(isOffRoute(500, Number.NaN), true);
+  assert.equal(isOffRoute(500, -50), true);
+});
+
+test("a poor fix does not raise the off-route warning through progressOn", () => {
+  const r = route(1_000, 800);
+  const marks = milestones(r.steps, r.path);
+  const vague = progressOn(r, marks, { point: east(400, 90), accuracyM: 120 });
+  assert.ok(vague.offM > 80, "it really is that far from the line");
+  assert.equal(vague.offRoute, false, "but the device does not know that well enough to say so");
+
+  const sure = progressOn(r, marks, { point: east(400, 90), accuracyM: 8 });
+  assert.equal(sure.offRoute, true);
 });
