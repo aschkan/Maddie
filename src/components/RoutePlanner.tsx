@@ -35,6 +35,7 @@ import { plannedAt, type Light } from "@/lib/daylight";
 import { isForwarded } from "@/lib/endpoints";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, gridStep, snapBox, type BBox, type LayerData } from "@/lib/layers";
+import { googleMapsLink } from "@/lib/handoff";
 import { milestones, progressOn } from "@/lib/navigation";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
@@ -377,6 +378,19 @@ export default function RoutePlanner() {
    * waiting for Overpass before they can set off would be the wrong trade.
    */
   const canStart = Boolean(chosenRoute && chosenRoute.path.length > 1);
+
+  /**
+   * The same walk, handed to Google Maps.
+   *
+   * Not a link to the destination — that would throw away the whole
+   * contribution, because Google would plan the fastest route, which is the one
+   * this app exists to disagree with. Our route goes with it as waypoints; see
+   * `handoff.ts` for how few of them there can be and what that costs.
+   */
+  const handoff = useMemo(
+    () => (chosenRoute ? googleMapsLink(chosenRoute.path, profile) : null),
+    [chosenRoute, profile],
+  );
 
   const startTrip = useCallback(() => {
     setNavigating(true);
@@ -738,6 +752,34 @@ export default function RoutePlanner() {
                 <span aria-hidden="true">▶</span> Start
               </button>
             )}
+            {/*
+              * The other way to walk it: someone else's navigation, following
+              * our route. Secondary to Start, because the safety read — the
+              * reason to have planned here at all — does not travel with it.
+              */}
+            {handoff && !busy && (
+              <>
+                <a
+                  className="hand-off"
+                  href={handoff.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  <span aria-hidden="true">↗</span> Navigate in Google Maps
+                </a>
+                <p className="hint">
+                  {handoff.waypoints > 0
+                    ? <>Google gets this route as <strong>{handoff.waypoints} waypoint{handoff.waypoints === 1 ? "" : "s"}</strong>, which is
+                       as many as its links allow — enough to hold the shape
+                       {handoff.driftM > 25 ? <> to within about {handoff.driftM} m</> : null}, not
+                       enough to reproduce it exactly.</>
+                    : <>This route is straight enough that Google will draw the same line unprompted.</>}
+                  {" "}It navigates and reroutes properly, and it talks. What it cannot do is any of
+                  the safety read — the lit stretches and the one worth taking care on stay here.
+                </p>
+              </>
+            )}
+
             {canStart && chosenRoute && chosenRoute.steps.length === 0 && (
               <p className="hint">
                 This route came back without turn instructions, so navigation will follow the line

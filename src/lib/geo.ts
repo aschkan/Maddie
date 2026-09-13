@@ -20,7 +20,7 @@ export function distanceM(a: LatLng, b: LatLng): number {
 }
 
 /** Total length of a path, in metres. */
-export function pathLengthM(path: LatLng[]): number {
+export function pathLengthM(path: readonly LatLng[]): number {
   let total = 0;
   for (let i = 1; i < path.length; i++) {
     const previous = path[i - 1];

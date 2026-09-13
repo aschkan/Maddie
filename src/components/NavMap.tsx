@@ -34,6 +34,15 @@ import type { Segment } from "@/lib/segments";
 import { NAV_PITCH, NAV_ZOOM, VECTOR_STYLE, rewriteStyle, stillReachesOut } from "@/lib/vector";
 import { VERDICT_COLOUR } from "@/lib/verdict";
 
+/**
+ * How long to wait for the first basemap tile before giving up on it.
+ *
+ * Long enough for a slow exit in the pool to answer — these tiles come through
+ * the same proxies everything else does — and short enough that nobody stands
+ * on a corner watching a blank rectangle wondering whether it is loading.
+ */
+export const BASEMAP_GRACE_MS = 9_000;
+
 export interface NavMapProps {
   route: Route;
   /** The stretches, so the line keeps the safety colouring it has when flat. */
@@ -57,7 +66,22 @@ export interface NavMapProps {
  * dynamic import exists to avoid. Anything added here has to be added
  * deliberately, which is the point.
  */
-type Listener = (event: { error?: { message?: string } }) => void;
+/**
+ * The shape of the events this component listens for.
+ *
+ * One union rather than a listener type per event: MapLibre's own `on` is
+ * overloaded per event name, and reproducing that here would be a lot of
+ * surface for three callbacks.
+ */
+interface MapEvent {
+  error?: { message?: string };
+  dataType?: string;
+  sourceId?: string;
+  isSourceLoaded?: boolean;
+  tile?: unknown;
+}
+
+type Listener = (event: MapEvent) => void;
 
 interface MapHandle {
   on(event: string, listener: Listener | (() => void)): void;
@@ -137,6 +161,7 @@ export default function NavMap({
      the upstream and around this server's proxy chain entirely. */
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     void (async () => {
       const holderEl = holder.current;
@@ -184,12 +209,67 @@ export default function NavMap({
         });
         instance.touchZoomRotate?.disableRotation?.();
 
-        instance.on("error", (event: { error?: { message?: string } }) => {
-          // Individual tile failures are normal through a proxy pool and must
-          // not tear the map down; only a failure to start is fatal, and that
-          // arrives as a rejected promise above.
+        /*
+         * ── a basemap that never arrives must not be silent ──────────────
+         *
+         * This is the failure that shipped. The style loaded, MapLibre started,
+         * every tile request failed through the proxy pool — and the handler
+         * here logged a warning and carried on, so the view sat there as a
+         * blank rectangle with a route drawn on nothing. It looked identical to
+         * a map that had simply not painted yet, and there was no way for
+         * anyone, including me, to tell from the screen which it was.
+         *
+         * An individual tile failing is still fine — that is normal through a
+         * pool of public proxies and must not tear the map down. What is not
+         * fine is NONE of them arriving, so the style's own sources are
+         * counted, and if nothing has loaded by the time the grace period is up
+         * the flat map takes over and says why.
+         *
+         * Only the style's sources count. The route lines are `geojson` sources
+         * added here; they load instantly and always, so counting them would
+         * report a healthy basemap on a screen with no basemap at all.
+         */
+        /*
+         * ⚠ `isSourceLoaded` does NOT mean tiles arrived.
+         *
+         * For a tiled source it means the source DEFINITION is ready — the
+         * TileJSON parsed, or the inline `tiles` array was read — which happens
+         * immediately and says nothing about whether a single tile came back.
+         * Counting it was the bug in the first version of this watchdog: a
+         * style whose tiles could never load reported itself healthy before the
+         * first request went out, and the blank map stayed on screen.
+         *
+         * So it depends on the source's type. A tiled source has only arrived
+         * when an actual tile has (`event.tile`). A geojson, image or video
+         * source has no tiles and `isSourceLoaded` is the only signal there is.
+         */
+        const declared = (style as { sources?: Record<string, { type?: string }> }).sources ?? {};
+        const tiled = new Set(["vector", "raster", "raster-dem"]);
+        const needsTile = new Map(
+          Object.entries(declared).map(([id, source]) => [id, tiled.has(source?.type ?? "")]),
+        );
+        let loaded = 0;
+
+        instance.on("data", (event: MapEvent) => {
+          if (event?.dataType !== "source" || !event.sourceId) return;
+          const wantsTile = needsTile.get(event.sourceId);
+          if (wantsTile === undefined) return;   // one of ours, not the style's
+          if (wantsTile ? Boolean(event.tile) : Boolean(event.isSourceLoaded)) loaded += 1;
+        });
+
+        instance.on("error", (event: MapEvent) => {
           if (typeof console !== "undefined") console.warn("[nav map]", event?.error?.message ?? event);
         });
+
+        const watchdog = setTimeout(() => {
+          if (cancelled || loaded > 0) return;
+          onUnavailable(
+            needsTile.size === 0
+              ? "the vector basemap style has no map in it"
+              : "no basemap tiles arrived",
+          );
+        }, BASEMAP_GRACE_MS);
+        timer = watchdog;
 
         // A drag is the walker taking over. `dragstart` only a person can
         // cause; `move` is fired by our own camera and would fight the finger.
@@ -210,6 +290,7 @@ export default function NavMap({
 
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
       marker.current?.remove();
       marker.current = null;
       map.current?.remove();
@@ -260,19 +341,37 @@ export default function NavMap({
       instance.addLayer({
         id: "route-ahead-casing", type: "line", source: "route-ahead",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": night ? "#0b0d13" : "#ffffff", "line-width": 13, "line-opacity": 0.9 },
+        paint: { "line-color": night ? "#0b0d13" : "#ffffff", "line-width": 14, "line-opacity": 0.9 },
+      });
+      /*
+       * The route ahead, ALWAYS drawn — and this is a bug fixed, not a nicety.
+       *
+       * It used to be drawn only by the stretch layer below, which is built
+       * from the Overpass read. With no read — the request failed, or it has
+       * not come back yet, or the map says nothing about these streets — there
+       * were no stretches, so the only thing left was the casing: white on a
+       * pale basemap, black on a dark one. Invisible. The navigation view drew
+       * no route at all and said nothing about it, and I shipped a screenshot
+       * of exactly that and read the walked-behind line as the route.
+       *
+       * So the line exists first, in the app's accent, and the verdict colours
+       * are an overlay on top of it when there is something to say.
+       */
+      instance.addLayer({
+        id: "route-ahead-line", type: "line", source: "route-ahead",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": night ? "#8b6dff" : "#5b3df5", "line-width": 8 },
       });
       instance.addLayer({
         id: "route-stretches-line", type: "line", source: "route-stretches",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": ["get", "colour"], "line-width": 8 },
       });
-      // Drawn last and on top: what is behind you is history, and the line
-      // ahead has to be the brightest thing on the screen.
+      // What is behind you is history: drawn last, and dulled.
       instance.addLayer({
         id: "route-behind-line", type: "line", source: "route-behind",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": night ? "#4b5364" : "#aeb6c6", "line-width": 8, "line-opacity": 0.85 },
+        paint: { "line-color": night ? "#4b5364" : "#aeb6c6", "line-width": 8, "line-opacity": 0.9 },
       });
     }
   }, [ready, route, segments, travelledM, night, done]);

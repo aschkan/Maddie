@@ -163,6 +163,13 @@ Some deliberate choices, because each is a trade:
     and says so. That is not a nicety: one of the two servers this is deployed
     on cannot reach the internet at all, and a blank rectangle would be a worse
     navigation view than a flat one that works.
+* **Or hand the walk to Google Maps.** Under Start there is a second button that
+  opens Google's navigation — with *this* route, not Google's. Ours travels as
+  waypoints, up to the nine its links allow, spent on the corners where the two
+  would otherwise part company rather than on the straights. Google then does
+  the things worth not rebuilding: spoken directions, rerouting, a lock screen.
+  What it cannot do is the safety read, and the button says so — the lit
+  stretches and the one worth taking care on stay here.
 * **There is no rerouting and no voice.** Going off route says so and offers to
   plan again from where you are; it does not silently replan, because a route
   that changes under you at night is worse than one that tells you it no longer

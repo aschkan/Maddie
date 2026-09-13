@@ -736,6 +736,23 @@ input[type="range"]::-moz-range-thumb {
 .start-trip:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
 .start-trip span { margin-right: .35rem; font-size: .9em; }
 
+/* Handing the walk to another app. Secondary to Start — an outline rather than
+   a fill — because the safety read does not travel with it. */
+.hand-off {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%;
+  min-height: var(--tap);
+  margin-top: .1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--button);
+  color: var(--text);
+  font-size: .95rem; font-weight: 620;
+  text-decoration: none;
+}
+.hand-off:hover { background: var(--button-hover); }
+.hand-off span { margin-right: .4rem; color: var(--accent); }
+
 /* The shared card. Identical treatment to `.trip-card`, on purpose. */
 .nav-card {
   background: var(--panel);

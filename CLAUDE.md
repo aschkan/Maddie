@@ -25,6 +25,10 @@ short list of things that will bite you while editing.
   mounted only while navigating.
 - `src/lib/vector.ts` — the vector basemap, and the style rewriting that keeps
   it behind this server's forwarder. Pure, tested.
+- `src/lib/handoff.ts` — the same walk, handed to Google Maps, **with our route
+  as waypoints**. Pure, tested.
+- `scripts/nav-check.mjs` — drives a browser and MEASURES THE PIXELS. Opt-in,
+  not part of `npm run check`. Read its header before touching the nav view.
 - `src/components/useNavigation.ts` — the geolocation watch, and nothing else.
 - `src/lib/verdict.ts` — how a verdict is written and coloured, in one place.
 - `src/lib/compare.ts` — which route is preferred, and when to say none is.
@@ -431,6 +435,45 @@ GPU, which is MapLibre. Planning needs none of that and should not pay for it.
 - **Rotation by hand is off** (`dragRotate`, `pitchWithRotate`). A walker does
   not need to spin the map, and a stray two-finger twist while it is following
   is only confusing.
+- **The route ahead is drawn by its OWN layer, not by the stretches.** It used
+  to be drawn only by the Overpass-derived stretch layer, so a failed or absent
+  safety read left nothing but a casing — white on a pale basemap, black on a
+  dark one, invisible either way. The line exists first, in the accent; the
+  verdict colours are an overlay when there is something to say.
+- **`isSourceLoaded` does NOT mean tiles arrived.** For a tiled source it means
+  the source DEFINITION parsed, which happens before the first request goes
+  out. Counting it made the watchdog report a healthy basemap on a blank
+  screen. A tiled source has arrived when `event.tile` has; a geojson one when
+  `isSourceLoaded` does. The type decides.
+- **A blank basemap must never be silent.** `BASEMAP_GRACE_MS` after load, if
+  nothing the STYLE declares has produced data, the flat map takes over and
+  says why. The route lines are our own geojson sources and load instantly, so
+  counting them would report a healthy basemap over no basemap at all.
+
+## Handing the walk to Google Maps
+
+`handoff.ts` builds a Maps link that starts turn-by-turn. It exists because
+spoken directions, rerouting and a lock screen are not worth rebuilding, and
+somebody walking home at night is better served by the app they already know.
+
+- **The ROUTE has to survive the handoff, or there was no point.** A link to the
+  destination throws away the entire contribution: Google plans the fastest
+  route, which is the one this app exists to disagree with. Ours goes along as
+  waypoints.
+- **`MAX_WAYPOINTS` is 9 and is not a number to tune.** It is the documented
+  ceiling of the Maps URLs API, and over it the link is rejected outright —
+  navigation does not start at all, rather than starting slightly wrong.
+- **The budget is spent by Douglas–Peucker, never by even spacing.** Even
+  spacing spends it on long straights, where Google would go the same way
+  unprompted, and has nothing left for the corner where our route and the fast
+  route part company — the only place a waypoint does any work.
+- **`driftM` is reported rather than hidden.** Nine points approximate a route,
+  they do not reproduce it. The panel says how much shape was lost.
+- **The `|` between waypoints must not be percent-encoded by
+  `URLSearchParams`** — Google ignores the encoded form and quietly reverts to
+  its own route, which looks like the feature working.
+- **The safety read does not travel.** The lit stretches and the stretch worth
+  taking care on stay in this app, and the button says so before it is tapped.
 
 ## Navigating — a mode, not a panel
 
@@ -1051,6 +1094,16 @@ can act on by walking a different way), and is the same data OSRM routed on.
   snapped point is fiction.
 - **`.toLowerCase()` on an instruction lowercases the street name.** Proper
   nouns are the one word a walker reads off a sign.
+- **A blank map looks identical whatever caused it**, which is why
+  `scripts/nav-check.mjs` counts pixels instead of a person looking at a
+  screenshot. It shipped blank twice, and both times the screenshot was looked
+  at and explained away.
+- **`readPixels` on MapLibre's canvas reads back CLEARED.** There is no
+  `preserveDrawingBuffer`, so a check written that way reports every map as
+  blank — the false negative that hides the failure it was meant to catch.
+  Measure the composited screenshot.
+- **A Google Maps link to the destination is not a handoff of the route.** It
+  is a handoff of the problem, to the router this app exists to disagree with.
 
 ## Toolchain constraints
 
@@ -1074,6 +1127,11 @@ can act on by walking a different way), and is the same data OSRM routed on.
   resolves and the test runner does not — so anything imported by a test must
   use a relative path.
 - `eslint` is pinned to 9.x: `eslint-plugin-react` is not compatible with 10.
+- **`npm run nav-check` is NOT part of `npm run check`, deliberately.** That
+  suite is offline and opens no socket but loopback; this needs a built app, a
+  running server and a browser. Playwright is not a dependency either — it is a
+  300 MB tool installed with `npm i --no-save playwright` when it is wanted.
+  Run it by hand whenever the navigation view changes.
 - The React Compiler lint rejects a `setState` reached synchronously from an
   effect body. Everything goes inside `void (async () => { … })()`.
 
