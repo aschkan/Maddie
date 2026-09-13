@@ -23,9 +23,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import BottomSheet, { type Snap } from "@/components/BottomSheet";
 import FilterPanel from "@/components/FilterPanel";
+import Navigation from "@/components/Navigation";
 import RouteChoices from "@/components/RouteChoices";
 import SafetyPanel from "@/components/SafetyPanel";
 import TripCard from "@/components/TripCard";
+import { useNavigation } from "@/components/useNavigation";
 import { useReports } from "@/components/useReports";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import { compareRoutes } from "@/lib/compare";
@@ -33,6 +35,7 @@ import { plannedAt, type Light } from "@/lib/daylight";
 import { isForwarded } from "@/lib/endpoints";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, gridStep, snapBox, type BBox, type LayerData } from "@/lib/layers";
+import { milestones, progressOn } from "@/lib/navigation";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
 import { assess, lightingFor, type When } from "@/lib/score";
@@ -129,6 +132,18 @@ export default function RoutePlanner() {
   const [reportMode, setReportMode] = useState(false);
   const [reportCategory, setReportCategory] = useState<string>(CRIME_CATEGORIES[0]?.id ?? "other");
   const { reports, backend, error: reportError, add, remove, clearExamples } = useReports();
+
+  /*
+   * ── navigating ──────────────────────────────────────────────────────────
+   *
+   * One flag, because it changes the whole page rather than a corner of it:
+   * the trip card, the sheet and the tabs all leave, and the map becomes the
+   * only thing. `follow` is separate and can be broken by a drag — see
+   * `FollowMe` in `MapCanvas`, which is where the give-up is bound.
+   */
+  const [navigating, setNavigating] = useState(false);
+  const [following, setFollowing] = useState(true);
+  const { fix, error: locationError, waiting: locating } = useNavigation(navigating);
 
   const [view, setView] = useState<{ bbox: BBox; zoom: number } | null>(null);
   const [layers, setLayers] = useState<LayerData>(EMPTY_LAYERS);
@@ -297,6 +312,77 @@ export default function RoutePlanner() {
   const worst = useMemo(() => worstStretch(segments, chosenScore), [segments, chosenScore]);
   const worstLine = useMemo(() => describeWorst(worst, chosenScore), [worst, chosenScore]);
 
+  /* ── where the walk has got to ───────────────────────────────────────── */
+
+  const chosenRoute = routes[selected];
+
+  /*
+   * The instructions, put on the line once per route rather than once per fix.
+   *
+   * Snapping every maneuver onto the polyline is a few hundred distance
+   * calculations; doing it on every position update would be that many times a
+   * second for an answer that cannot have changed.
+   */
+  const marks = useMemo(
+    () => (chosenRoute ? milestones(chosenRoute.steps, chosenRoute.path) : []),
+    [chosenRoute],
+  );
+
+  const progress = useMemo(
+    () => (navigating && chosenRoute && fix ? progressOn(chosenRoute, marks, fix) : null),
+    [navigating, chosenRoute, marks, fix],
+  );
+
+  /**
+   * The stretch being walked through right now.
+   *
+   * Looked up by distance along the route, which is the same measurement the
+   * position was snapped into — matching on the nearest segment by straight
+   * line would pick the wrong one wherever the route doubles back on itself.
+   */
+  const here = useMemo(() => {
+    const alongM = progress?.on?.alongM;
+    if (alongM === undefined) return null;
+    return segments.find((segment) => alongM >= segment.fromM && alongM <= segment.toM) ?? null;
+  }, [segments, progress]);
+
+  /*
+   * Starting is only offered when there is something to navigate.
+   *
+   * It does not wait for the safety read: the turns come from the router and
+   * are ready as soon as the route is, and making somebody stand on a corner
+   * waiting for Overpass before they can set off would be the wrong trade.
+   */
+  const canStart = Boolean(chosenRoute && chosenRoute.path.length > 1);
+
+  const startTrip = useCallback(() => {
+    setNavigating(true);
+    setFollowing(true);
+    // The sheet is hidden while navigating; leaving it open means it is in the
+    // way the moment the walk ends.
+    setSnap("peek");
+  }, []);
+
+  const endTrip = useCallback(() => {
+    setNavigating(false);
+    setFollowing(true);
+  }, []);
+
+  /*
+   * Changing the plan ends the trip.
+   *
+   * Editing A or B, or picking a different way round, while a navigation view
+   * is following the old line would leave the banner giving instructions for a
+   * route that is no longer on screen. There is no safe way to reconcile those,
+   * so the trip stops and has to be started again — deliberately, by the
+   * person, who is the one who knows what they meant.
+   */
+  useEffect(() => {
+    // In the IIFE like every other setState in this file: the React Compiler
+    // lint rejects one reached synchronously from an effect body.
+    void (async () => { setNavigating(false); })();
+  }, [start, end, profile, selected]);
+
   /* ── the layers over the visible map ─────────────────────────────────── */
   const zoomedOut = view !== null && view.zoom < MIN_LAYER_ZOOM;
 
@@ -358,7 +444,15 @@ export default function RoutePlanner() {
   );
   const exampleCount = useMemo(() => countExamples(reports), [reports]);
 
-  const usePlace = (which: "start" | "end") => (place: Place) => {
+  /*
+   * Named `pickPlace`, not `usePlace`.
+   *
+   * It is a factory that returns a handler, not a hook — and while it was
+   * called unconditionally the `use` prefix was merely misleading. The moment
+   * the trip card became conditional (it is hidden while navigating) the lint
+   * read it as a hook called inside a branch, which is what it looks like.
+   */
+  const pickPlace = (which: "start" | "end") => (place: Place) => {
     if (which === "start") {
       setStart(place.point);
       setStartText(place.label);
@@ -414,7 +508,7 @@ export default function RoutePlanner() {
   return (
     /* The stop is on the frame, not just the sheet: the map's own buttons and
        the reporting banner have to move out from under the panel with it. */
-    <div className="app" data-snap={snap}>
+    <div className="app" data-snap={snap} data-nav={navigating ? "on" : "off"}>
       <main className={reportMode ? "map reporting" : "map"}>
         <MapCanvas
           start={start}
@@ -437,27 +531,46 @@ export default function RoutePlanner() {
           onTileError={() => setTilesFailed(true)}
           onView={setView}
           night={night}
+          me={navigating ? fix : null}
+          travelledM={progress?.on?.alongM ?? null}
+          follow={navigating && following}
+          onFollowBroken={() => setFollowing(false)}
         />
 
+        {!navigating && (
         <TripCard
           start={start} end={end}
           startText={startText} endText={endText}
           onStartText={setStartText} onEndText={setEndText}
-          onPickStart={usePlace("start")} onPickEnd={usePlace("end")}
+          onPickStart={pickPlace("start")} onPickEnd={pickPlace("end")}
           onClearStart={() => { setStart(null); setStartText(""); }}
           onClearEnd={() => { setEnd(null); setEndText(""); }}
           onSwap={swap}
           next={next}
           night={night} onNight={setNight}
         />
+        )}
 
-        {reportMode && (
+        {navigating && (
+          <Navigation
+            progress={progress}
+            here={here}
+            following={following}
+            onRecentre={() => setFollowing(true)}
+            onExit={endTrip}
+            locationError={locationError}
+            waiting={locating}
+          />
+        )}
+
+        {reportMode && !navigating && (
           <p className="reporting-banner">
             Tapping the map adds a report — not a route point.
           </p>
         )}
       </main>
 
+      {!navigating && (
       <BottomSheet
         snap={snap}
         onSnap={setSnap}
@@ -561,6 +674,22 @@ export default function RoutePlanner() {
                 <div><span>{formatDuration(chosen.seconds)}</span><small>{PROFILE_TIME[profile]}</small></div>
               </div>
             )}
+
+            {/* The one big button on the page, and the only primary action.
+                Below the summary rather than above it, because the numbers are
+                what somebody reads before deciding to set off. */}
+            {canStart && !busy && (
+              <button type="button" className="start-trip" onClick={startTrip}>
+                <span aria-hidden="true">▶</span> Start
+              </button>
+            )}
+            {canStart && chosenRoute && chosenRoute.steps.length === 0 && (
+              <p className="hint">
+                This route came back without turn instructions, so navigation will follow the line
+                without naming the turns. A self-hosted OSRM sends them; the public demo server does
+                not always.
+              </p>
+            )}
           </>
         )}
 
@@ -610,6 +739,7 @@ export default function RoutePlanner() {
           />
         )}
       </BottomSheet>
+      )}
     </div>
   );
 }

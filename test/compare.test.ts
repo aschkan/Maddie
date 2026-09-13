@@ -6,7 +6,7 @@ import type { Assessment } from "../src/lib/score.ts";
 import type { Route } from "../src/lib/osrm.ts";
 
 function route(metres: number, seconds: number): Route {
-  return { path: [{ lat: 52.37, lng: 4.89 }, { lat: 52.38, lng: 4.90 }], metres, seconds };
+  return { path: [{ lat: 52.37, lng: 4.89 }, { lat: 52.38, lng: 4.90 }], metres, seconds, steps: [] };
 }
 
 function scored(score: number | null): Assessment {

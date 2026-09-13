@@ -111,6 +111,48 @@ that gap would cost more than the gap is worth. Where the place is not known at
 all, the old clock rule stands in and the panel says `(by the clock)` rather
 than passing a guess off as a sunset.
 
+## Starting the walk
+
+Under the route summary there is one button: **Start**. It turns the page into
+a navigation view — the trip card, the panel and the tabs all leave, and the map
+becomes the whole screen with three things over it:
+
+* the **next instruction**, with how far to it, and a smaller "Then …" line for
+  the one after;
+* the **bottom bar** — time left, distance left, the clock time you would
+  arrive, and **Exit**;
+* the **caution line**, when the stretch you are walking through right now is
+  one the map says to take care on. That is the part no other navigation app
+  has, and it is the reason this one exists.
+
+The map follows you and zooms in. Drag it and it stops following — pulling the
+view back under somebody's finger is the most infuriating thing a navigation
+view can do — and a **Recentre** button appears until you want it back.
+
+Some deliberate choices, because each is a trade:
+
+* **Turn instructions come from the router.** `steps=true` asks OSRM for them
+  and they arrive with the route. A server that does not send them still
+  navigates: the line is followed, there is just no turn banner, and the panel
+  says so rather than looking broken.
+* **Refusing to share your location is a perfectly good answer** on a page about
+  walking home after dark. The route, the turns and the safety read all still
+  work — the map simply does not follow you.
+* **Off-route is judged generously** (45 m). A phone's fix drifts tens of metres
+  between buildings, and a walker legitimately uses either pavement and cuts
+  corners the router drew square. An alert that cries wolf on every narrow
+  street is one that gets ignored on the night it is right.
+* **The position is a dot with an accuracy ring, never a pin.** A pin points at
+  a spot and claims a precision a phone does not have; the ring is the only
+  honest thing on screen about how well it knows.
+* **Editing the plan ends the trip.** Changing A, B, the travel mode or the
+  chosen route while the banner is giving instructions for the old line cannot
+  be reconciled, so it stops and you start it again.
+* **There is no rerouting and no voice.** Going off route says so and offers to
+  plan again from where you are; it does not silently replan, because a route
+  that changes under you at night is worse than one that tells you it no longer
+  applies. Neither is hard to add — they are simply not there yet.
+
 ## "Preferred", not "safe"
 
 With two or three ways round on screen, each is read from OpenStreetMap and

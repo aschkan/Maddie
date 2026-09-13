@@ -47,6 +47,13 @@
   /* Nothing interactive is ever smaller than this. A 30px button is a button
      you miss, and on this page the one you hit instead might be Report. */
   --tap: 44px;
+  /* Navigating: dark chrome in both themes on purpose. The instruction is read
+     at a glance over a map of unknown colour, and a light banner on a light
+     basemap is the one combination that cannot be read at all. */
+  --nav-banner: #10422f;
+  --nav-then: #1c5a41;
+  --stop: #d93a3a;
+  --danger: #f2603c;
 
   /* The sheet's three stops. `--peek` is what stays on screen collapsed; the
      other two are percentages of the viewport, kept as bare numbers so that
@@ -692,6 +699,123 @@ input[type="range"]::-moz-range-thumb {
 .tiles-night {
   filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.75);
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Navigating — the trip, under way
+
+   A mode, not a panel. The trip card, the sheet and the tab bar are all gone
+   while this is up, because the person reading it is walking, holding the phone
+   in one hand, probably at night, and there are exactly three things worth any
+   screen: what to do next, how far is left, and how to stop.
+
+   Written at 360px like everything above it. Both bars are anchored to the
+   safe-area insets rather than to the viewport edge — on a phone with a notch
+   or a home bar the instruction would otherwise sit under the hardware.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* The one primary action on the planning panel. Full width and well over the
+   tap minimum: it is pressed once, outdoors, possibly in a hurry. */
+.start-trip {
+  width: 100%;
+  min-height: calc(var(--tap) + 8px);
+  margin-top: .2rem;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 1.02rem;
+  font-weight: 680;
+  letter-spacing: .01em;
+  box-shadow: var(--shadow-2);
+}
+.start-trip span { margin-right: .35rem; font-size: .9em; }
+
+.nav-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 1200;
+  display: flex; flex-direction: column; gap: .4rem;
+  padding: calc(env(safe-area-inset-top) + .5rem) calc(env(safe-area-inset-right) + .6rem)
+           0 calc(env(safe-area-inset-left) + .6rem);
+  pointer-events: none;   /* the map underneath stays draggable */
+}
+
+/* The instruction. Dark and solid rather than translucent: it is read at a
+   glance in the dark, over a map that may be any colour underneath. */
+.nav-banner {
+  display: flex; align-items: center; gap: .7rem;
+  padding: .75rem .9rem;
+  border-radius: var(--r-md);
+  background: var(--nav-banner);
+  color: #fff;
+  box-shadow: var(--shadow-2);
+}
+.nav-glyph { font-size: 1.9rem; line-height: 1; flex: none; }
+.nav-say { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+/* Street names are long, and the page must never scroll sideways. */
+.nav-say strong { font-size: 1.12rem; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+.nav-say small { font-size: .85rem; opacity: .8; }
+
+/* The one after. Narrower and tucked under the left edge, the way every
+   navigation app does it, so it reads as secondary without being small. */
+.nav-then {
+  align-self: flex-start;
+  margin: -.25rem 0 0;
+  padding: .4rem .7rem .45rem;
+  border-radius: 0 var(--r-md) var(--r-md) var(--r-md);
+  background: var(--nav-then);
+  color: #fff;
+  font-size: .88rem;
+  overflow-wrap: anywhere;
+}
+
+.nav-caution {
+  margin: 0;
+  padding: .5rem .7rem;
+  border-radius: var(--r-md);
+  background: var(--panel);
+  border-left: 3px solid var(--verdict, var(--line));
+  color: var(--ink);
+  font-size: .86rem; line-height: 1.4;
+  box-shadow: var(--shadow-1);
+  pointer-events: auto;
+}
+.nav-off { border-left-color: var(--danger, #f2603c); }
+
+.nav-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 1200;
+  display: flex; align-items: center; gap: .6rem;
+  padding: .6rem calc(env(safe-area-inset-right) + .7rem)
+           calc(env(safe-area-inset-bottom) + .6rem) calc(env(safe-area-inset-left) + .7rem);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, .18);
+}
+.nav-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .05rem; }
+.nav-eta { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.nav-left small { color: var(--muted); font-size: .8rem; }
+
+.nav-recentre, .nav-exit {
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 1rem;
+  border-radius: 999px;
+  font-size: .92rem; font-weight: 620;
+}
+.nav-recentre { background: var(--raised); color: var(--ink); border: 1px solid var(--line); }
+.nav-recentre span { margin-right: .25rem; }
+/* Red, and the widest thing on the bar. Stopping has to be findable without
+   looking for it. */
+.nav-exit { background: var(--stop); color: #fff; padding: 0 1.4rem; }
+
+/* The map is the whole page while navigating, so the tool cluster sits above
+   the bar rather than above a sheet that is no longer there. */
+.app[data-nav="on"] .map-tools { bottom: calc(env(safe-area-inset-bottom) + 5.2rem); }
+.app[data-nav="on"] .map { flex: 1; }
+
+/* The stretch already walked, faded rather than recoloured — see MapCanvas. */
+.leaflet-container .walked { pointer-events: none; }
 
 /* ────────────────────────────────────────────────────────────────────────────
    From a tablet up: the sheet stops being a sheet and becomes a sidebar. The

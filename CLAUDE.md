@@ -18,6 +18,10 @@ short list of things that will bite you while editing.
   the NOAA solar equations, not from the clock. Pure, tested.
 - `src/lib/segments.ts` — the route in ~400 m stretches, each scored by the same
   `assess()` the whole route is. Pure, tested.
+- `src/lib/navigation.ts` — where you are on the route and what to do next.
+  Pure, tested. **The turn-by-turn arithmetic lives here, not in the component.**
+- `src/components/Navigation.tsx` — the navigation view: banner and bottom bar.
+- `src/components/useNavigation.ts` — the geolocation watch, and nothing else.
 - `src/lib/verdict.ts` — how a verdict is written and coloured, in one place.
 - `src/lib/compare.ts` — which route is preferred, and when to say none is.
 - `src/lib/reports.ts` — the crime layer. Entered by people, never scored.
@@ -367,6 +371,70 @@ The rules that will be undone by accident:
 - **The 429 is NEVER cached.** `keep()` is deliberately not called on that path,
   and `osm-cache.ts` refuses a non-200 anyway — storing a refusal for the
   service's TTL turns one minute of rate limiting into ten.
+
+## Navigating — a mode, not a panel
+
+**Start** turns the page into a navigation view: the trip card, the sheet and
+the tab bar all go, and the map becomes the whole screen. The person reading it
+is walking, holding the phone in one hand, probably at night, and there are
+three things worth any screen — what to do next, how far is left, how to stop.
+
+- **The arithmetic is in `navigation.ts`, pure and tested; the component only
+  arranges it.** Every rule in it is a judgement about somebody walking down a
+  street at night, and the only way to try them without going outside is to
+  feed positions in and assert on what comes out.
+- **`steps=true` is why any of this works.** `routeUrl` asks OSRM for turn
+  instructions; without them there is a line on a map and nothing to say about
+  it. A route that comes back with none still navigates — it follows the line,
+  with no turn banner — and the panel says so rather than looking broken.
+- **Maneuvers are placed on the line by SNAPPING, never by summing OSRM's own
+  step distances.** OSRM measures against its network geometry; a walker is
+  measured against the simplified polyline this app drew. The two drift by tens
+  of metres over a long route, which is exactly the scale at which "turn in
+  20 m" has to be right. `milestones()` puts both in one measurement space, once
+  per route rather than once per fix.
+- **`locateOnPath` searches the WHOLE line, never just the part ahead.**
+  Forwards-only is the obvious optimisation and it is unrecoverable here: a fix
+  that jumps — and they do, between tall buildings — would drag progress
+  permanently with it, and the walk would report itself nearly arrived for the
+  rest of the journey.
+- **Arrival is measured to the END POINT, not from the distance remaining.** A
+  fix that drifted near the destination can snap to a point with metres still to
+  run while standing on the doorstep, or snap past the end while a street away.
+- **`OFF_ROUTE_M` is 45 and errs generous on purpose.** A phone's fix drifts
+  tens of metres between buildings, a walker uses either pavement and cuts
+  corners the router drew square. An alert that cries wolf on every narrow
+  street is one that gets ignored on the night it is right.
+- **Following gives up on `dragstart`, never on `moveend`.** `moveend` is fired
+  by this component's own `setView`, so binding to it makes the map fight the
+  finger — and pulling the view back a second after somebody moved it is the
+  single most infuriating thing a navigation view can do.
+- **A refused location is a STATE, not an error.** On a page about walking home
+  after dark, "I would rather not share my location" is a reasonable answer. The
+  route and the turns still show; only the following stops.
+- **A poor fix is kept and labelled, never dropped.** Dropping fixes above an
+  accuracy threshold freezes the screen with no explanation in exactly the
+  narrow streets this app is most for. The accuracy ring is the honest thing.
+- **The watch only runs while navigating.** `watchPosition` keeps the GPS warm,
+  which on a phone is the difference between a walk and a flat battery.
+- **Editing the plan ends the trip.** Changing A, B, the profile or the selected
+  route while the banner is giving instructions for the old line cannot be
+  reconciled, so it stops and has to be started again by the person who knows
+  what they meant.
+- **Only a `poor` stretch raises the caution line.** Not `unknown` — that is
+  most streets in most of the world and is not a thing to say every four hundred
+  metres — and not `fair`. A caution that appears constantly stops being read.
+- **`asClause`, never `.toLowerCase()`, for the "Then …" line.** Lowercasing the
+  whole instruction takes the street name with it; "onto prinsengracht" shipped
+  once and was caught in a screenshot. A street name is the one word a walker
+  matches against a sign.
+- **The walked part is faded by drawing the background OVER it**, not by
+  recolouring it — that would be a second copy of the safety colouring to keep
+  in step. The cut point is interpolated, because snapping the fade to the
+  nearest vertex makes it lurch by half a block as you walk.
+- **`pickPlace` is not a hook** and must not be renamed back to `usePlace`. It
+  is a factory returning a handler, and the trip card is conditional now, so the
+  `use` prefix reads to the lint as a hook called inside a branch.
 
 ## The split that matters
 
@@ -915,6 +983,14 @@ can act on by walking a different way), and is the same data OSRM routed on.
 - **There is no environment variable to add.** The proxy system, the upstreams
   and the model are constants; `MONGO_URI` is the only one left. A test that
   needs to vary one takes a parameter.
+- **Summing OSRM's step distances is not the same measurement as the line.**
+  Snap each maneuver onto the polyline instead, or "turn in 20 m" is wrong by
+  tens of metres on a long route.
+- **Snapping a fix to the route never says where you are in the WORLD.** A fix
+  300 m away still lands on the line; `offM` is the only thing that says the
+  snapped point is fiction.
+- **`.toLowerCase()` on an instruction lowercases the street name.** Proper
+  nouns are the one word a walker reads off a sign.
 
 ## Toolchain constraints
 
