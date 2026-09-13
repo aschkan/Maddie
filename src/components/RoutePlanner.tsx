@@ -94,6 +94,13 @@ const MAX_ROUTES = 3;
  */
 const RATE_LIMIT_REST_MS = 60_000;
 
+/**
+ * The hour the page starts on, before the browser has been asked what time it
+ * really is. See the note on `hour` below — it exists because this page is
+ * prerendered, and a clock read during render is the build machine's clock.
+ */
+const NOON = 12;
+
 const THEME_KEY = "maddie.theme.v1";
 
 /**
@@ -110,9 +117,30 @@ export default function RoutePlanner() {
   const [startText, setStartText] = useState("");
   const [endText, setEndText] = useState("");
   const [profile, setProfile] = useState<Profile>("walking");
-  // The safety read turns almost entirely on whether it is dark, so the hour is
-  // something you set rather than something the page assumes.
-  const [hour, setHour] = useState<number>(() => new Date().getHours());
+  /*
+   * The safety read turns almost entirely on whether it is dark, so the hour is
+   * something you set rather than something the page assumes.
+   *
+   * ⚠ It does NOT start from the clock, and that is not fussiness. This page is
+   * statically prerendered, so `new Date().getHours()` read during render is
+   * evaluated once at BUILD time and baked into the HTML — a build at midnight
+   * ships "00:00 · after dark" to everyone, for ever. Every visitor whose hour
+   * differs then hydrates against text that does not match, React throws the
+   * server HTML away and re-renders the whole page, and the first paint is
+   * wrong about the one input the verdict actually turns on.
+   *
+   * So it starts at a fixed hour and is corrected on mount, when there is a
+   * browser to ask. `NOON` rather than midnight because it is the honest
+   * placeholder: a page that has not yet worked out what time it is should not
+   * be claiming it is dark.
+   */
+  const [hour, setHour] = useState<number>(NOON);
+
+  useEffect(() => {
+    // In the IIFE like every other setState in this file: the React Compiler
+    // lint rejects one reached synchronously from an effect body.
+    void (async () => { setHour(new Date().getHours()); })();
+  }, []);
 
   const [routes, setRoutes] = useState<Route[]>([]);
   const [selected, setSelected] = useState(0);
