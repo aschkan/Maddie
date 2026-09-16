@@ -1,0 +1,845 @@
+{
+ "odata.metadata": "https://dataderden.cbs.nl/ODataApi/OData/47022NED/$metadata#Cbs.OData.WebAPI.TypedDataSet",
+ "value": [
+  {
+   "ID": 9,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 37
+  },
+  {
+   "ID": 0,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 5
+  },
+  {
+   "ID": 1,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 2,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 3,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": null
+  },
+  {
+   "ID": 4,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 5,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 13
+  },
+  {
+   "ID": 6,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 7,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 8,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM09",
+   "GeregistreerdeMisdrijven_1": 5
+  },
+  {
+   "ID": 19,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 26
+  },
+  {
+   "ID": 10,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 11,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 12,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 13,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": null
+  },
+  {
+   "ID": 14,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 15,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 6
+  },
+  {
+   "ID": 16,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 6
+  },
+  {
+   "ID": 17,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 18,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM10",
+   "GeregistreerdeMisdrijven_1": 3
+  },
+  {
+   "ID": 29,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 47
+  },
+  {
+   "ID": 20,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 21,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 22,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 23,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": null
+  },
+  {
+   "ID": 24,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 13
+  },
+  {
+   "ID": 25,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 26,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 27,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 3
+  },
+  {
+   "ID": 28,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM11",
+   "GeregistreerdeMisdrijven_1": 10
+  },
+  {
+   "ID": 39,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 45
+  },
+  {
+   "ID": 30,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 10
+  },
+  {
+   "ID": 31,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 32,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": null
+  },
+  {
+   "ID": 33,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 34,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 35,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 3
+  },
+  {
+   "ID": 36,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 37,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 38,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2025MM12",
+   "GeregistreerdeMisdrijven_1": 13
+  },
+  {
+   "ID": 49,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 38
+  },
+  {
+   "ID": 40,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 41,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 4
+  },
+  {
+   "ID": 42,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 43,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 44,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 45,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 46,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 47,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 4
+  },
+  {
+   "ID": 48,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM01",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 59,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 59
+  },
+  {
+   "ID": 50,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 13
+  },
+  {
+   "ID": 51,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 10
+  },
+  {
+   "ID": 52,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 53,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": null
+  },
+  {
+   "ID": 54,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 55,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 56,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 10
+  },
+  {
+   "ID": 57,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 3
+  },
+  {
+   "ID": 58,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM02",
+   "GeregistreerdeMisdrijven_1": 5
+  },
+  {
+   "ID": 69,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 46
+  },
+  {
+   "ID": 60,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 61,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 62,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": null
+  },
+  {
+   "ID": 63,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": null
+  },
+  {
+   "ID": 64,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 65,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 3
+  },
+  {
+   "ID": 66,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 7
+  },
+  {
+   "ID": 67,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 10
+  },
+  {
+   "ID": 68,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM03",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 79,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 60
+  },
+  {
+   "ID": 70,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 6
+  },
+  {
+   "ID": 71,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 12
+  },
+  {
+   "ID": 72,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 73,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 74,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 75,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 14
+  },
+  {
+   "ID": 76,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 7
+  },
+  {
+   "ID": 77,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 5
+  },
+  {
+   "ID": 78,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM04",
+   "GeregistreerdeMisdrijven_1": 4
+  },
+  {
+   "ID": 89,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 44
+  },
+  {
+   "ID": 80,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 3
+  },
+  {
+   "ID": 81,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 12
+  },
+  {
+   "ID": 82,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 83,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 84,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 85,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 86,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 4
+  },
+  {
+   "ID": 87,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 88,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM05",
+   "GeregistreerdeMisdrijven_1": 7
+  },
+  {
+   "ID": 99,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 47
+  },
+  {
+   "ID": 90,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 14
+  },
+  {
+   "ID": 91,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 5
+  },
+  {
+   "ID": 92,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 93,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 94,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 95,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 96,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 97,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 8
+  },
+  {
+   "ID": 98,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM06",
+   "GeregistreerdeMisdrijven_1": 6
+  },
+  {
+   "ID": 109,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 52
+  },
+  {
+   "ID": 100,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 2
+  },
+  {
+   "ID": 101,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 12
+  },
+  {
+   "ID": 102,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 103,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 104,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 14
+  },
+  {
+   "ID": 105,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 7
+  },
+  {
+   "ID": 106,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 6
+  },
+  {
+   "ID": 107,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 0
+  },
+  {
+   "ID": 108,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM07",
+   "GeregistreerdeMisdrijven_1": 10
+  },
+  {
+   "ID": 119,
+   "SoortMisdrijf": "0.0.0 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 56
+  },
+  {
+   "ID": 110,
+   "SoortMisdrijf": "1.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 111,
+   "SoortMisdrijf": "1.2.3 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 12
+  },
+  {
+   "ID": 112,
+   "SoortMisdrijf": "1.4.5 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 113,
+   "SoortMisdrijf": "2.5.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 1
+  },
+  {
+   "ID": 114,
+   "SoortMisdrijf": "3.7.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 11
+  },
+  {
+   "ID": 115,
+   "SoortMisdrijf": "3.7.2 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 5
+  },
+  {
+   "ID": 116,
+   "SoortMisdrijf": "2.1.1 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 9
+  },
+  {
+   "ID": 117,
+   "SoortMisdrijf": "1.4.7 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 7
+  },
+  {
+   "ID": 118,
+   "SoortMisdrijf": "3.9.9 ",
+   "WijkenEnBuurten": "BU03630000",
+   "Perioden": "2026MM08",
+   "GeregistreerdeMisdrijven_1": 9
+  }
+ ]
+}

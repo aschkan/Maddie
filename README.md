@@ -156,9 +156,10 @@ about is never preferred by default, and never dismissed by default either.
 
 ## The layers
 
-Switched on in the filter panel, drawn over whatever is on screen. All of it is
-one Overpass query, debounced until the map stops moving, and only at zoom 14 or
-closer — the area below that is too big to ask about.
+Switched on in the filter panel, drawn over whatever is on screen. The three
+OpenStreetMap ones are a single Overpass query, debounced until the map stops
+moving; the police-figures layer is its own pair of requests. All of them are
+asked only at zoom 14 or closer — the area below that is too big to ask about.
 
 **Safe spots — pink hearts.** Taxi ranks, police, hospitals, fire stations, 24/7
 gyms, shopping centres, supermarkets, petrol stations, bars and cafés,
@@ -189,6 +190,59 @@ Where those reports live depends on `MONGO_URI`. Set, they are rows in the
 the browser that entered them. The panel prints which, because a report somebody
 believed they had filed, visible to nobody, is worse than not being able to file
 one.
+
+**Police figures — blue-grey badges.** The official figures, and a separate
+layer on purpose. Offences recorded by the police, from CBS StatLine table
+`47022NED` ("Geregistreerde misdrijven; soort misdrijf, wijk, buurt,
+maandcijfers"), whose offence classification is the police's own. A badge sits
+at the middle of each neighbourhood on screen carrying its average recorded
+offences per month; the popup breaks that down by category and says what window
+it covers.
+
+Three things about it are the whole design, and all three are on the screen:
+
+* **It is per neighbourhood per month.** That is the finest grain this data has
+  anywhere in the country — there is no point-level feed, and inventing points
+  inside a neighbourhood so the shapes match would be fabricating evidence. The
+  badge sits at a centroid because the figure is for the whole area; nothing
+  happened at that dot.
+* **It does not touch the route score.** A walk usually stays inside one
+  neighbourhood, so these numbers would hand every candidate route the same
+  answer — they cannot say which way round is better, which is the only
+  question this app asks. `score.ts` stays on OpenStreetMap, which changes
+  street by street. Adding this layer did not change that argument — it is the
+  reason the layer sits beside the score rather than inside it. `CLAUDE.md`
+  § "Why OpenStreetMap and not crime figures" is the long version.
+* **It misses most of what this app is about.** Harassment and catcalling are
+  not offences anyone is charged with, so they appear in no police table
+  anywhere. That gap is exactly what the purple layer is for. Neither layer
+  replaces the other and they are never merged.
+
+And the caveat the panel repeats: more recorded offences is not more dangerous.
+Reporting rates, footfall and how heavily an area is policed all move these
+numbers, and a busy centre records more of everything than a quiet street
+nobody walks down.
+
+The join is PDOK's Locatieserver — the Dutch government's own geocoder, free
+and keyless — which is the one service that returns the CBS neighbourhood codes
+the figures are published against. Nine probes are spread across the visible box
+and deduplicated by code, so a view sitting inside one neighbourhood draws one
+badge. Netherlands only: outside it there is no Dutch neighbourhood to resolve,
+and the panel says that rather than drawing an empty map, because a blank layer
+here would read as "no recorded crime".
+
+Four traps in this table have each cost a wrong number on screen, and each has a
+test in `test/nl-crime.test.ts`:
+
+| trap | what it produces |
+|---|---|
+| the roll-up row is `Misdrijven, totaal` — **with a comma** | it is summed alongside the rows it totals, and every figure roughly doubles |
+| `null` means **withheld**, not zero | a neighbourhood reads as having had nothing happen in it |
+| periods must be **enumerated**, never a `ge`/`le` range | the annual `2025JJ00` codes sort inside the range and the year's own total is added to its months |
+| divide by the months that **answered**, not those asked for | the rate is understated by exactly the reporting lag |
+
+The most recent month is skipped for the same reason as the last of those: police
+figures lag, and a half-filled month reads as a sudden drop in crime.
 
 ## Where the browser asks for the map
 
@@ -729,6 +783,14 @@ debounces and keeps one request in flight; do not remove that.
 **OpenStreetMap's tile policy** asks heavy users to run their own tiles. A small
 app is fine; a popular one should point the `tile` entry in
 `src/lib/osm-forward.ts` at its own.
+
+**CBS and PDOK are open government data**, keyless and with no published rate
+limit, which is why neither needed an account to wire in. The forwarder still
+caches them — an hour for the CBS figures, a day for PDOK's neighbourhood
+lookups — because both answers are stable for far longer than that (the figures
+are monthly, with a reporting lag measured in weeks; neighbourhood boundaries
+are redrawn once a year at most), and every cached answer is a request nobody
+had to make of somebody else's donated hardware.
 
 **Overpass hands out a couple of query slots per IP.** Two things follow, and
 they only look contradictory. Candidate routes are read one after another rather

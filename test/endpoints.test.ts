@@ -7,7 +7,7 @@ import {
 } from "../src/lib/endpoints.ts";
 import { SERVICES, upstreamUrl } from "../src/lib/osm-forward.ts";
 
-const ALL: MapService[] = ["overpass", "osrm", "nominatim", "tile"];
+const ALL: MapService[] = ["overpass", "osrm", "nominatim", "tile", "cbs", "pdok"];
 
 /** `SERVICES` is indexed by a plain string, so it is optional to the compiler. */
 function service(name: string) {
@@ -85,11 +85,19 @@ test("and the forwarder has no service that could reach one", () => {
    * server will fetch on a visitor's behalf.
    *
    * `vector` is the navigation view's tile source (OpenFreeMap). It is NOT one
-   * of the four services the browser resolves through `endpoints.ts`; it is
-   * reached only by the style MapLibre loads, which is why it appears here and
-   * not in `FORWARD`.
+   * of the services the browser resolves through `endpoints.ts`; it is reached
+   * only by the style MapLibre loads, which is why it appears here and not in
+   * `FORWARD`.
+   *
+   * `cbs` and `pdok` are the police-figures layer — CBS StatLine for the
+   * recorded crime, PDOK for the neighbourhood a coordinate falls in. They are
+   * forwarded for the same reason as everything else: the machine that cannot
+   * reach OpenStreetMap cannot reach the Dutch government's servers either.
    */
-  assert.deepEqual(Object.keys(SERVICES).sort(), ["nominatim", "osrm", "overpass", "tile", "vector"]);
+  assert.deepEqual(
+    Object.keys(SERVICES).sort(),
+    ["cbs", "nominatim", "osrm", "overpass", "pdok", "tile", "vector"],
+  );
 });
 
 test("every forwarded endpoint is same-origin and under /api/osm/", () => {
@@ -116,6 +124,22 @@ test("a 502 from our own forwarder is not OpenStreetMap answering 502", () => {
   assert.ok(message);
   assert.match(message, /this server could not reach/i);
   assert.match(message, /\/api\/osm\/status/);
+});
+
+test("a 502 names the RIGHT upstream, not OpenStreetMap for all six", () => {
+  /*
+   * That sentence is read by somebody deciding which machine to go and look
+   * at. Four of these services are OSM's and two are the Dutch government's;
+   * telling an operator this server could not reach OpenStreetMap when it was
+   * CBS that did not answer sends them to check a host that is fine.
+   */
+  assert.match(String(forwarderFailure("cbs", 502)), /could not reach CBS/);
+  assert.match(String(forwarderFailure("pdok", 502)), /could not reach PDOK/);
+  assert.match(String(forwarderFailure("tile", 502)), /could not reach OpenStreetMap/);
+  // All of them still point at the one page that says which hop failed.
+  for (const service of ALL) {
+    assert.match(String(forwarderFailure(service, 502)), /\/api\/osm\/status/);
+  }
 });
 
 test("every other status is left to whoever sent it", () => {

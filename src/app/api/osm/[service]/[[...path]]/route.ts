@@ -182,7 +182,7 @@ async function forward(request: Request, service: Service, name: string, parts: 
       keep(response.status, response.headers, response.body);
       return reply(response.status, response.headers, response.body, service, "direct", 1, proxies.capacity());
     } catch (error) {
-      return unreachable(error instanceof Error ? [error.message] : [], [], proxies.capacity());
+      return unreachable(error instanceof Error ? [error.message] : [], [], proxies.capacity(), name);
     }
   }
 
@@ -269,7 +269,7 @@ async function forward(request: Request, service: Service, name: string, parts: 
   if (outcome === "rate-limited") {
     return NextResponse.json(
       {
-        error: "OpenStreetMap is rate limiting us.",
+        error: `${upstreamName(name)} is rate limiting us.`,
         exitsTried: result.tried.length,
         tried: result.tried,
         reasons: result.reasons.slice(0, 6),
@@ -287,7 +287,7 @@ async function forward(request: Request, service: Service, name: string, parts: 
     );
   }
 
-  return unreachable(result.reasons, result.tried, proxies.capacity());
+  return unreachable(result.reasons, result.tried, proxies.capacity(), name);
 }
 
 function reply(
@@ -322,17 +322,44 @@ function reply(
 }
 
 /**
+ * Whose server is at the far end of each forwarded service.
+ *
+ * The 502 and 429 bodies below are read by somebody working out which machine
+ * to go and look at, and not every upstream here is OpenStreetMap's: the
+ * police-figures layer goes to CBS and PDOK. Saying "no route out reached
+ * OpenStreetMap" about a CBS request sends them to check a host that is fine
+ * — the same mistake `forwarderFailure()` exists to prevent one layer up.
+ *
+ * Unknown names cannot occur (the service was looked up in `SERVICES` before
+ * anything was fetched), but the fallback is the neutral word rather than a
+ * wrong one.
+ */
+const UPSTREAM_NAME: Record<string, string> = {
+  overpass: "OpenStreetMap",
+  osrm: "OpenStreetMap",
+  nominatim: "OpenStreetMap",
+  tile: "OpenStreetMap",
+  vector: "OpenFreeMap",
+  cbs: "CBS",
+  pdok: "PDOK",
+};
+
+function upstreamName(service: string): string {
+  return UPSTREAM_NAME[service] ?? "the upstream";
+}
+
+/**
  * Nothing in the chain answered.
  *
- * 502, with the reasons, because "the proxies are all dead" and "OpenStreetMap
+ * 502, with the reasons, because "the proxies are all dead" and "the upstream
  * said no" are different problems and the page cannot tell them apart from a
- * blank reply. The client turns this into "could not reach OpenStreetMap",
- * which is true either way, and the detail is here for whoever is debugging.
+ * blank reply. The client turns this into "could not reach <upstream>", which
+ * is true either way, and the detail is here for whoever is debugging.
  */
-function unreachable(reasons: string[], tried: string[], exits: number): Response {
+function unreachable(reasons: string[], tried: string[], exits: number, service: string): Response {
   return NextResponse.json(
     {
-      error: "No route out reached OpenStreetMap.",
+      error: `No route out reached ${upstreamName(service)}.`,
       tried,
       reasons: reasons.slice(0, 6),
       hint: "Check /api/osm/status. If every hop failed at CONNECT with 403, the entry proxy is refusing CONNECT to non-443 ports — that is its ACL, not the list.",

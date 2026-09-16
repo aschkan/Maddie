@@ -94,6 +94,46 @@ export const SERVICES: Record<string, Service> = {
     cache: "public, max-age=604800, immutable",
     ttlMs: 604_800_000,
   },
+  /*
+   * CBS StatLine — the police-recorded crime figures. See `nl-crime.ts`.
+   *
+   * Forwarded for exactly the same reason as everything else here: one of the
+   * two machines this is deployed on cannot reach the internet at all, and a
+   * browser sent straight to CBS from a page that box served gets nothing.
+   *
+   * GET only. It is a read-only open-data API and there is nothing to post to
+   * it — and a forwarder that accepts POST to a host is a forwarder that can be
+   * asked to do more than read.
+   */
+  cbs: {
+    bases: ["https://dataderden.cbs.nl/ODataApi/OData"],
+    methods: ["GET"],
+    cache: "no-store",
+    /*
+     * An hour. These are MONTHLY figures with a reporting lag measured in
+     * weeks — the answer is the same all day — and the layer re-asks on every
+     * pan that lands in a new grid cell. Caching for less would spend requests
+     * re-fetching a number that cannot have changed.
+     *
+     * Not longer, because the shape and the label list are fetched through the
+     * same entry, and a stale column list outlives a table revision.
+     */
+    ttlMs: 3_600_000,
+  },
+  /*
+   * PDOK Locatieserver — the point → CBS neighbourhood join. See `nl-areas.ts`.
+   *
+   * The reverse lookup is what makes the figures placeable at all, and it is
+   * the Dutch government's own service over its own address register.
+   */
+  pdok: {
+    bases: ["https://api.pdok.nl/bzk/locatieserver/search/v3_1"],
+    methods: ["GET"],
+    cache: "no-store",
+    // A day. Neighbourhood boundaries are redrawn once a year at most, and the
+    // nine probes per view are the same nine on every return to that view.
+    ttlMs: 86_400_000,
+  },
   tile: {
     bases: [
       "https://tile.openstreetmap.org",

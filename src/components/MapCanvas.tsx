@@ -20,6 +20,9 @@ import type { LatLng, Route } from "@/lib/osrm";
 import { alwaysOpen, type BBox, type LayerData } from "@/lib/layers";
 import { endpoint } from "@/lib/endpoints";
 import { CRIME_CATEGORIES, type Report } from "@/lib/reports";
+import {
+  CRIME_BAND_LABEL, crimeBand, topCategories, type PlacedCrimeSummary,
+} from "@/lib/nl-crime";
 import type { Segment } from "@/lib/segments";
 import { VERDICT_COLOUR } from "@/lib/verdict";
 
@@ -125,6 +128,46 @@ function examplePin(): L.DivIcon {
   });
 }
 
+/**
+ * The police-figures badge.
+ *
+ * Deliberately NOT a dot and NOT in the report palette. A neighbourhood figure
+ * and a report of something that happened to somebody are different objects —
+ * one is a monthly count over an area, the other is one person at one place —
+ * and the map has to make that difference visible before either popup is
+ * opened. So this is a rounded oblong carrying a NUMBER, pinned to the
+ * neighbourhood's centroid, in its own blue-grey ramp.
+ *
+ * ⚠ The centroid is where the LABEL goes, not where anything happened. The
+ * figure is for the whole neighbourhood, which is why the badge reads as a
+ * label rather than as a marker and why the popup says so in as many words.
+ */
+const BAND_FILL: Record<string, string> = {
+  low: "#3f7f6f",
+  medium: "#7d7a3a",
+  high: "#a2603a",
+  highest: "#9c3f57",
+};
+
+const BADGES = new Map<string, L.DivIcon>();
+
+function badgeFor(band: string, text: string): L.DivIcon {
+  const key = `${band}|${text}`;
+  const existing = BADGES.get(key);
+  if (existing) return existing;
+  const made = L.divIcon({
+    className: "",
+    html: `
+      <div class="cbs-badge" style="--band:${BAND_FILL[band] ?? BAND_FILL.medium}">
+        <span class="cbs-badge-n">${text}</span>
+      </div>`,
+    iconSize: [44, 24],
+    iconAnchor: [22, 12],
+  });
+  BADGES.set(key, made);
+  return made;
+}
+
 export interface MapCanvasProps {
   start: LatLng | null;
   end: LatLng | null;
@@ -152,6 +195,14 @@ export interface MapCanvasProps {
   centre: LatLng;
   layers: LayerData;
   reports: Report[];
+  /**
+   * Police-recorded figures for the neighbourhoods on screen.
+   *
+   * A separate prop from `reports` and never merged with them: one is a
+   * per-neighbourhood monthly count from CBS, the other is one person saying
+   * something happened at one place. See `nl-crime.ts`.
+   */
+  policeAreas: PlacedCrimeSummary[];
   /** Dropping a report instead of a route point. */
   reportMode: boolean;
   onReport: (point: LatLng) => void;
@@ -284,7 +335,7 @@ function KeepSized() {
 
 export default function MapCanvas({
   start, end, routes, selected, segments, highlight, sheetSnap, onSelectRoute, centre, layers, reports,
-  reportMode, onReport, onRemoveReport,
+  policeAreas, reportMode, onReport, onRemoveReport,
   onPick, onMoveStart, onMoveEnd, onTileError, onView, night,
 }: MapCanvasProps) {
   const [map, setMap] = useState<L.Map | null>(null);
@@ -440,6 +491,71 @@ export default function MapCanvas({
           </Popup>
         </Marker>
       ))}
+
+      {/* ── police figures, by neighbourhood ─────────────────────────────── */}
+      {/* Before the reports, so a report dot always draws ON TOP of a badge:
+          a real report is the more specific statement and must never end up
+          hidden under an area label. */}
+      {policeAreas.map((area) => {
+        const band = crimeBand(area.severityPerMonth);
+        const perMonth = Math.round(area.offencesPerMonth);
+        return (
+          <Marker
+            key={area.areaCode}
+            position={[area.point.lat, area.point.lng]}
+            icon={badgeFor(band, String(perMonth))}
+          >
+            {/*
+              `maxHeight` rather than a CSS cap, because Leaflet's own auto-pan
+              reads this number: it scrolls the content AND shifts the map so
+              the popup fits, which CSS alone cannot do. This is the tallest
+              popup on the map — the breakdown, the withheld-cell note and the
+              whole-neighbourhood sentence are all load-bearing and none may be
+              cut — and unbounded it grows past the top of a phone screen and
+              spills behind the trip card, which reads as the popup being
+              broken rather than as it being long.
+            */}
+            <Popup maxHeight={260}>
+              <span className="cbs-tag">POLICE FIGURES — WHOLE NEIGHBOURHOOD</span>
+              <br />
+              <strong>{area.areaName}</strong>
+              <br />
+              {perMonth} recorded offences a month on average
+              <br />
+              <small>
+                {CRIME_BAND_LABEL[band]} · {area.totalCount} over{" "}
+                {area.monthsObserved} month{area.monthsObserved === 1 ? "" : "s"}
+              </small>
+              {topCategories(area).length > 0 && (
+                <>
+                  <br />
+                  {topCategories(area).map((entry) => (
+                    <span key={entry.category} className="cbs-row">
+                      {entry.label}: {entry.count}
+                      <br />
+                    </span>
+                  ))}
+                </>
+              )}
+              {area.suppressedCells > 0 && (
+                <>
+                  <br />
+                  <small>
+                    {area.suppressedCells} figure{area.suppressedCells === 1 ? " was" : "s were"}{" "}
+                    withheld by CBS — small numbers, not zero.
+                  </small>
+                </>
+              )}
+              <br />
+              <small>
+                CBS table {area.table}, {area.areaCode}. This is a count for the whole
+                neighbourhood, not a place where anything happened, and it does not
+                affect the route score.
+              </small>
+            </Popup>
+          </Marker>
+        );
+      })}
 
       {/* ── reports ──────────────────────────────────────────────────────── */}
       {reports.map((report) => {

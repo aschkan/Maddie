@@ -24,6 +24,11 @@ short list of things that will bite you while editing.
 - `src/lib/verdict.ts` — how a verdict is written and coloured, in one place.
 - `src/lib/compare.ts` — which route is preferred, and when to say none is.
 - `src/lib/reports.ts` — the crime layer. Entered by people, never scored.
+- `src/lib/nl-crime.ts` — the POLICE figures, from CBS. Per neighbourhood per
+  month, drawn as its own layer, **never scored**. Pure parts tested against
+  real recorded replies in `test/fixtures/`.
+- `src/lib/nl-areas.ts` — PDOK: which CBS neighbourhood a point is in. The join
+  that lets the figures be placed at all. Pure parts tested.
 - `src/lib/seed-data.ts` — the example data. **Read its header before touching it.**
 - `src/lib/db.ts` — MongoDB, when `MONGO_URI` is set. **Server only.**
 - `scripts/seed.ts` — `npm run seed`, which the proxy's reseed button runs.
@@ -96,10 +101,17 @@ be on a network that reaches neither. Sending the browser straight to
 `tile.openstreetmap.org` works on exactly one of those combinations — which is
 how the map came to be blank on a site that was otherwise up.
 
-So the four map services resolve to `/api/osm/*` by default, and this server
-fetches them: directly where that works, through the entry proxy and the
-fastest live exit where it does not. Both machines then behave identically from
-the browser's side.
+So the map services resolve to `/api/osm/*` by default, and this server fetches
+them: directly where that works, through the entry proxy and the fastest live
+exit where it does not. Both machines then behave identically from the browser's
+side. Four of the entries are OpenStreetMap's; `cbs` and `pdok` are the
+police-figures layer and are forwarded for exactly the same reason — the box
+that cannot reach OSM cannot reach the Dutch government's servers either.
+`vector` is reached only by the MapLibre style, never resolved through
+`endpoints.ts`. The list is pinned in TWO tests (`test/endpoints.test.ts` and
+`test/proxy-pool.test.ts`), deliberately: growing it means a host this server
+will fetch on a visitor's behalf, and that should be a decision somebody made,
+not a line that slipped in.
 
 - **This app's OWN API is never forwarded.** `/api/assess` and `/api/reports`
   are same-origin calls to the box that served the page. There is nothing to
@@ -521,7 +533,7 @@ wording tweak.
 line and moves by several points on a handful of samples; badging a 63 over a 61
 invents a distinction the map cannot support.
 
-## The crime layer holds no crime data
+## Two crime layers, and neither of them is scored
 
 There is no open point-level dataset for harassment, catcalling, sexual assault
 or rape. Official figures are per neighbourhood per month — the same objection
@@ -529,14 +541,47 @@ as below — and the categories that matter most are the least reported. So the
 purple layer holds **reports people entered**, starting empty, and it never
 reaches `score.ts`.
 
+The police figures are now on the map too, as a SEPARATE layer
+(`nl-crime.ts` + `nl-areas.ts`, blue-grey badges, off by default). That does not
+soften anything above; it is why the two are separate:
+
+- **Neither reaches `score.ts`, and the police one especially must not.** Its
+  grain is a whole neighbourhood, so it hands every candidate route the same
+  number and cannot answer "which way round is better". Wiring it into the score
+  would replace a per-metre answer with a per-district one and would look like
+  an improvement while destroying the only comparison this app makes. The header
+  of `nl-crime.ts` says so in a box; `test/nl-crime.test.ts` cannot pin it, so
+  the grep is: nothing under `src/lib/score.ts`, `segments.ts` or `compare.ts`
+  may import either module.
+- **They are never merged, and never share a colour or a shape.** A report is
+  one person at one place; a badge is a monthly count over an area. Purple dot
+  versus blue-grey oblong-with-a-number, and the popup's first line says which
+  kind of thing it is — the same device `source: "example"` already uses.
+- **The purple layer's empty state still means what it said.** "Nobody wrote
+  anything down" stays true because the police figures are a different layer
+  with its own switch, not a backfill into this one. `FilterPanel` now points at
+  that layer from the crime note so the reader knows the official figures exist
+  and where; if the two are ever merged, that sentence becomes a lie.
+- **The police table cannot cover this app's subject and the panel says so.**
+  Harassment and catcalling are not chargeable offences, so they are in no
+  police table anywhere. That is the gap the purple layer exists for.
+- **More recorded offences is not more dangerous**, and that sentence is on the
+  screen, not just here. Reporting rates, footfall and policing all move these
+  numbers.
+
 Two backends, and which one is in use is printed in the panel: rows in the
 `maddie` database when `MONGO_URI` is set, `localStorage` when it is not. A
 report somebody believed they had filed, visible to nobody, is worse than not
 being able to file one.
 
-If a real dataset is ever wired in, the empty-state sentence in `FilterPanel`
-has to change with it: right now it says an empty map means nobody wrote
-anything down, and that has to stay true.
+That instruction — "if a real dataset is ever wired in, the empty-state sentence
+in `FilterPanel` has to change with it" — has now been carried out, and the way
+it was carried out is the thing to preserve. The official dataset went into its
+OWN layer rather than into this one, so "an empty map means nobody wrote
+anything down" is still literally true of the purple layer; the crime note now
+points at the police layer so the reader is not left thinking no official
+figures exist. Merging the two would break that sentence, and there is no
+version of the merge that does not.
 
 ### Example data is a different object, everywhere
 
@@ -819,6 +864,21 @@ sits inside one neighbourhood, so it gives every candidate route the same number
 `lit=*` (what most decides how a street feels after dark, and the one thing you
 can act on by walking a different way), and is the same data OSRM routed on.
 
+**The police figures being on the map does not reopen this.** They are a layer
+you switch on to see what was recorded around here, in the units it was recorded
+in; the SCORE is still OSM alone, for the reason in the paragraph above, which
+the new layer does nothing to change. The two live side by side precisely
+because one of them can compare two routes and the other cannot. If a reason to
+merge them ever seems compelling, the question to answer first is: what would
+this layer make the score say about two routes 200 m apart in the same
+neighbourhood? The answer is "the same thing", and that is the whole objection.
+
+The history is worth knowing, because this has been round once. The first
+version of this app (`70b95cb`, Sept 2026) scored on CBS 47022NED among eleven
+dimensions; `f8fba8c` deleted the whole platform, crime source included, in a
+scope reset. `src/lib/nl-crime.ts` is that parser brought back — same table,
+same traps, same severity weights — wired to a layer instead of to the score.
+
 ## Traps — each one has a test
 
 - **OSRM takes lon,lat. Leaflet takes lat,lng.** Swapping them still returns a
@@ -953,6 +1013,57 @@ can act on by walking a different way), and is the same data OSRM routed on.
   needs to vary one takes a parameter.
 - **A Google Maps link to the destination is not a handoff of the route.** It
   is a handoff of the problem, to the router this app exists to disagree with.
+- **CBS's roll-up row is `Misdrijven, totaal` — with a COMMA.** Normalise before
+  matching, or the total is summed alongside the detail rows it totals and every
+  figure on the badge roughly doubles. Sub-totals (`Vermogensmisdrijven, totaal`)
+  do the same, so `totaal` anywhere in the normalised label disqualifies a row.
+  `test/nl-crime.test.ts`
+- **A `null` in the CBS table means WITHHELD, not zero.** It is small-number
+  suppression, so an individual cannot be identified. Counting it as zero
+  renders missing data as "nothing happened here", which is the most reassuring
+  possible reading of a gap. It is counted as `suppressedCells` and the popup
+  says how many. `test/nl-crime.test.ts`
+- **CBS periods are ENUMERATED, never a `ge`/`le` range.** The same column holds
+  the annual codes (`2025JJ00`), which sort inside a lexicographic month range,
+  so the year's own total is added to the twelve months that make it up and
+  every figure roughly triples. `test/nl-crime.test.ts`
+- **Divide by the months that ANSWERED, not the months asked for.** Police
+  figures lag; an unfilled window understates the rate by exactly the lag. The
+  most recent whole month is skipped for the same reason — a half-filled month
+  reads as a sudden drop in crime, the one direction a reader acts on without
+  checking. `test/nl-crime.test.ts`
+- **`GeoDetail` does not contain the substring "Dimension".** A
+  `Type.includes("Dimension")` test finds the period and the offence type and
+  silently loses the REGION column, and a table whose region cannot be found
+  reads as unusable — which ends as no figures at all rather than as an error
+  anyone sees. `test/nl-crime.test.ts`
+- **The CBS count column is `GeregistreerdeMisdrijven_1`, not
+  `GeregistreerdeMisdrijven`.** CBS appends `_1`, `_2`… on a name collision, so
+  the lookup is a prefix/substring test. An exact match finds nothing, which
+  reads as a table with no figures in it. `test/nl-crime.test.ts`
+- **PDOK hands back bare region codes; StatLine publishes against padded ones.**
+  `0363` and `GM0363` are the same municipality, but only the second will ever
+  match a row — a bare code compares unequal to everything and reads as a
+  neighbourhood the police have no figures for. `normaliseAreaCode` owns it.
+  `test/nl-areas.test.ts`
+- **`centroide_ll` is WKT: `POINT(lon lat)`, longitude FIRST.** The same trap as
+  OSRM and as the GeoJSON in `db.ts`. Read backwards, every Dutch neighbourhood
+  badge lands in Somalia — and still draws, on a map that still looks fine.
+  `test/nl-areas.test.ts`
+- **A non-finite rate must band LOW, never `highest`.** Every comparison against
+  NaN is false, so an unguarded ladder of `<` tests falls through to the worst
+  band — the worst thing this layer can say about a neighbourhood, reached from
+  arithmetic that produced no number. `crimeBand` guards it. `test/nl-crime.test.ts`
+- **A neighbourhood the CBS table holds no rows for is LEFT OUT, not drawn as a
+  zero.** "Not in the table" and "no offences" are different statements, and
+  only one of them is about the place. Same rule, one layer up: outside the
+  Netherlands the panel says the table does not cover here rather than drawing
+  an empty layer, because a blank crime layer reads as reassurance.
+- **A 502 from `/api/osm/*` does not always mean OpenStreetMap.** Two of the
+  seven forwarded services are the Dutch government's, so both the client's
+  `forwarderFailure()` and the route's own 502/429 bodies name the upstream from
+  a table. Saying "could not reach OpenStreetMap" about a CBS request sends
+  whoever is debugging to a host that is fine. `test/endpoints.test.ts`
 
 ## Toolchain constraints
 

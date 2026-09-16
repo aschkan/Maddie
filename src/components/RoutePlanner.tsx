@@ -33,6 +33,8 @@ import { plannedAt, type Light } from "@/lib/daylight";
 import { isForwarded } from "@/lib/endpoints";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, gridStep, snapBox, type BBox, type LayerData } from "@/lib/layers";
+import { fetchAreas } from "@/lib/nl-areas";
+import { fetchNeighbourhoodCrime, type PlacedCrimeSummary } from "@/lib/nl-crime";
 import { MAX_WAYPOINTS, googleMapsLink } from "@/lib/handoff";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import { countExamples, CRIME_CATEGORIES, newReportId } from "@/lib/reports";
@@ -163,6 +165,19 @@ export default function RoutePlanner() {
   const [layers, setLayers] = useState<LayerData>(EMPTY_LAYERS);
   const [layerError, setLayerError] = useState<string | null>(null);
 
+  /*
+   * The police-figures layer. Off by default, and that is deliberate.
+   *
+   * It is the slower of the two — a round of PDOK lookups and then CBS — and
+   * it is the one most easily misread, so it is something you turn on having
+   * read what it is rather than something the page asserts on arrival.
+   */
+  const [police, setPolice] = useState(false);
+  const [policeAreas, setPoliceAreas] = useState<PlacedCrimeSummary[]>([]);
+  const [policePeriods, setPolicePeriods] = useState<string[]>([]);
+  const [policeError, setPoliceError] = useState<string | null>(null);
+  const [policeBusy, setPoliceBusy] = useState(false);
+
   // So a slow reply for an old pair cannot overwrite a newer one.
   const inFlight = useRef<AbortController | null>(null);
   /**
@@ -171,6 +186,8 @@ export default function RoutePlanner() {
    * A pan that does not change it asks nothing at all.
    */
   const askedFor = useRef<string | null>(null);
+  /** The same idea for the police layer: its own snapped box, asked once. */
+  const askedPolice = useRef<string | null>(null);
   /**
    * Do not ask again until this moment.
    *
@@ -380,6 +397,87 @@ export default function RoutePlanner() {
     };
   }, [view, spots, lighting, quietUntil]);
 
+  /* ── the police figures over the visible map ─────────────────────────── */
+  useEffect(() => {
+    const controller = new AbortController();
+
+    /*
+     * A longer settle than the OSM layers use.
+     *
+     * This costs a round of PDOK lookups and then a CBS query, and the answer
+     * is a monthly figure — nothing about it rewards being quick off the mark
+     * on a pan that has not finished.
+     */
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (!police || !view || view.zoom < MIN_LAYER_ZOOM) {
+          setPoliceAreas([]);
+          setPoliceError(null);
+          askedPolice.current = null;
+          return;
+        }
+
+        // The same snapped box the other layers use, for the same reason: a
+        // pan inside one cell asks the question that was already answered.
+        const box = snapBox(view.bbox, gridStep(view.bbox));
+        const asking = `${box.south},${box.west},${box.north},${box.east}`;
+        if (asking === askedPolice.current) return;
+
+        setPoliceBusy(true);
+        try {
+          const found = await fetchAreas(box, { signal: controller.signal });
+          if (controller.signal.aborted) return;
+          if (!found.ok) {
+            if (found.error !== "cancelled") setPoliceError(found.error);
+            return;
+          }
+          if (found.areas.length === 0) {
+            /*
+             * Outside the Netherlands, almost always. Said plainly rather than
+             * drawn as an empty layer: a blank map here would read as "no
+             * recorded crime", which is the most reassuring possible rendering
+             * of a table that simply does not cover this place.
+             */
+            askedPolice.current = asking;
+            setPoliceAreas([]);
+            setPolicePeriods([]);
+            setPoliceError("No Dutch neighbourhood here — CBS publishes these figures for the Netherlands only.");
+            return;
+          }
+
+          const figures = await fetchNeighbourhoodCrime(
+            found.areas.map((area) => ({ code: area.code, name: area.name })),
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted) return;
+          if (!figures.ok) {
+            if (figures.error !== "cancelled") setPoliceError(figures.error);
+            return;
+          }
+
+          // The centroid PDOK gave for each area, carried onto its figures —
+          // CBS has no geometry at all, so this is the only thing that knows
+          // where to put the badge.
+          const where = new Map(found.areas.map((area) => [area.code, area.point]));
+          askedPolice.current = asking;
+          setPoliceAreas(figures.data.summaries.map((summary) => ({
+            ...summary,
+            point: where.get(summary.areaCode) ?? { lat: 0, lng: 0 },
+          })));
+          setPolicePeriods(figures.data.periods);
+          setPoliceError(null);
+        } finally {
+          if (!controller.signal.aborted) setPoliceBusy(false);
+        }
+      })();
+    }, 900);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [police, view]);
+
   const centre = useMemo(() => start ?? end ?? AMSTERDAM, [start, end]);
   const visibleReports = useMemo(
     () => reports.filter((report) => crime.includes(report.category)),
@@ -473,6 +571,7 @@ export default function RoutePlanner() {
           selected={selected}
           segments={segments}
           highlight={worst}
+          policeAreas={policeAreas}
           sheetSnap={snap}
           onSelectRoute={setSelected}
           centre={centre}
@@ -694,6 +793,11 @@ export default function RoutePlanner() {
             zoomedOut={zoomedOut}
             layerError={layerError}
             truncated={layers.truncated}
+            police={police} onPolice={setPolice}
+            policeCount={policeAreas.length}
+            policePeriods={policePeriods}
+            policeError={policeError}
+            policeBusy={policeBusy}
           />
         )}
       </BottomSheet>
