@@ -89,8 +89,13 @@ test("only the services in the table can be reached", () => {
   // Pinned so that growing the table is a decision, not a line that slipped in:
   // every entry is a host this server will fetch on a visitor's behalf.
   // `vector` is the navigation view's tile source (OpenFreeMap) — reached only
-  // by the MapLibre style, never by the four services the browser resolves.
-  assert.deepEqual(Object.keys(SERVICES).sort(), ["nominatim", "osrm", "overpass", "tile", "vector"]);
+  // by the MapLibre style, never by a service the browser resolves. `cbs` and
+  // `pdok` are the police-figures layer: the Dutch government's open crime
+  // table and the geocoder that says which neighbourhood a point is in.
+  assert.deepEqual(
+    Object.keys(SERVICES).sort(),
+    ["cbs", "nominatim", "osrm", "overpass", "pdok", "tile", "vector"],
+  );
   for (const service of Object.values(SERVICES)) {
     assert.ok(service.bases.length > 0);
     for (const base of service.bases) assert.match(base, /^https?:\/\//);

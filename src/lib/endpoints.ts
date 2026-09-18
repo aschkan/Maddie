@@ -37,8 +37,16 @@
  * not something a box can be left in the wrong state for.
  */
 
-/** The four services the browser needs, and nothing else. */
-export type MapService = "overpass" | "osrm" | "nominatim" | "tile";
+/**
+ * The services the browser needs, and nothing else.
+ *
+ * Four of them are the map itself. `cbs` and `pdok` are the police-figures
+ * layer — CBS StatLine for the recorded crime and PDOK for the neighbourhood
+ * a coordinate is in — and they are here for the same reason as the rest: the
+ * machine that cannot reach OpenStreetMap cannot reach those either, and a
+ * browser sent straight out from a page it served would get nothing.
+ */
+export type MapService = "overpass" | "osrm" | "nominatim" | "tile" | "cbs" | "pdok";
 
 /** This server, standing in front of OpenStreetMap. Same origin, always. */
 export const FORWARD: Record<MapService, string> = {
@@ -46,6 +54,8 @@ export const FORWARD: Record<MapService, string> = {
   osrm: "/api/osm/osrm",
   nominatim: "/api/osm/nominatim",
   tile: "/api/osm/tile/{z}/{x}/{y}.png",
+  cbs: "/api/osm/cbs",
+  pdok: "/api/osm/pdok",
 };
 
 /** Straight from the browser, the way it used to be. */
@@ -54,6 +64,8 @@ export const PUBLIC: Record<MapService, string> = {
   osrm: "https://router.project-osrm.org",
   nominatim: "https://nominatim.openstreetmap.org",
   tile: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  cbs: "https://dataderden.cbs.nl/ODataApi/OData",
+  pdok: "https://api.pdok.nl/bzk/locatieserver/search/v3_1",
 };
 
 /**
@@ -102,6 +114,8 @@ const EXPLICIT: Record<MapService, string | undefined> = {
   osrm: undefined,
   nominatim: undefined,
   tile: undefined,
+  cbs: undefined,
+  pdok: undefined,
 };
 
 /**
@@ -135,8 +149,25 @@ export function isForwarded(service: MapService): boolean {
  */
 export function forwarderFailure(service: MapService, status: number): string | null {
   if (status !== 502 || !isForwarded(service)) return null;
-  return "This server could not reach OpenStreetMap — no route out worked. Check /api/osm/status.";
+  return `This server could not reach ${UPSTREAM_NAME[service]} — no route out worked. Check /api/osm/status.`;
 }
+
+/**
+ * Whose server is at the far end of each service.
+ *
+ * Named rather than all called "OpenStreetMap", because the sentence above is
+ * read by somebody deciding which machine to go and look at, and four of these
+ * are OSM's while two are the Dutch government's. Telling them apart is the
+ * whole job of that sentence.
+ */
+const UPSTREAM_NAME: Record<MapService, string> = {
+  overpass: "OpenStreetMap",
+  osrm: "OpenStreetMap",
+  nominatim: "OpenStreetMap",
+  tile: "OpenStreetMap",
+  cbs: "CBS",
+  pdok: "PDOK",
+};
 
 /**
  * A 429 from `/api/osm/*`, turned into a sentence for the person on the map.

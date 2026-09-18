@@ -18,6 +18,7 @@
 
 import { MongoClient, type Collection, type Db } from "mongodb";
 
+import type { Interview } from "./interviews.ts";
 import type { Report } from "./reports.ts";
 
 /** The report as it is stored. `id` is ours; `_id` is Mongo's. */
@@ -29,6 +30,29 @@ export interface ReportDoc extends Report {
 }
 
 export const REPORTS = "reports";
+
+/**
+ * The interviews collection.
+ *
+ * ⚠ A DIFFERENT COLLECTION FROM `REPORTS`, and that separation is the whole
+ * safeguard rather than tidiness. The crime layer holds what somebody typed
+ * about a place; this holds what a participant said across a 30–45 minute
+ * sitting under a consent form. They have different consent behind them, they
+ * are deleted on different schedules, and — the reason it matters most — the
+ * seed writes synthetic interviews, so keeping them apart is what stops an
+ * invented quote ever sitting in the same collection as real testimony. See
+ * the header of `seed-interviews.ts`.
+ *
+ * Never merge these two, and never write an interview into `reports` "so the
+ * map can show it". An interview is not a point on a map.
+ */
+export const INTERVIEWS = "interviews";
+
+/** The interview as it is stored. No geometry — an interview is not a place. */
+export interface InterviewDoc extends Interview {
+  /** Epoch ms of `conductedAt`, so the index sorts without parsing. */
+  atMs: number;
+}
 
 /**
  * The database name.
@@ -103,6 +127,42 @@ export async function reportsCollection(): Promise<Collection<ReportDoc> | null>
     collection.createIndex({ atMs: -1 }),
   ]);
   return collection;
+}
+
+/**
+ * The interviews collection, with its indexes.
+ *
+ * No 2dsphere: there is no coordinate on an interview and adding one would be
+ * the first step towards drawing a participant on the map, which is exactly
+ * what the separation above exists to prevent.
+ */
+export async function interviewsCollection(): Promise<Collection<InterviewDoc> | null> {
+  const database = await db();
+  if (!database) return null;
+  const collection = database.collection<InterviewDoc>(INTERVIEWS);
+  await Promise.all([
+    collection.createIndex({ id: 1 }, { unique: true }),
+    // `code` is what the transcripts use (P01…), so it is how a human looks one
+    // up. Unique, because two participants sharing a code is a filing error
+    // that would silently merge two people's answers.
+    collection.createIndex({ code: 1 }, { unique: true }),
+    collection.createIndex({ source: 1 }),
+    collection.createIndex({ atMs: -1 }),
+  ]);
+  return collection;
+}
+
+/** An interview → the document that stores it. */
+export function toInterviewDoc(interview: Interview): InterviewDoc {
+  return { ...interview, atMs: Date.parse(interview.conductedAt) };
+}
+
+/** A stored document → the interview, with the storage-only field dropped. */
+export function fromInterviewDoc(doc: InterviewDoc): Interview {
+  const out = { ...doc } as InterviewDoc & { _id?: unknown };
+  delete out._id;
+  delete (out as { atMs?: number }).atMs;
+  return out as Interview;
 }
 
 /** A report → the document that stores it. */

@@ -11,7 +11,11 @@
 
 import { SAFE_SPOTS } from "@/lib/layers";
 import { CRIME_CATEGORIES } from "@/lib/reports";
+import { CRIME_BAND_LABEL, type CrimeBand } from "@/lib/nl-crime";
 import type { Backend } from "@/components/useReports";
+
+/** The legend, in the order the bands climb. */
+const BANDS: CrimeBand[] = ["low", "medium", "high", "highest"];
 
 interface Props {
   spots: string[];
@@ -35,6 +39,14 @@ interface Props {
   zoomedOut: boolean;
   layerError: string | null;
   truncated: boolean;
+  /** The police-figures layer — official, per neighbourhood, never scored. */
+  police: boolean;
+  onPolice: (on: boolean) => void;
+  /** How many neighbourhoods are drawn, and what window the figures cover. */
+  policeCount: number;
+  policePeriods: string[];
+  policeError: string | null;
+  policeBusy: boolean;
 }
 
 function toggle(list: string[], id: string): string[] {
@@ -46,6 +58,7 @@ export default function FilterPanel({
   reportMode, onReportMode, reportCategory, onReportCategory,
   reportCount, hiddenReports, exampleCount, onClearExamples, backend, reportError,
   zoomedOut, layerError, truncated,
+  police, onPolice, policeCount, policePeriods, policeError, policeBusy,
 }: Props) {
   return (
     <div className="filters">
@@ -61,7 +74,9 @@ export default function FilterPanel({
           police figures are published per neighbourhood per month, which cannot tell one
           street from the next. So this layer holds <strong>reports entered here</strong>.
           An empty map means nothing was written down, not that nothing happened, and it
-          never affects the route score.
+          never affects the route score. The official figures are a{" "}
+          <strong>separate layer</strong> below, in their own units; neither replaces the
+          other, and nothing here is ever mixed into it.
           {backend === "mongo"
             ? " Reports are saved to this instance's database and everyone using it sees them."
             : backend === "browser"
@@ -167,7 +182,62 @@ export default function FilterPanel({
         </p>
       </details>
 
-      {zoomedOut && (spots.length > 0 || lighting) && (
+      {/* ── police figures ────────────────────────────────────────────────── */}
+      <details className="filter police">
+        <summary>
+          <span className="swatch" /> Police figures
+          <span className="count">{policeCount || ""}</span>
+        </summary>
+
+        <label className="check">
+          <input type="checkbox" checked={police} onChange={(event) => onPolice(event.target.checked)} />
+          Recorded crime by neighbourhood (CBS)
+        </label>
+
+        <p className="filter-note">
+          Offences recorded by the police, from CBS table <code>47022NED</code>, counted{" "}
+          <strong>per neighbourhood per month</strong>. That is the finest grain this data
+          has anywhere — it is not a map of where anything happened, and there is no such
+          feed. Badges sit at the middle of a neighbourhood because the figure is for the
+          whole of it.
+        </p>
+
+        <p className="filter-note">
+          <strong>It does not affect the route score.</strong> A walk usually stays inside
+          one neighbourhood, so these numbers would give every way round the same answer.
+          The score stays on OpenStreetMap, which changes street by street.
+        </p>
+
+        <p className="filter-note">
+          It also misses most of what this app is about: harassment and catcalling are not
+          offences anyone is charged with, so they appear in no police table. That is what
+          the Crime layer above is for.
+        </p>
+
+        <div className="bands">
+          {BANDS.map((band) => (
+            <span key={band} className={`band band-${band}`}>{CRIME_BAND_LABEL[band]}</span>
+          ))}
+        </div>
+
+        <p className="filter-note">
+          More recorded offences is not the same as more dangerous. Reporting rates,
+          footfall and how heavily an area is policed all move these numbers, and a busy
+          centre records more of everything than a quiet street nobody walks down.
+        </p>
+
+        {policePeriods.length > 0 && (
+          <p className="filter-note">
+            Showing {policePeriods.length} months to {policePeriods[policePeriods.length - 1]}.
+            The most recent month is skipped — police figures lag, and a half-filled month
+            reads as a sudden drop in crime.
+          </p>
+        )}
+        {policeBusy && <p className="hint">Asking CBS…</p>}
+        {policeError && <p className="error">{policeError}</p>}
+      </details>
+
+      {zoomedOut && (spots.length > 0 || lighting || police) && (
         <p className="hint">Zoom in to load these layers — the area on screen is too big to query.</p>
       )}
       {truncated && <p className="hint">Showing part of what is here; zoom in for the rest.</p>}

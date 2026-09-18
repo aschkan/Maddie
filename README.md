@@ -156,9 +156,10 @@ about is never preferred by default, and never dismissed by default either.
 
 ## The layers
 
-Switched on in the filter panel, drawn over whatever is on screen. All of it is
-one Overpass query, debounced until the map stops moving, and only at zoom 14 or
-closer — the area below that is too big to ask about.
+Switched on in the filter panel, drawn over whatever is on screen. The three
+OpenStreetMap ones are a single Overpass query, debounced until the map stops
+moving; the police-figures layer is its own pair of requests. All of them are
+asked only at zoom 14 or closer — the area below that is too big to ask about.
 
 **Safe spots — pink hearts.** Taxi ranks, police, hospitals, fire stations, 24/7
 gyms, shopping centres, supermarkets, petrol stations, bars and cafés,
@@ -189,6 +190,59 @@ Where those reports live depends on `MONGO_URI`. Set, they are rows in the
 the browser that entered them. The panel prints which, because a report somebody
 believed they had filed, visible to nobody, is worse than not being able to file
 one.
+
+**Police figures — blue-grey badges.** The official figures, and a separate
+layer on purpose. Offences recorded by the police, from CBS StatLine table
+`47022NED` ("Geregistreerde misdrijven; soort misdrijf, wijk, buurt,
+maandcijfers"), whose offence classification is the police's own. A badge sits
+at the middle of each neighbourhood on screen carrying its average recorded
+offences per month; the popup breaks that down by category and says what window
+it covers.
+
+Three things about it are the whole design, and all three are on the screen:
+
+* **It is per neighbourhood per month.** That is the finest grain this data has
+  anywhere in the country — there is no point-level feed, and inventing points
+  inside a neighbourhood so the shapes match would be fabricating evidence. The
+  badge sits at a centroid because the figure is for the whole area; nothing
+  happened at that dot.
+* **It does not touch the route score.** A walk usually stays inside one
+  neighbourhood, so these numbers would hand every candidate route the same
+  answer — they cannot say which way round is better, which is the only
+  question this app asks. `score.ts` stays on OpenStreetMap, which changes
+  street by street. Adding this layer did not change that argument — it is the
+  reason the layer sits beside the score rather than inside it. `CLAUDE.md`
+  § "Why OpenStreetMap and not crime figures" is the long version.
+* **It misses most of what this app is about.** Harassment and catcalling are
+  not offences anyone is charged with, so they appear in no police table
+  anywhere. That gap is exactly what the purple layer is for. Neither layer
+  replaces the other and they are never merged.
+
+And the caveat the panel repeats: more recorded offences is not more dangerous.
+Reporting rates, footfall and how heavily an area is policed all move these
+numbers, and a busy centre records more of everything than a quiet street
+nobody walks down.
+
+The join is PDOK's Locatieserver — the Dutch government's own geocoder, free
+and keyless — which is the one service that returns the CBS neighbourhood codes
+the figures are published against. Nine probes are spread across the visible box
+and deduplicated by code, so a view sitting inside one neighbourhood draws one
+badge. Netherlands only: outside it there is no Dutch neighbourhood to resolve,
+and the panel says that rather than drawing an empty map, because a blank layer
+here would read as "no recorded crime".
+
+Four traps in this table have each cost a wrong number on screen, and each has a
+test in `test/nl-crime.test.ts`:
+
+| trap | what it produces |
+|---|---|
+| the roll-up row is `Misdrijven, totaal` — **with a comma** | it is summed alongside the rows it totals, and every figure roughly doubles |
+| `null` means **withheld**, not zero | a neighbourhood reads as having had nothing happen in it |
+| periods must be **enumerated**, never a `ge`/`le` range | the annual `2025JJ00` codes sort inside the range and the year's own total is added to its months |
+| divide by the months that **answered**, not those asked for | the rate is understated by exactly the reporting lag |
+
+The most recent month is skipped for the same reason as the last of those: police
+figures lag, and a half-filled month reads as a sudden drop in crime.
 
 ## Where the browser asks for the map
 
@@ -485,6 +539,103 @@ is left, and every request identifies itself with a real `User-Agent`.
 in one move, and is faster than any of this. Point the `overpass` entry in
 `src/lib/osm-forward.ts` at it and the chain has nothing left to do.
 
+## The interviews — the Research tab
+
+The app is the prototype for a study, and the study's instrument is a
+semi-structured interview: *Requirements Interviews — Women's Safety-Related
+Urban Mobility Decisions*. The **Research** tab holds the interviews and what
+they add up to, and the store is shaped section for section like the protocol,
+so real transcripts can be typed into it later without a migration.
+
+Two halves, in this order:
+
+1. **What the cohort said, aggregated.** The §4 printed-list tally, the §6
+   split on official figures versus lived experience, §8's presentation
+   preferences, and the yes/no on contributing reports.
+2. **The participants**, one expandable card each, every answer labelled with
+   the protocol section it came from.
+
+Three things about it are load-bearing.
+
+**Interviews are their own collection, never `reports`.** `interviews` and
+`reports` are separate in Mongo and must stay separate. The crime layer holds
+what somebody typed about a place; this holds what a participant said across a
+30–45 minute sitting with a consent form signed first. Different consent,
+different retention — and, most importantly, the seed writes *synthetic*
+interviews, so keeping them apart is what stops an invented quote ever sitting
+in the same collection as a real one.
+
+**There is no `POST /api/interviews`, and there must not be one.** An interview
+is produced in a room and transcribed afterwards. A public endpoint that
+accepted one would let anybody write a "participant" into the study's own data
+— a worse version of the problem `POST /api/reports` already guards against by
+forcing `source: "community"`. Interviews get in through `npm run seed`
+(synthetic) or an import the researcher runs by hand. Not over HTTP.
+
+**No database means no interviews, and the panel says so.** Unlike reports,
+there is no `localStorage` fallback: a browser has no business holding a
+transcript and could never have produced one. An empty list would read as a
+study that found nothing, so the panel prints the reason instead.
+
+### The synthetic cohort
+
+`npm run seed` writes 24 invented participants. **Nobody said any of it and no
+participant exists.** It is there so this panel, the tallies and the place
+table can be seen working before the fieldwork is done, and it is meant to be
+deleted when it is — `npm run seed -- --no-demo`.
+
+It keeps the same three rules as the example reports on the map, for the same
+reason: a banner in the panel while any are loaded, `SYNTHETIC — NOBODY SAID
+THIS` as the first line of every card, and a count. A quote lifted off that
+screen into a document has to carry its marking with it, because that screen is
+the last point at which anybody can still catch it.
+
+Two things it deliberately does **not** do:
+
+- **It invents no testimony about being attacked, followed or harassed.** §3
+  asks *how did you make that decision?* and what it is after is the reasoning —
+  the options, the cues, what changed afterwards. So every recalled situation is
+  a decision ("I didn't cycle back through the park, I took the tram"), never an
+  incident. Invented first-person testimony about an assault is exactly the
+  material the real interviews will supply, and a fluent fake of it is how a fake
+  ends up quoted in a findings chapter. `test/interviews.test.ts` greps the
+  cohort for it and fails if it appears.
+- **It does not make the participants agree.** Twenty-four people who all want a
+  map with scores on it would let the prototype be validated against its own
+  assumptions. So two would not use such a tool at all, three want no
+  personalisation and no personal data, several rate a nearby police station as
+  making things *worse*, the 24/7 gym is 23-to-1 useless, only four want scores
+  at all, and the room splits three ways on official versus lived. The awkward
+  answers are the useful ones.
+
+The numbers are shaped to exercise every branch of the panel — unanimous, split,
+mostly-no-difference, and a place several people actively dislike. **They are
+not findings, they are calibrated against nothing, and no number or sentence
+from them should be quoted.**
+
+One presentational decision worth defending: the cue tallies are shown **as the
+participants said them, uncoded**, and the panel says so. Grouping "no lighting
+in the park" with "unlit stretches" is qualitative coding — a research step with
+a method and an audit trail behind it — and doing it here with string matching
+would manufacture findings. So the list is long and repetitive, which is what
+raw cues look like.
+
+### Where the interviews meet the map
+
+§4 hands every participant the same printed list of places, which is what makes
+the tally comparable at all. Six of the seven map onto a `SAFE_SPOTS` id in
+`src/lib/layers.ts` — police station, taxi stand, open café, 24/7 gym, shopping
+centre, pharmacy, hospital — and that join is what lets an interview answer say
+something about the map: "23 of 24 called a 24/7 gym no difference" is a
+statement about the `gym24` layer. `test/interviews.test.ts` pins that every id
+in the protocol table still exists in `layers.ts`, because a typo there silently
+stops the aggregate lining up with the checkboxes.
+
+The row worth reading twice is **less safe**. A place several participants call
+less safe is one where drawing it as a "safe spot" is actively wrong for them,
+not merely unhelpful — and the panel highlights that column for exactly that
+reason.
+
 ## Example data — `npm run seed`
 
 ```bash
@@ -729,6 +880,14 @@ debounces and keeps one request in flight; do not remove that.
 **OpenStreetMap's tile policy** asks heavy users to run their own tiles. A small
 app is fine; a popular one should point the `tile` entry in
 `src/lib/osm-forward.ts` at its own.
+
+**CBS and PDOK are open government data**, keyless and with no published rate
+limit, which is why neither needed an account to wire in. The forwarder still
+caches them — an hour for the CBS figures, a day for PDOK's neighbourhood
+lookups — because both answers are stable for far longer than that (the figures
+are monthly, with a reporting lag measured in weeks; neighbourhood boundaries
+are redrawn once a year at most), and every cached answer is a request nobody
+had to make of somebody else's donated hardware.
 
 **Overpass hands out a couple of query slots per IP.** Two things follow, and
 they only look contradictory. Candidate routes are read one after another rather

@@ -1,0 +1,24 @@
+{
+  "odata.metadata": "https://dataderden.cbs.nl/ODataApi/OData/47022NED/$metadata#Cbs.OData.WebAPI.Dimension",
+  "value": [
+    { "Key": "0.0.0 ", "Title": "Misdrijven, totaal", "Description": "Alle misdrijven." },
+    { "Key": "1.1.1 ", "Title": "1.1.1 Diefstal/inbraak woning" },
+    { "Key": "1.2.1 ", "Title": "1.2.1 Diefstal uit/vanaf motorvoertuigen" },
+    { "Key": "1.2.3 ", "Title": "1.2.3 Diefstal van brom-, snor-, fietsen" },
+    { "Key": "1.4.4 ", "Title": "1.4.4 Zakkenrollerij" },
+    { "Key": "1.4.5 ", "Title": "1.4.5 Straatroof" },
+    { "Key": "1.4.6 ", "Title": "1.4.6 Overval" },
+    { "Key": "1.4.7 ", "Title": "1.4.7 Winkeldiefstal" },
+    { "Key": "1.6.3 ", "Title": "1.6.3 Vermogensmisdrijven, totaal" },
+    { "Key": "2.5.1 ", "Title": "2.5.1 Zedenmisdrijf" },
+    { "Key": "2.1.1 ", "Title": "2.1.1 Vernieling cq. zaakbeschadiging" },
+    { "Key": "3.7.1 ", "Title": "3.7.1 Mishandeling" },
+    { "Key": "3.7.2 ", "Title": "3.7.2 Bedreiging" },
+    { "Key": "3.7.3 ", "Title": "3.7.3 Openlijke geweldpleging (persoon)" },
+    { "Key": "3.7.4 ", "Title": "3.7.4 Moord, doodslag" },
+    { "Key": "2.5.2 ", "Title": "2.5.2 Drugshandel" },
+    { "Key": "3.1.1 ", "Title": "3.1.1 Drugs/drankoverlast" },
+    { "Key": "1.1.2 ", "Title": "1.1.2 Diefstal/inbraak box/garage/schuur" },
+    { "Key": "3.9.9 ", "Title": "3.9.9 Overige misdrijven" }
+  ]
+}
