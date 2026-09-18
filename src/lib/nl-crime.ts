@@ -453,6 +453,15 @@ export function summariseCrimeRows(input: SummariseInput): CrimeSummary {
  */
 export interface PlacedCrimeSummary extends CrimeSummary {
   point: LatLng;
+  /**
+   * The neighbourhood's own outline, when PDOK's WFS gave one.
+   *
+   * Optional, and the layer works without it: the figure is for this whole
+   * area, so drawing the area is the honest rendering and the centroid badge
+   * is the fallback. Rings rather than one path because a Dutch neighbourhood
+   * is routinely split by a canal or a railway.
+   */
+  rings?: LatLng[][];
 }
 
 /** The categories with something in them, heaviest first, for the popup. */

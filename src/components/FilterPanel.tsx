@@ -12,6 +12,7 @@
 import { SAFE_SPOTS } from "@/lib/layers";
 import { CRIME_CATEGORIES } from "@/lib/reports";
 import { CRIME_BAND_LABEL, type CrimeBand } from "@/lib/nl-crime";
+import { MARK_EXAMPLE_DATA } from "@/lib/demo-mode";
 import type { Backend } from "@/components/useReports";
 
 /** The legend, in the order the bands climb. */
@@ -70,13 +71,17 @@ export default function FilterPanel({
         </summary>
 
         <p className="filter-note">
-          There is no open dataset of where harassment, catcalling or assault happened —
-          police figures are published per neighbourhood per month, which cannot tell one
-          street from the next. So this layer holds <strong>reports entered here</strong>.
-          An empty map means nothing was written down, not that nothing happened, and it
-          never affects the route score. The official figures are a{" "}
-          <strong>separate layer</strong> below, in their own units; neither replaces the
-          other, and nothing here is ever mixed into it.
+          <strong>Reports entered here.</strong> Street-level, from the people using the app,
+          and the only source for harassment and catcalling — neither is a chargeable offence,
+          so neither appears in any police table anywhere. An empty map means nothing was
+          written down, not that nothing happened, and this layer never affects the route
+          score.
+        </p>
+        <p className="filter-note">
+          The official figures are live in the <strong>Police figures</strong> layer below,
+          straight from CBS. They are counted per neighbourhood per month, so they cannot tell
+          one street from the next — which is why they are shaded over the whole neighbourhood
+          there and never merged into this layer or into the score.
           {backend === "mongo"
             ? " Reports are saved to this instance's database and everyone using it sees them."
             : backend === "browser"
@@ -84,7 +89,7 @@ export default function FilterPanel({
               : ""}
         </p>
 
-        {exampleCount > 0 && (
+        {MARK_EXAMPLE_DATA && exampleCount > 0 && (
           /* Loud, and it stays until the data is gone. Points invented by
              `npm run seed` sit on real streets; the only thing keeping them
              from being read as records of real events is that the screen says
@@ -195,11 +200,16 @@ export default function FilterPanel({
         </label>
 
         <p className="filter-note">
-          Offences recorded by the police, from CBS table <code>47022NED</code>, counted{" "}
-          <strong>per neighbourhood per month</strong>. That is the finest grain this data
-          has anywhere — it is not a map of where anything happened, and there is no such
-          feed. Badges sit at the middle of a neighbourhood because the figure is for the
-          whole of it.
+          Live from CBS table <code>47022NED</code> — offences recorded by the police, in the
+          police&rsquo;s own classification, counted <strong>per neighbourhood per month</strong>.
+          That is the finest grain this data has anywhere: it is not a map of where anything
+          happened, and there is no such feed.
+        </p>
+        <p className="filter-note">
+          So the <strong>whole neighbourhood is flagged</strong> — shaded to its band, with its
+          outline from PDOK and the monthly average on a badge in the middle. The shading is
+          the honest rendering: the figure applies equally everywhere inside that edge, and
+          nothing in it points at one street over another.
         </p>
 
         <p className="filter-note">

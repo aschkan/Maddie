@@ -23,13 +23,55 @@ test("EVERY seeded report is marked as example data", () => {
   }
 });
 
-test("no seeded note could be mistaken for something a person said", () => {
-  // Invented testimony about an assault is exactly the material the real
-  // interviews will supply. A convincing fake of it in the same collection is
-  // how a fake ends up quoted as a finding.
-  for (const report of buildSeedReports({ now: NOW })) {
-    assert.match(report.note ?? "", /^Example note —/);
+test("every seeded report still carries source: example in the DATA", () => {
+  /*
+   * This replaces a test that required every note to begin "Example note —".
+   * The notes are now written in the register a real report is written in, on
+   * purpose: the app is being evaluated as it will look, and a layer full of
+   * visible stubs says nothing about whether the popup, the wrapping or the
+   * category filter work. `MARK_EXAMPLE_DATA` in `src/lib/demo-mode.ts` is off
+   * for the same reason.
+   *
+   * What has NOT moved is the `source` field, and this is the test that keeps
+   * it. It is the only thing left that can find these rows again:
+   * `npm run seed -- --no-demo` and the panel's clear button both select on
+   * it, and `--keep` spares real reports by it. Lose the field and the
+   * placeholder rows are stranded in the database, indistinguishable from
+   * fieldwork, with the on-screen marking off as well.
+   */
+  const reports = buildSeedReports({ now: NOW });
+  assert.ok(reports.length > 0);
+  for (const report of reports) {
+    assert.equal(report.source, "example", report.id);
   }
+});
+
+test("a note matches its own category, and an empty note is allowed", () => {
+  // A `catcalling` point carrying a note about a break-in makes the category
+  // filter impossible to test — you cannot tell a filtering bug from a data
+  // one. `murder` has no note pool at all, and a report with no note is a real
+  // state the popup has to render.
+  const reports = buildSeedReports({ now: NOW });
+  const byCategory = new Map<string, Set<string>>();
+  for (const report of reports) {
+    if (!report.note) continue;
+    const seen = byCategory.get(report.category) ?? new Set<string>();
+    seen.add(report.note);
+    byCategory.set(report.category, seen);
+  }
+  // No note is shared between two categories.
+  const owners = new Map<string, string>();
+  for (const [category, notes] of byCategory) {
+    for (const note of notes) {
+      const already = owners.get(note);
+      assert.ok(
+        already === undefined || already === category,
+        `"${note}" is used by both ${already} and ${category}`,
+      );
+      owners.set(note, category);
+    }
+  }
+  assert.ok(reports.some((report) => !report.note), "no report was left without a note");
 });
 
 test("the same options give the same data", () => {

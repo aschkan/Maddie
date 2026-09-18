@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   MAX_AREAS,
+  boundaryQuery,
+  detectAxisOrder,
   normaliseAreaCode,
+  parseBoundaries,
   parseArea,
   parseAreas,
   parseWktPoint,
@@ -170,4 +173,161 @@ test("the number of probes is bounded, and so is what they can draw", () => {
   // being useful long before they stop being possible.
   assert.equal(probePoints({ south: 52, west: 4, north: 53, east: 5 }, 4).length, 16);
   assert.ok(MAX_AREAS > 0 && MAX_AREAS <= 24);
+});
+
+/* ───────────────────── neighbourhood outlines (WFS) ───────────────────────── */
+
+/** A one-feature reply, with the pairs written in the given order. */
+function wfs(order: "lon-lat" | "lat-lon", code = "BU03630000") {
+  // A square around the Amsterdam centre, so it is unambiguously in the NL.
+  const lonlat = [[4.89, 52.37], [4.91, 52.37], [4.91, 52.39], [4.89, 52.39], [4.89, 52.37]];
+  const pairs = order === "lon-lat" ? lonlat : lonlat.map(([a, b]) => [b, a]);
+  return {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      properties: { buurtcode: code, buurtnaam: "Burgwallen-Oude Zijde" },
+      geometry: { type: "Polygon", coordinates: [pairs] },
+    }],
+  };
+}
+
+test("a GeoJSON reply is read as lon,lat — the spec order", () => {
+  const [shape] = parseBoundaries(wfs("lon-lat"));
+  assert.ok(shape);
+  assert.equal(shape.code, "BU03630000");
+  assert.equal(shape.rings.length, 1);
+  assert.deepEqual(shape.rings[0]?.[0], { lat: 52.37, lng: 4.89 });
+});
+
+test("a reply that is lat,lon instead is DETECTED, not drawn in Somalia", () => {
+  /*
+   * The trap. `srsName=EPSG:4326` officially means lat-first; GeoJSON means
+   * lon-first; servers disagree about which wins. Read the wrong way round,
+   * 4.89/52.37 becomes a polygon off the Somali coast — it parses, it draws,
+   * and the map looks empty rather than wrong.
+   */
+  const [shape] = parseBoundaries(wfs("lat-lon"));
+  assert.ok(shape);
+  // Same points, whichever way the server wrote them.
+  assert.deepEqual(shape.rings[0]?.[0], { lat: 52.37, lng: 4.89 });
+});
+
+test("the axis order is decided from the reply, both ways round", () => {
+  assert.equal(detectAxisOrder([[4.89, 52.37]]), "lon-lat");
+  assert.equal(detectAxisOrder([[52.37, 4.89]]), "lat-lon");
+  // Ambiguous: both readings land in the Netherlands, so this pair decides
+  // nothing and a later one has to.
+  assert.equal(detectAxisOrder([[5.1, 5.2]]), null);
+  assert.equal(detectAxisOrder([[5.1, 5.2], [4.89, 52.37]]), "lon-lat");
+  // Neither reading is in the Netherlands — not this dataset's data at all.
+  assert.equal(detectAxisOrder([[100, 100]]), null);
+  assert.deepEqual(parseBoundaries({ features: [] }), []);
+});
+
+test("an undecidable reply yields NO shapes rather than a guess", () => {
+  // Same rule as a missing area code: drop it. A guessed outline is a claim
+  // about which ground a figure covers.
+  const reply = {
+    features: [{
+      properties: { buurtcode: "BU03630000" },
+      geometry: { type: "Polygon", coordinates: [[[5.1, 5.2], [5.3, 5.4], [5.5, 5.6]]] },
+    }],
+  };
+  assert.deepEqual(parseBoundaries(reply), []);
+});
+
+test("a MultiPolygon keeps its parts apart", () => {
+  // A neighbourhood split by a canal or a railway is two shapes. Joining them
+  // draws a line across the water between them.
+  const reply = {
+    features: [{
+      properties: { buurtcode: "BU03630000", buurtnaam: "Split" },
+      geometry: {
+        type: "MultiPolygon",
+        coordinates: [
+          [[[4.89, 52.37], [4.90, 52.37], [4.90, 52.38], [4.89, 52.37]]],
+          [[[4.92, 52.37], [4.93, 52.37], [4.93, 52.38], [4.92, 52.37]]],
+        ],
+      },
+    }],
+  };
+  const [shape] = parseBoundaries(reply);
+  assert.ok(shape);
+  assert.equal(shape.rings.length, 2);
+});
+
+test("a Polygon's interior ring is kept, so a hole stays a hole", () => {
+  // A park or an industrial estate cut out of a neighbourhood is excluded from
+  // its figures; filling it in claims the figure covers ground it does not.
+  const reply = {
+    features: [{
+      properties: { buurtcode: "BU03630000" },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [[4.88, 52.36], [4.94, 52.36], [4.94, 52.40], [4.88, 52.40], [4.88, 52.36]],
+          [[4.90, 52.37], [4.91, 52.37], [4.91, 52.38], [4.90, 52.38], [4.90, 52.37]],
+        ],
+      },
+    }],
+  };
+  const [shape] = parseBoundaries(reply);
+  assert.equal(shape?.rings.length, 2);
+});
+
+test("a shape with no code, or a degenerate ring, is dropped", () => {
+  const reply = {
+    features: [
+      { properties: {}, geometry: { type: "Polygon", coordinates: [[[4.89, 52.37], [4.9, 52.38], [4.9, 52.37]]] } },
+      // Two points is a line, not an area.
+      { properties: { buurtcode: "BU03630100" }, geometry: { type: "Polygon", coordinates: [[[4.89, 52.37], [4.9, 52.38]]] } },
+      { properties: { buurtcode: "BU03630200" }, geometry: { type: "Point", coordinates: [4.89, 52.37] } },
+    ],
+  };
+  assert.deepEqual(parseBoundaries(reply), []);
+});
+
+test("shapes are deduplicated by code", () => {
+  const one = wfs("lon-lat").features[0];
+  assert.ok(one);
+  assert.equal(parseBoundaries({ features: [one, { ...one }] }).length, 1);
+});
+
+test("an unreadable reply is no shapes rather than a throw", () => {
+  for (const reply of [null, {}, { features: "no" }, 7, "text"]) {
+    assert.deepEqual(parseBoundaries(reply), []);
+  }
+});
+
+/* ─────────────────────────── the WFS query itself ─────────────────────────── */
+
+test("the WFS query spells typeNames the 2.0 way and filters by code", () => {
+  // `typeName` singular is the WFS 1.1 form; GeoServer answers an exception
+  // for it on a 2.0.0 request, which reads as the layer being missing.
+  const search = boundaryQuery(["BU03630000", "BU03630100"]);
+  assert.ok(search);
+  const params = new URLSearchParams(search.slice(1));
+  assert.equal(params.get("typeNames"), "wijkenbuurten:buurten");
+  assert.equal(params.get("typeName"), null);
+  assert.equal(params.get("version"), "2.0.0");
+  assert.equal(params.get("outputFormat"), "application/json");
+  assert.equal(params.get("cql_filter"), "buurtcode IN ('BU03630000','BU03630100')");
+});
+
+test("the query carries NO bbox — that is what keeps the axis question out", () => {
+  const search = boundaryQuery(["BU03630000"]);
+  assert.ok(search);
+  assert.ok(!search.includes("bbox"), search);
+});
+
+test("a quote in a code cannot break out of the CQL literal", () => {
+  const search = boundaryQuery(["BU03'630000"]);
+  assert.ok(search);
+  const filter = new URLSearchParams(search.slice(1)).get("cql_filter");
+  assert.equal(filter, "buurtcode IN ('BU03''630000')");
+});
+
+test("no codes means no query, so no request is made", () => {
+  assert.equal(boundaryQuery([]), null);
 });

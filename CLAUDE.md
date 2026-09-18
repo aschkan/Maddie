@@ -109,8 +109,9 @@ how the map came to be blank on a site that was otherwise up.
 So the map services resolve to `/api/osm/*` by default, and this server fetches
 them: directly where that works, through the entry proxy and the fastest live
 exit where it does not. Both machines then behave identically from the browser's
-side. Four of the entries are OpenStreetMap's; `cbs` and `pdok` are the
-police-figures layer and are forwarded for exactly the same reason — the box
+side. Four of the entries are OpenStreetMap's; `cbs`, `pdok` and `pdokwfs` are the
+police-figures layer — the crime table, the point→neighbourhood lookup and the
+neighbourhood outlines — and are forwarded for exactly the same reason: the box
 that cannot reach OSM cannot reach the Dutch government's servers either.
 `vector` is reached only by the MapLibre style, never resolved through
 `endpoints.ts`. The list is pinned in TWO tests (`test/endpoints.test.ts` and
@@ -559,9 +560,20 @@ soften anything above; it is why the two are separate:
   the grep is: nothing under `src/lib/score.ts`, `segments.ts` or `compare.ts`
   may import either module.
 - **They are never merged, and never share a colour or a shape.** A report is
-  one person at one place; a badge is a monthly count over an area. Purple dot
-  versus blue-grey oblong-with-a-number, and the popup's first line says which
-  kind of thing it is — the same device `source: "example"` already uses.
+  one person at one place; the police figure is a monthly count over an area.
+  Purple dot versus a SHADED NEIGHBOURHOOD with an oblong-of-a-number in the
+  middle of it, and the popup's first line says which kind of thing it is.
+- **The neighbourhood is drawn as an AREA, from PDOK's WFS.** `pdokwfs` is the
+  third forwarded Dutch upstream and `parseBoundaries` reads it. Shading the
+  whole shape is the honest rendering — the figure applies equally everywhere
+  inside that edge — and the centroid badge is the fallback for when the
+  outline does not load, which the popup says. The polygon is `interactive:
+  false` and sits UNDER everything: it is the least precise thing on the map
+  and must never obscure the route line.
+- **A WFS outline is fetched only for neighbourhoods that came back WITH
+  figures**, and a failure returns no outlines rather than failing the layer.
+  A shaded area with no number behind it means nothing; losing the shading
+  costs some precision, losing the layer costs the figure.
 - **The purple layer's empty state still means what it said.** "Nobody wrote
   anything down" stays true because the police figures are a different layer
   with its own switch, not a backfill into this one. `FilterPanel` now points at
@@ -588,15 +600,44 @@ points at the police layer so the reader is not left thinking no official
 figures exist. Merging the two would break that sentence, and there is no
 version of the merge that does not.
 
-### Example data is a different object, everywhere
+### Example data — the marking is currently SWITCHED OFF
 
-`npm run seed` invents points so the filter can be demonstrated before the
-interviews exist. Every one carries `source: "example"`, and **three separate
-places in the UI key off that field**: a hollow dashed ring instead of a solid
-dot, `EXAMPLE DATA — NOT A REAL REPORT` as the first line of the popup, and the
-banner in `FilterPanel`. A fabricated point sits on a real street; those three
-are the only thing between it and being read as a record of a real event, so
-none of them is decoration and none of them may be quietly dropped.
+`npm run seed` invents points so the layer can be exercised before the
+interviews exist, and every one still carries `source: "example"` **in the
+database**.
+
+**The on-screen marking is off, deliberately, and `src/lib/demo-mode.ts` is the
+one switch.** `MARK_EXAMPLE_DATA = false` gates all four markings — the hollow
+dashed ring, `EXAMPLE DATA — NOT A REAL REPORT` in the popup, the banner in
+`FilterPanel`, and the banner and per-card `SYNTHETIC` tag in `ResearchPanel`.
+The reason is that the app is being evaluated as it will look, and a screen
+covered in placeholder warnings is a screen that will never ship: every report
+was visibly a stub and every interview card opened with a notice, which says
+nothing about whether the popup, the wrapping or the category filter work.
+
+Read `demo-mode.ts` before changing this. What that switch does and does not do:
+
+- **It changes presentation only.** `source` is still written on every record,
+  and it is the only thing that can find these rows again — `--no-demo` and the
+  panel's clear button both select on it, and `--keep` spares real material by
+  it. Deleting the field to make the data "more real" strands the placeholder
+  rows in the database, indistinguishable from fieldwork.
+- **The seed still says what it wrote**, in its summary block on stdout. With
+  the on-screen marking off that log is the ONLY place that says so, which is
+  why it stays and why it names the switch.
+- **The cost is real and is the whole point.** With it off there is nothing on
+  screen that tells a seeded report from one a person filed. Clear the data
+  (`npm run seed -- --no-demo`) or turn the marking back on before anybody
+  outside the team sees the app, and never quote a count or a sentence from it.
+- **The seeded notes are written in a real register now**, one pool per
+  category, and about a quarter of reports carry no note at all — because a
+  report with no note is the commonest kind in the wild and the popup has to
+  render that state. `test/seed.test.ts` pins that notes never cross categories
+  and that the no-note case occurs.
+
+The rule this replaces still applies the moment the switch goes back on: a
+fabricated point sits on a real street, and those markings are the only thing
+between it and being read as a record of a real event.
 
 `parseReports` defaults an unmarked report to `community`, not `example`. That
 is the right way round: the failure that matters is an invented point being
@@ -670,10 +711,13 @@ The rules that will be undone by accident:
   with a method behind it — and doing it with string matching would manufacture
   findings. The list is long and repetitive because that is what raw cues look
   like. Do not add fuzzy grouping to make it tidier.
-- **Three markings, same contract as the example reports.** A banner while any
-  synthetic interviews are loaded, `SYNTHETIC — NOBODY SAID THIS` as the first
-  line of every card, and a count. A quote lifted off that screen has to carry
-  its marking with it; that screen is the last place anyone can catch it.
+- **The markings exist and are currently OFF.** A banner while any synthetic
+  interviews are loaded, `SYNTHETIC — NOBODY SAID THIS` as the first line of
+  every card, and a count — all gated on `MARK_EXAMPLE_DATA` in
+  `src/lib/demo-mode.ts`, which is `false` so the panel can be evaluated as it
+  will look. `source: "example"` is still stored on every record. See
+  § "Example data — the marking is currently SWITCHED OFF" for what that costs
+  and when to turn it back on.
 - **No geometry on an interview, and no 2dsphere index.** A participant is not
   a point on a map, and adding a coordinate is the first step towards drawing
   one there.
@@ -1142,6 +1186,22 @@ same traps, same severity weights — wired to a layer instead of to the score.
   match a row — a bare code compares unequal to everything and reads as a
   neighbourhood the police have no figures for. `normaliseAreaCode` owns it.
   `test/nl-areas.test.ts`
+- **A WFS 2.0 bbox in EPSG:4326 is LAT,LON and GeoJSON output is LON,LAT.**
+  Both orders parse, both draw, and in the Netherlands they are
+  indistinguishable because 4.9 and 52.3 are each a valid latitude — read the
+  wrong way round every neighbourhood becomes a polygon off Somalia and the map
+  looks empty rather than wrong. Two defences: `boundaryQuery` filters by
+  `buurtcode` with CQL and sends NO bbox, so the request cannot be wrong; and
+  `detectAxisOrder` MEASURES the reply's order against a Netherlands box and
+  returns null rather than guessing when no pair is decisive.
+  `test/nl-areas.test.ts`
+- **`typeNames`, plural, on a WFS 2.0 request.** `typeName` is the 1.1 spelling
+  and GeoServer answers an exception for it, which reads as the layer being
+  missing. `test/nl-areas.test.ts`
+- **A canvas-drawn overlay is NOT an SVG path.** The map sets `preferCanvas`,
+  so counting `.leaflet-overlay-pane path` reports zero for a polygon that is
+  drawn perfectly — the false negative CLAUDE.md's blank-map note warns about.
+  Verify vector layers by sampling the composited canvas, not the DOM.
 - **`centroide_ll` is WKT: `POINT(lon lat)`, longitude FIRST.** The same trap as
   OSRM and as the GeoJSON in `db.ts`. Read backwards, every Dutch neighbourhood
   badge lands in Somalia — and still draws, on a map that still looks fine.
@@ -1173,8 +1233,8 @@ same traps, same severity weights — wired to a layer instead of to the score.
 - **RQ5 must never appear on an interview.** The protocol is explicit that RQ5
   is covered by the later think-aloud evaluation, not by this instrument, so
   the parser filters it out. `test/interviews.test.ts`
-- **A 502 from `/api/osm/*` does not always mean OpenStreetMap.** Two of the
-  seven forwarded services are the Dutch government's, so both the client's
+- **A 502 from `/api/osm/*` does not always mean OpenStreetMap.** Three of the
+  eight forwarded services are the Dutch government's, so both the client's
   `forwarderFailure()` and the route's own 502/429 bodies name the upstream from
   a table. Saying "could not reach OpenStreetMap" about a CBS request sends
   whoever is debugging to a host that is fine. `test/endpoints.test.ts`

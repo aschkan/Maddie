@@ -33,6 +33,7 @@ import {
   type Interview,
 } from "@/lib/interviews";
 import type { InterviewBackend } from "@/components/useInterviews";
+import { MARK_EXAMPLE_DATA } from "@/lib/demo-mode";
 
 interface Props {
   interviews: Interview[];
@@ -78,7 +79,7 @@ function Card({ interview }: { interview: Interview }) {
 
       {/* First line inside, before any answer is read: what kind of thing
           this is. Same device as EXAMPLE DATA on a report popup. */}
-      {one.source === "example" && (
+      {one.source === "example" && MARK_EXAMPLE_DATA && (
         <p className="iv-tag">SYNTHETIC — NOBODY SAID THIS</p>
       )}
 
@@ -205,7 +206,7 @@ export default function ResearchPanel({ interviews, backend, error, loading }: P
 
   return (
     <div className="research">
-      {examples > 0 && (
+      {MARK_EXAMPLE_DATA && examples > 0 && (
         /* Loud, and it stays until the data is gone — the same contract as the
            example-data banner on the crime layer. These are invented
            participants answering invented questions; the only thing between a

@@ -252,16 +252,21 @@ async function main(): Promise<number> {
     console.log(`      prefer no profiling ${neutral}`);
   }
   console.log("");
-  console.log("  ⚠  NONE OF THIS HAPPENED AND NOBODY SAID IT. It is generated data, so the");
-  console.log("     crime filter and the research panel can be demonstrated before the");
-  console.log("     interviews are done. Reports draw as hollow dashed markers and say");
-  console.log("     EXAMPLE DATA in the popup; every interview card is tagged SYNTHETIC and");
-  console.log("     the panel carries a banner while any are loaded.");
+  // The record of which rows are placeholders. This is a log read by whoever
+  // pressed the button, not a label on the product — and with the on-screen
+  // marking off (see src/lib/demo-mode.ts) it is the ONLY place that says so,
+  // which is why it stays.
+  console.log("  ℹ  PLACEHOLDER DATA. None of it happened and nobody said it. It is here so");
+  console.log("     the crime layer and the research panel can be evaluated before the");
+  console.log("     fieldwork is in.");
   console.log("");
-  console.log("     No participant below exists. Do not quote a number or a sentence from");
-  console.log("     this data in a report — it is shaped to exercise the screens, and it is");
-  console.log("     not calibrated against anything.");
-  console.log("     Clear it from the panel, or with:  npm run seed -- --no-demo");
+  console.log("     MARK_EXAMPLE_DATA is OFF, so it renders exactly as real data will —");
+  console.log("     solid markers, ordinary popups, no banners. Nothing on screen tells");
+  console.log("     these rows from real ones. Every row still carries source:\"example\"");
+  console.log("     in the database, which is how they are found again.");
+  console.log("");
+  console.log("     Clear before anyone outside the team sees it:  npm run seed -- --no-demo");
+  console.log("     Put the on-screen marking back:               MARK_EXAMPLE_DATA = true");
   console.log("");
   console.log(line);
   console.log("");

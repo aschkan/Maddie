@@ -46,7 +46,9 @@
  * machine that cannot reach OpenStreetMap cannot reach those either, and a
  * browser sent straight out from a page it served would get nothing.
  */
-export type MapService = "overpass" | "osrm" | "nominatim" | "tile" | "cbs" | "pdok";
+export type MapService =
+  | "overpass" | "osrm" | "nominatim" | "tile"
+  | "cbs" | "pdok" | "pdokwfs";
 
 /** This server, standing in front of OpenStreetMap. Same origin, always. */
 export const FORWARD: Record<MapService, string> = {
@@ -56,6 +58,7 @@ export const FORWARD: Record<MapService, string> = {
   tile: "/api/osm/tile/{z}/{x}/{y}.png",
   cbs: "/api/osm/cbs",
   pdok: "/api/osm/pdok",
+  pdokwfs: "/api/osm/pdokwfs",
 };
 
 /** Straight from the browser, the way it used to be. */
@@ -66,6 +69,7 @@ export const PUBLIC: Record<MapService, string> = {
   tile: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
   cbs: "https://dataderden.cbs.nl/ODataApi/OData",
   pdok: "https://api.pdok.nl/bzk/locatieserver/search/v3_1",
+  pdokwfs: "https://service.pdok.nl/cbs/wijkenbuurten/2023/wfs/v1_0",
 };
 
 /**
@@ -116,6 +120,7 @@ const EXPLICIT: Record<MapService, string | undefined> = {
   tile: undefined,
   cbs: undefined,
   pdok: undefined,
+  pdokwfs: undefined,
 };
 
 /**
@@ -167,6 +172,7 @@ const UPSTREAM_NAME: Record<MapService, string> = {
   tile: "OpenStreetMap",
   cbs: "CBS",
   pdok: "PDOK",
+  pdokwfs: "PDOK",
 };
 
 /**

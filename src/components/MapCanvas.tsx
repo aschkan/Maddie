@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents,
+  CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMap, useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -20,6 +20,7 @@ import type { LatLng, Route } from "@/lib/osrm";
 import { alwaysOpen, type BBox, type LayerData } from "@/lib/layers";
 import { endpoint } from "@/lib/endpoints";
 import { CRIME_CATEGORIES, type Report } from "@/lib/reports";
+import { MARK_EXAMPLE_DATA } from "@/lib/demo-mode";
 import {
   CRIME_BAND_LABEL, crimeBand, topCategories, type PlacedCrimeSummary,
 } from "@/lib/nl-crime";
@@ -496,6 +497,32 @@ export default function MapCanvas({
       {/* Before the reports, so a report dot always draws ON TOP of a badge:
           a real report is the more specific statement and must never end up
           hidden under an area label. */}
+      {/* The neighbourhood itself, shaded by band.
+          UNDER the badges and under the route, and translucent, because this
+          is the least precise thing on the map: one figure for the whole
+          shape. It must never obscure the route line, which is the answer the
+          page exists to give. Drawn before the badges so a badge is always
+          readable on top of its own area. */}
+      {policeAreas.map((area) => (
+        area.rings && area.rings.length > 0 ? (
+          <Polygon
+            key={`shape-${area.areaCode}`}
+            positions={area.rings.map((one) => one.map((p) => [p.lat, p.lng] as [number, number]))}
+            pathOptions={{
+              color: BAND_FILL[crimeBand(area.severityPerMonth)] ?? BAND_FILL.medium,
+              fillColor: BAND_FILL[crimeBand(area.severityPerMonth)] ?? BAND_FILL.medium,
+              fillOpacity: 0.16,
+              weight: 1.5,
+              opacity: 0.55,
+              // The figure applies to the whole area equally, so the boundary
+              // is a real edge rather than a gradient — a dashed edge would
+              // read as "approximately here", which is the opposite of true.
+              interactive: false,
+            }}
+          />
+        ) : null
+      ))}
+
       {policeAreas.map((area) => {
         const band = crimeBand(area.severityPerMonth);
         const perMonth = Math.round(area.offencesPerMonth);
@@ -549,8 +576,9 @@ export default function MapCanvas({
               <br />
               <small>
                 CBS table {area.table}, {area.areaCode}. This is a count for the whole
-                neighbourhood, not a place where anything happened, and it does not
-                affect the route score.
+                {area.rings ? " shaded area" : " neighbourhood"}, not a place where anything
+                happened, and it does not affect the route score.
+                {!area.rings && " The outline for this neighbourhood could not be loaded, so only this marker is shown."}
               </small>
             </Popup>
           </Marker>
@@ -559,7 +587,10 @@ export default function MapCanvas({
 
       {/* ── reports ──────────────────────────────────────────────────────── */}
       {reports.map((report) => {
-        const invented = report.source === "example";
+        // Gated on `MARK_EXAMPLE_DATA`, which is off: seeded reports draw as a
+        // solid dot like any other, so the map can be judged as it will look.
+        // The `source` field is untouched in the database — see `demo-mode.ts`.
+        const invented = report.source === "example" && MARK_EXAMPLE_DATA;
         return (
           <Marker
             key={report.id}
@@ -573,7 +604,11 @@ export default function MapCanvas({
               <strong>{categoryLabel.get(report.category) ?? report.category}</strong>
               <br />
               {new Date(report.at).toLocaleString()}
-              {report.area && <><br />scattered in {report.area}</>}
+              {/* The district. Named plainly, because "scattered in X" read as
+                  generated output — and with the placeholder marking off, a
+                  popup that announces how it was made is the one thing on the
+                  map that does not look like the product. */}
+              {report.area && <><br />{report.area}</>}
               {report.note && <><br />{report.note}</>}
               <br />
               <button type="button" className="link" onClick={() => onRemoveReport(report.id)}>

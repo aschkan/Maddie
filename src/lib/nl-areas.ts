@@ -149,9 +149,218 @@ export function probePoints(bbox: BBox, across = PROBES_ACROSS): LatLng[] {
   return points;
 }
 
+/* ─────────────────────────── neighbourhood shapes ─────────────────────────── */
+
+/**
+ * A neighbourhood's outline, as rings of points ready for Leaflet.
+ *
+ * Rings rather than one path, because a Dutch neighbourhood is routinely a
+ * MultiPolygon — split by a canal, a railway or a motorway — and joining the
+ * parts into one path draws a line across the water between them.
+ */
+export interface Boundary {
+  code: string;
+  name: string;
+  rings: LatLng[][];
+}
+
+/**
+ * The Netherlands, generously boxed.
+ *
+ * Used ONLY to settle the axis order of a reply, below. A region test is a
+ * blunt instrument and it is justified here by the dataset: CBS wijkenbuurten
+ * covers European Netherlands by construction, so a coordinate outside this
+ * box is not a neighbourhood somewhere else — it is this one read backwards.
+ */
+const NL = { south: 50.6, west: 3.2, north: 53.7, east: 7.3 };
+
+function insideNL(lat: number, lng: number): boolean {
+  return lat >= NL.south && lat <= NL.north && lng >= NL.west && lng <= NL.east;
+}
+
+/**
+ * Which way round a reply's coordinate pairs are.
+ *
+ * ⚠ THE TRAP THIS EXISTS FOR. GeoJSON is specified as `[lon, lat]`, and that
+ * is what a GeoServer WFS emits — but `srsName=EPSG:4326` officially means
+ * lat-first, servers disagree about which wins, and the two are
+ * indistinguishable in the Netherlands because 4.9 and 52.3 are both valid
+ * latitudes. Read backwards, every neighbourhood becomes a polygon off the
+ * coast of Somalia: it parses, it draws, and the map looks empty rather than
+ * wrong.
+ *
+ * So the order is MEASURED from the reply instead of assumed. The first pair
+ * that is unambiguous — one way round lands in the Netherlands and the other
+ * does not — decides it for the whole reply. When no pair is decisive the
+ * answer is `null` and the caller drops the shapes rather than guessing, which
+ * is the same rule `parseArea` applies to a missing code.
+ */
+export function detectAxisOrder(pairs: readonly (readonly number[])[]): "lon-lat" | "lat-lon" | null {
+  for (const pair of pairs) {
+    const first = pair[0];
+    const second = pair[1];
+    if (typeof first !== "number" || typeof second !== "number") continue;
+    if (!Number.isFinite(first) || !Number.isFinite(second)) continue;
+
+    const asLonLat = insideNL(second, first);
+    const asLatLon = insideNL(first, second);
+    if (asLonLat && !asLatLon) return "lon-lat";
+    if (asLatLon && !asLonLat) return "lat-lon";
+    // Both or neither: this pair cannot settle it. Try the next one.
+  }
+  return null;
+}
+
+/** Every coordinate pair in a GeoJSON geometry, at any nesting depth. */
+function flattenPairs(node: unknown, out: number[][]): void {
+  if (!Array.isArray(node)) return;
+  if (typeof node[0] === "number" && typeof node[1] === "number") {
+    out.push(node as number[]);
+    return;
+  }
+  for (const child of node) flattenPairs(child, out);
+}
+
+/** One ring of coordinate pairs → points, in the order the reply uses. */
+function ring(coords: unknown, order: "lon-lat" | "lat-lon"): LatLng[] {
+  if (!Array.isArray(coords)) return [];
+  const points: LatLng[] = [];
+  for (const pair of coords) {
+    if (!Array.isArray(pair)) continue;
+    const first = pair[0];
+    const second = pair[1];
+    if (typeof first !== "number" || typeof second !== "number") continue;
+    if (!Number.isFinite(first) || !Number.isFinite(second)) continue;
+    const lat = order === "lon-lat" ? second : first;
+    const lng = order === "lon-lat" ? first : second;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    points.push({ lat, lng });
+  }
+  return points;
+}
+
+/**
+ * A WFS GeoJSON reply → one boundary per neighbourhood.
+ *
+ * Polygon and MultiPolygon both handled, and the interior rings of a Polygon
+ * are kept: a neighbourhood with a park or an industrial estate cut out of it
+ * has a hole, and filling it in claims figures for ground the figures exclude.
+ */
+export function parseBoundaries(reply: unknown): Boundary[] {
+  const body = reply as { features?: unknown } | null;
+  const features = Array.isArray(body?.features) ? body.features : [];
+  if (features.length === 0) return [];
+
+  // Decide the axis order ONCE, from the whole reply, rather than per feature:
+  // a server does not change its mind halfway down, and one decisive pair is
+  // better evidence than a per-feature guess on an ambiguous one.
+  const sample: number[][] = [];
+  for (const feature of features) {
+    const geometry = (feature as { geometry?: { coordinates?: unknown } })?.geometry;
+    flattenPairs(geometry?.coordinates, sample);
+    if (sample.length > 200) break;
+  }
+  const order = detectAxisOrder(sample);
+  if (!order) return [];
+
+  const out: Boundary[] = [];
+  const seen = new Set<string>();
+  for (const feature of features) {
+    const item = feature as {
+      properties?: Record<string, unknown>;
+      geometry?: { type?: unknown; coordinates?: unknown };
+    };
+    const code = normaliseAreaCode("buurt", item.properties?.buurtcode);
+    if (!code || seen.has(code)) continue;
+
+    const type = item.geometry?.type;
+    const coords = item.geometry?.coordinates;
+    const rings: LatLng[][] = [];
+    if (type === "Polygon" && Array.isArray(coords)) {
+      for (const one of coords) {
+        const points = ring(one, order);
+        if (points.length >= 3) rings.push(points);
+      }
+    } else if (type === "MultiPolygon" && Array.isArray(coords)) {
+      for (const polygon of coords) {
+        if (!Array.isArray(polygon)) continue;
+        for (const one of polygon) {
+          const points = ring(one, order);
+          if (points.length >= 3) rings.push(points);
+        }
+      }
+    }
+    // A ring of two points is a line, not an area. Dropped rather than drawn.
+    if (rings.length === 0) continue;
+
+    seen.add(code);
+    const name = typeof item.properties?.buurtnaam === "string"
+      ? item.properties.buurtnaam.trim()
+      : code;
+    out.push({ code, name, rings });
+  }
+  return out;
+}
+
 /* ────────────────────────────── live fetching ─────────────────────────────── */
 
 export const PDOK_BASE = endpoint("pdok");
+export const PDOK_WFS_BASE = endpoint("pdokwfs");
+
+/** A CQL string literal. Single quotes doubled, as CQL requires. */
+function cqlQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * The WFS query for a set of neighbourhood codes.
+ *
+ * Pure, so the awkward parts are testable: `typeNames` (WFS 2.0 spells it
+ * plural — `typeName` is the 1.1 form and GeoServer answers an exception for
+ * it), and a CQL `IN` filter rather than a bbox, which keeps the lat/lon axis
+ * question out of the REQUEST entirely. See the note on `SERVICES.pdokwfs`.
+ */
+export function boundaryQuery(codes: readonly string[]): string | null {
+  if (codes.length === 0) return null;
+  const list = codes.map(cqlQuote).join(",");
+  const params = new URLSearchParams({
+    service: "WFS",
+    version: "2.0.0",
+    request: "GetFeature",
+    typeNames: "wijkenbuurten:buurten",
+    outputFormat: "application/json",
+    srsName: "EPSG:4326",
+    count: String(MAX_AREAS),
+    cql_filter: `buurtcode IN (${list})`,
+  });
+  return `?${params.toString()}`;
+}
+
+/**
+ * The outlines for the neighbourhoods we already hold figures for.
+ *
+ * Shapes are a nicety, not the layer: a failure here returns NO boundaries
+ * rather than an error, and the caller falls back to the centroid badge on its
+ * own. Losing the shading costs the reader some precision about where the
+ * figure applies; failing the whole layer over it would cost them the figure.
+ */
+export async function fetchBoundaries(
+  codes: readonly string[],
+  options: { signal?: AbortSignal } = {},
+): Promise<Boundary[]> {
+  const search = boundaryQuery(codes);
+  if (!search) return [];
+  try {
+    const response = await fetch(`${PDOK_WFS_BASE}${search}`, {
+      headers: { Accept: "application/json" },
+      signal: options.signal,
+    });
+    if (!response.ok) return [];
+    return parseBoundaries(await response.json());
+  } catch {
+    return [];
+  }
+}
 
 /**
  * How many neighbourhoods to carry at once.

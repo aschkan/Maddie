@@ -134,6 +134,33 @@ export const SERVICES: Record<string, Service> = {
     // nine probes per view are the same nine on every return to that view.
     ttlMs: 86_400_000,
   },
+  /*
+   * PDOK's CBS wijkenbuurten WFS — the neighbourhood BOUNDARIES.
+   *
+   * A different host from `pdok` (that is the Locatieserver, which answers
+   * "which neighbourhood is this point in?"; this one answers "what shape is
+   * it?"), so it is a separate entry. Together they are what lets the police
+   * figures be drawn over the area they are actually about instead of at a
+   * single point in the middle of it.
+   *
+   * Queried by `buurtcode` through a CQL filter rather than by bbox, and that
+   * is deliberate: a WFS 2.0 bbox in EPSG:4326 takes its corners in LAT,LON
+   * order, GeoJSON output emits LON,LAT, and getting either backwards returns
+   * a plausible-looking polygon in the wrong hemisphere. Filtering by the
+   * codes we already hold removes the question from the request entirely, and
+   * `parseBoundaries` sanity-checks the reply's own axis order.
+   */
+  pdokwfs: {
+    bases: ["https://service.pdok.nl/cbs/wijkenbuurten/2023/wfs/v1_0"],
+    methods: ["GET"],
+    cache: "no-store",
+    // A week. CBS redraws these once a year at most, and a polygon is far and
+    // away the heaviest thing this forwarder fetches per neighbourhood.
+    ttlMs: 604_800_000,
+    // The client asks the base itself with everything in the query string, so
+    // anything after it is ignored.
+    suffix: () => "",
+  },
   tile: {
     bases: [
       "https://tile.openstreetmap.org",

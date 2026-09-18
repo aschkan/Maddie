@@ -191,21 +191,23 @@ the browser that entered them. The panel prints which, because a report somebody
 believed they had filed, visible to nobody, is worse than not being able to file
 one.
 
-**Police figures — blue-grey badges.** The official figures, and a separate
-layer on purpose. Offences recorded by the police, from CBS StatLine table
+**Police figures — the neighbourhood, shaded.** The official figures, live from
+CBS, and a separate layer on purpose. Offences recorded by the police, from CBS StatLine table
 `47022NED` ("Geregistreerde misdrijven; soort misdrijf, wijk, buurt,
-maandcijfers"), whose offence classification is the police's own. A badge sits
-at the middle of each neighbourhood on screen carrying its average recorded
-offences per month; the popup breaks that down by category and says what window
-it covers.
+maandcijfers"), whose offence classification is the police's own. **The whole neighbourhood is flagged**: shaded to its band, with its outline
+fetched from PDOK's CBS `wijkenbuurten` WFS, and the average recorded offences
+per month on a badge in the middle. The popup breaks that down by category and
+says what window it covers. Shading the area is the honest rendering — the
+figure applies equally everywhere inside that edge — and the badge alone is the
+fallback for when an outline does not load, which the popup says.
 
 Three things about it are the whole design, and all three are on the screen:
 
 * **It is per neighbourhood per month.** That is the finest grain this data has
   anywhere in the country — there is no point-level feed, and inventing points
   inside a neighbourhood so the shapes match would be fabricating evidence. The
-  badge sits at a centroid because the figure is for the whole area; nothing
-  happened at that dot.
+  shape is exactly the area the figure covers, and nothing inside it points at
+  one street over another.
 * **It does not touch the route score.** A walk usually stays inside one
   neighbourhood, so these numbers would hand every candidate route the same
   answer — they cannot say which way round is better, which is the only
@@ -223,9 +225,24 @@ Reporting rates, footfall and how heavily an area is policed all move these
 numbers, and a busy centre records more of everything than a quiet street
 nobody walks down.
 
-The join is PDOK's Locatieserver — the Dutch government's own geocoder, free
-and keyless — which is the one service that returns the CBS neighbourhood codes
-the figures are published against. Nine probes are spread across the visible box
+Two PDOK services do the joining, both free and keyless. The **Locatieserver**
+returns the CBS neighbourhood codes the figures are published against — it is
+the one service that does, which is why the app's own address search cannot be
+used for it. The **`wijkenbuurten` WFS** then returns those neighbourhoods'
+outlines.
+
+That second request carries a trap worth knowing: a WFS 2.0 bbox in EPSG:4326
+takes its corners lat-first, GeoJSON output is lon-first, and in the
+Netherlands the two are indistinguishable because 4.9 and 52.3 are each a valid
+latitude — read backwards, every neighbourhood becomes a polygon off the coast
+of Somalia, which parses, draws, and makes the map look empty rather than
+wrong. So the outlines are fetched by **`buurtcode` through a CQL filter with
+no bbox at all**, which keeps the question out of the request, and
+`detectAxisOrder` measures the reply's own order against a Netherlands box
+rather than assuming it, returning nothing rather than a guess when no
+coordinate pair is decisive.
+
+The Locatieserver join works like this: Nine probes are spread across the visible box
 and deduplicated by code, so a view sitting inside one neighbourhood draws one
 badge. Netherlands only: outside it there is no Dutch neighbourhood to resolve,
 and the panel says that rather than drawing an empty map, because a blank layer
@@ -584,11 +601,26 @@ participant exists.** It is there so this panel, the tallies and the place
 table can be seen working before the fieldwork is done, and it is meant to be
 deleted when it is — `npm run seed -- --no-demo`.
 
-It keeps the same three rules as the example reports on the map, for the same
-reason: a banner in the panel while any are loaded, `SYNTHETIC — NOBODY SAID
-THIS` as the first line of every card, and a count. A quote lifted off that
-screen into a document has to carry its marking with it, because that screen is
-the last point at which anybody can still catch it.
+**The on-screen marking is currently switched off**, and one constant does it:
+`MARK_EXAMPLE_DATA` in `src/lib/demo-mode.ts`. With it on, the panel carries a
+banner while any synthetic interviews are loaded and every card opens with
+`SYNTHETIC — NOBODY SAID THIS`; the map draws seeded reports as hollow dashed
+rings and says `EXAMPLE DATA` in their popups. It is off because the app is
+being evaluated as it will look, and a screen covered in placeholder warnings
+is a screen that will never ship.
+
+What that does and does not change:
+
+- **Presentation only.** `source: "example"` is still written on every record.
+  It is the only thing that can find these rows again: `--no-demo` and the
+  panel's clear button both select on it, and `--keep` spares real material by
+  it.
+- **The seed still says what it wrote**, in its summary block. With the
+  on-screen marking off that log is the only place that does.
+- **Nothing on screen distinguishes a seeded row from a real one.** That is the
+  point and also the risk. Clear the data or turn the marking back on before
+  anybody outside the team sees the app, and never quote a count or a sentence
+  from it.
 
 Two things it deliberately does **not** do:
 

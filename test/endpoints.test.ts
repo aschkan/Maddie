@@ -7,7 +7,9 @@ import {
 } from "../src/lib/endpoints.ts";
 import { SERVICES, upstreamUrl } from "../src/lib/osm-forward.ts";
 
-const ALL: MapService[] = ["overpass", "osrm", "nominatim", "tile", "cbs", "pdok"];
+const ALL: MapService[] = [
+  "overpass", "osrm", "nominatim", "tile", "cbs", "pdok", "pdokwfs",
+];
 
 /** `SERVICES` is indexed by a plain string, so it is optional to the compiler. */
 function service(name: string) {
@@ -89,14 +91,16 @@ test("and the forwarder has no service that could reach one", () => {
    * only by the style MapLibre loads, which is why it appears here and not in
    * `FORWARD`.
    *
-   * `cbs` and `pdok` are the police-figures layer — CBS StatLine for the
-   * recorded crime, PDOK for the neighbourhood a coordinate falls in. They are
-   * forwarded for the same reason as everything else: the machine that cannot
-   * reach OpenStreetMap cannot reach the Dutch government's servers either.
+   * `cbs`, `pdok` and `pdokwfs` are the police-figures layer — CBS StatLine
+   * for the recorded crime, PDOK's Locatieserver for which neighbourhood a
+   * coordinate falls in, and PDOK's WFS for that neighbourhood's outline. All
+   * three are forwarded for the same reason as everything else: the machine
+   * that cannot reach OpenStreetMap cannot reach the Dutch government's
+   * servers either.
    */
   assert.deepEqual(
     Object.keys(SERVICES).sort(),
-    ["cbs", "nominatim", "osrm", "overpass", "pdok", "tile", "vector"],
+    ["cbs", "nominatim", "osrm", "overpass", "pdok", "pdokwfs", "tile", "vector"],
   );
 });
 

@@ -35,7 +35,7 @@ import { plannedAt, type Light } from "@/lib/daylight";
 import { isForwarded } from "@/lib/endpoints";
 import type { Place } from "@/lib/geocode";
 import { EMPTY_LAYERS, fetchLayers, gridStep, snapBox, type BBox, type LayerData } from "@/lib/layers";
-import { fetchAreas } from "@/lib/nl-areas";
+import { fetchAreas, fetchBoundaries } from "@/lib/nl-areas";
 import { fetchNeighbourhoodCrime, type PlacedCrimeSummary } from "@/lib/nl-crime";
 import { MAX_WAYPOINTS, googleMapsLink } from "@/lib/handoff";
 import { fetchRoutes, PROFILES, type LatLng, type Profile, type Route } from "@/lib/osrm";
@@ -468,10 +468,29 @@ export default function RoutePlanner() {
           // CBS has no geometry at all, so this is the only thing that knows
           // where to put the badge.
           const where = new Map(found.areas.map((area) => [area.code, area.point]));
+
+          /*
+           * And the outlines, so the figure is drawn over the area it is
+           * actually about rather than at a dot in the middle of it.
+           *
+           * Asked for only the neighbourhoods that came back WITH figures, not
+           * every one the probes found: a shape with no number behind it is a
+           * shaded area that means nothing. It is also the heaviest request in
+           * the layer, so it goes last and it is allowed to fail — `rings`
+           * stays undefined and the badge carries the layer on its own.
+           */
+          const outlines = await fetchBoundaries(
+            figures.data.summaries.map((summary) => summary.areaCode),
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted) return;
+          const shapes = new Map(outlines.map((one) => [one.code, one.rings]));
+
           askedPolice.current = asking;
           setPoliceAreas(figures.data.summaries.map((summary) => ({
             ...summary,
             point: where.get(summary.areaCode) ?? { lat: 0, lng: 0 },
+            ...(shapes.get(summary.areaCode) ? { rings: shapes.get(summary.areaCode) } : {}),
           })));
           setPolicePeriods(figures.data.periods);
           setPoliceError(null);
