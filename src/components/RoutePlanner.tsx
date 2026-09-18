@@ -27,6 +27,8 @@ import RouteChoices from "@/components/RouteChoices";
 import SafetyPanel from "@/components/SafetyPanel";
 import TripCard from "@/components/TripCard";
 import { useReports } from "@/components/useReports";
+import { useInterviews } from "@/components/useInterviews";
+import ResearchPanel from "@/components/ResearchPanel";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import { compareRoutes } from "@/lib/compare";
 import { plannedAt, type Light } from "@/lib/daylight";
@@ -70,12 +72,16 @@ const LIGHT_WORD: Record<Light, string> = {
   night: "after dark",
 };
 
-type Tab = "route" | "safety" | "layers";
+type Tab = "route" | "safety" | "layers" | "research";
 
 const TABS: { id: Tab; glyph: string; label: string }[] = [
   { id: "route", glyph: "🧭", label: "Route" },
   { id: "safety", glyph: "🔦", label: "Safety" },
   { id: "layers", glyph: "◉", label: "Layers" },
+  // The interviews behind the requirements. Last, because it is the only tab
+  // that is not about the walk in front of you — it is what the app was built
+  // from rather than something you consult on the way home.
+  { id: "research", glyph: "🎙", label: "Research" },
 ];
 
 /**
@@ -160,6 +166,9 @@ export default function RoutePlanner() {
   const [reportMode, setReportMode] = useState(false);
   const [reportCategory, setReportCategory] = useState<string>(CRIME_CATEGORIES[0]?.id ?? "other");
   const { reports, backend, error: reportError, add, remove, clearExamples } = useReports();
+  const {
+    interviews, backend: interviewBackend, error: interviewError, loading: interviewsLoading,
+  } = useInterviews();
 
   const [view, setView] = useState<{ bbox: BBox; zoom: number } | null>(null);
   const [layers, setLayers] = useState<LayerData>(EMPTY_LAYERS);
@@ -798,6 +807,15 @@ export default function RoutePlanner() {
             policePeriods={policePeriods}
             policeError={policeError}
             policeBusy={policeBusy}
+          />
+        )}
+
+        {tab === "research" && (
+          <ResearchPanel
+            interviews={interviews}
+            backend={interviewBackend}
+            error={interviewError}
+            loading={interviewsLoading}
           />
         )}
       </BottomSheet>

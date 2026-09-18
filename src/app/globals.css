@@ -823,3 +823,91 @@ input[type="range"]::-moz-range-thumb {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* ── the Research tab ───────────────────────────────────────────────────────
+   Dense text rather than the map's chrome, because this panel is read rather
+   than tapped — but every rule still starts at phone width, and the tap
+   targets on the summaries are full rows. */
+
+.research { display: flex; flex-direction: column; gap: .5rem; }
+.iv-heading {
+  margin: .8rem 0 .2rem; font-size: .92rem; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--muted);
+}
+
+/* One participant. The whole summary row is the target, not a caret. */
+.iv-card {
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--panel); overflow: hidden;
+}
+.iv-card > summary {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  min-height: var(--tap); padding: .5rem .7rem;
+  cursor: pointer; list-style: none; font-size: .86rem;
+}
+.iv-card > summary::-webkit-details-marker { display: none; }
+.iv-card[open] > summary { border-bottom: 1px solid var(--line); }
+.iv-code {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  padding: .1rem .4rem; border-radius: 4px;
+  background: var(--crime); color: #fff; font-size: .78rem;
+}
+.iv-who { color: var(--muted); }
+
+/* The synthetic tag. Same job as `.example-tag` on a report popup: the first
+   thing read inside the card, before any answer. */
+.iv-tag {
+  margin: .6rem .7rem 0; padding: .3rem .5rem;
+  font-size: .72rem; font-weight: 700; letter-spacing: .03em;
+  color: #fff; background: var(--crime); border-radius: 4px;
+}
+
+.iv-demo {
+  display: grid; grid-template-columns: max-content 1fr;
+  gap: .15rem .6rem; margin: .6rem .7rem; font-size: .8rem;
+}
+.iv-demo dt { color: var(--muted); }
+.iv-demo dd { margin: 0; }
+
+.iv-block { margin: .6rem .7rem; }
+.iv-block h5 {
+  margin: 0 0 .2rem; font-size: .74rem; font-weight: 700;
+  letter-spacing: .02em; color: var(--muted);
+}
+.iv-block ul { margin: 0; padding-left: 1.1rem; font-size: .82rem; line-height: 1.5; }
+.iv-quote {
+  margin: 0; font-size: .84rem; line-height: 1.55;
+  padding-left: .55rem; border-left: 2px solid var(--line);
+}
+.iv-note {
+  margin: .5rem .7rem; font-size: .78rem; line-height: 1.5;
+  color: var(--muted); font-style: italic;
+}
+.iv-rq {
+  margin: .6rem .7rem; font-size: .72rem; letter-spacing: .03em;
+  color: var(--muted); text-transform: uppercase;
+}
+
+/* The tallies. `table-layout: fixed` plus wrapping cells, so a long place
+   name cannot widen the page — there is no horizontal scroll anywhere here. */
+.iv-table {
+  width: 100%; table-layout: fixed; border-collapse: collapse;
+  font-size: .82rem; margin: .3rem 0 .5rem;
+}
+.iv-table th, .iv-table td {
+  padding: .35rem .3rem; text-align: left;
+  border-bottom: 1px solid var(--line); overflow-wrap: anywhere;
+}
+.iv-table thead th { font-size: .72rem; color: var(--muted); font-weight: 600; }
+.iv-table td { text-align: right; font-variant-numeric: tabular-nums; width: 4.2rem; }
+.iv-table tbody th { font-weight: 500; }
+.iv-table tbody th small { display: block; color: var(--muted); font-size: .72rem; }
+/* A place somebody called LESS SAFE is the row worth reading twice. */
+.iv-warn { color: var(--bad-text); font-weight: 700; }
+
+.iv-cues { margin: .4rem 0 0; padding-left: 0; list-style: none; font-size: .8rem; }
+.iv-cues li { padding: .15rem 0; display: flex; gap: .45rem; }
+.iv-n {
+  flex: none; min-width: 1.4rem; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600;
+}

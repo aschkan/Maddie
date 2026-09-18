@@ -29,6 +29,10 @@ short list of things that will bite you while editing.
   real recorded replies in `test/fixtures/`.
 - `src/lib/nl-areas.ts` — PDOK: which CBS neighbourhood a point is in. The join
   that lets the figures be placed at all. Pure parts tested.
+- `src/lib/interviews.ts` — the requirements interviews, shaped like the
+  protocol's own sections. Pure, tested. **Never scored, never on the map.**
+- `src/lib/seed-interviews.ts` — the synthetic cohort. **Read its header before
+  touching it.** 24 invented participants who deliberately disagree.
 - `src/lib/seed-data.ts` — the example data. **Read its header before touching it.**
 - `src/lib/db.ts` — MongoDB, when `MONGO_URI` is set. **Server only.**
 - `scripts/seed.ts` — `npm run seed`, which the proxy's reseed button runs.
@@ -43,6 +47,7 @@ short list of things that will bite you while editing.
 - `scripts/proxies.ts` — `npm run proxies`, the first thing to run on the box.
 - `src/app/api/assess/route.ts` — the model endpoint.
 - `src/app/api/reports/route.ts` — the crime layer's storage.
+- `src/app/api/interviews/route.ts` — the interviews, READ-ONLY. No POST, ever.
 - `src/app/api/osm/[service]/[[...path]]/route.ts` — OSM through this server.
 - `src/components/BottomSheet.tsx` — the panel, as a sheet with three stops.
 - `src/components/TripCard.tsx` — A and B, floating over the map; collapses.
@@ -601,6 +606,86 @@ The seed writes visibly placeholder notes. Invented first-person testimony is
 exactly what the real interviews will supply, and a convincing fake of it in the
 same collection is how a fake ends up quoted as a finding.
 
+## The interviews are the study's own data, and they live apart
+
+**`README.md` § "The interviews — the Research tab" is the spec.** The app is a
+prototype for a study whose instrument is `Interview_Protocol_Revised_3`, and
+`src/lib/interviews.ts` is shaped section for section like it (§2 mobility, §3
+decision, §4 cues + printed list + time of day, §5 current tools, §6 needs, §7
+concerns, §8 presentation, §9 closing, §10 demographics). A store shaped like
+the instrument is one real transcripts can be typed into without a migration.
+
+The rules that will be undone by accident:
+
+- **`interviews` is a DIFFERENT COLLECTION from `reports`, and merging them is
+  the one change to refuse.** The crime layer holds what somebody typed about a
+  place; this holds what a participant said in a 30–45 minute sitting under a
+  signed consent form. Different consent, different retention — and the seed
+  writes SYNTHETIC interviews, so the separation is the whole thing that stops
+  an invented quote sitting in the same collection as a real one. Do not
+  "simplify" it into one collection with a `kind` field.
+- **There is no `POST /api/interviews` and there must not be one.** An interview
+  is made in a room and transcribed afterwards. A public endpoint accepting one
+  lets anybody write a participant into the study's own data — the same failure
+  `POST /api/reports` guards against by forcing `source: "community"`, one step
+  worse. Interviews arrive via `npm run seed` or an import run by hand.
+- **`parseInterviews` defaults an unmarked record to `example`** — the OPPOSITE
+  way round from `parseReports`, on purpose. There the failure that matters is
+  an invented point promoted to a real report; here it is an invented QUOTE
+  promoted to real fieldwork. Both defaults fail towards "this might not be
+  real", which is why they point in opposite directions.
+- **The seed invents no testimony, and a test enforces it.** §3 asks how a
+  DECISION was made, so every recalled situation is a decision and never an
+  incident. `test/interviews.test.ts` greps the cohort for incident phrasings
+  ("followed me", "grabbed", "assaulted me"…) and fails if one appears. It is a
+  coarse net that cannot prove absence — its job is to fail loudly the day
+  somebody writes fluent fake testimony into the table, which is the realistic
+  way this gets lost.
+- **The cohort DISAGREES, and that is data rather than flavour.** Twenty-four
+  people who all want a map with scores would let the prototype be validated
+  against its own assumptions. Tests pin that somebody prefers official data
+  only, somebody prefers lived only, somebody refuses to contribute, somebody
+  wants no personalisation, §3's fallback is used at least once, §4's prompt
+  list is both needed and not needed, and at least one place is rated LESS
+  SAFE. Do not "tidy" the cohort into agreement.
+- **`prefersNeutral` exists because §6's note demands it.** The protocol
+  explicitly reframes the personalisation question to avoid an "obviously
+  personalised" answer, so a cohort where everybody wants personalisation means
+  the reframing failed. A test pins that some participants want none.
+- **A skipped §10 identity item is an ANSWER, not missing data.** The protocol
+  says it may be skipped. The field is left off entirely rather than set to
+  `""`, so it round-trips through JSON as skipped, and the panel prints
+  *skipped* rather than a blank.
+- **"No difference" is an answer on the printed list.** A place that changes
+  nothing is a finding about that place; folding it into "no response" would
+  make every list look unanimous. `answered` is carried separately from the
+  three counts so a place nobody was asked about can never read as a place
+  nobody chose — the denominator is part of the finding.
+- **The printed list JOINS to `SAFE_SPOTS` ids**, and that join is what lets an
+  interview say anything about the map. `test/interviews.test.ts` pins that
+  every non-null `spot` still exists in `layers.ts`; a typo silently stops the
+  aggregate lining up with the checkboxes.
+- **The cue tallies are UNCODED and the panel says so.** Grouping "no lighting
+  in the park" with "unlit stretches" is qualitative coding — a research step
+  with a method behind it — and doing it with string matching would manufacture
+  findings. The list is long and repetitive because that is what raw cues look
+  like. Do not add fuzzy grouping to make it tidier.
+- **Three markings, same contract as the example reports.** A banner while any
+  synthetic interviews are loaded, `SYNTHETIC — NOBODY SAID THIS` as the first
+  line of every card, and a count. A quote lifted off that screen has to carry
+  its marking with it; that screen is the last place anyone can catch it.
+- **No geometry on an interview, and no 2dsphere index.** A participant is not
+  a point on a map, and adding a coordinate is the first step towards drawing
+  one there.
+- **No database means no interviews, said as a sentence.** There is no
+  `localStorage` fallback — a browser could never have produced a transcript —
+  and an empty list would read as a study that found nothing.
+
+What the synthetic data is NOT: it is shaped to exercise every branch of the
+panel, calibrated against nothing, and **no number or sentence in it may be
+quoted**. The seed's summary block says so in the log tail, the panel says so
+in the banner, and `seed-interviews.ts` says so in a box at the top.
+
 ## The box this runs on — the platform reverse proxy
 
 This app does not run alone. It is one of nine platforms on a pair of servers
@@ -804,9 +889,20 @@ before changing `scripts/seed.ts`.**
   presses one thing. `resolveSeedFlags` is pure and `test/seed-flags.test.ts`
   pins the rule — which matters more here than anywhere: proving it the other
   way means running a destructive script against a live collection.
-- **The example reports are built BEFORE anything is deleted.** A bad `--count`
-  or a throwing generator after the wipe leaves an empty collection and takes
-  the real reports with it. A seed that declines to run costs nothing.
+- **The example reports AND the interviews are built BEFORE anything is
+  deleted.** A bad `--count` or a throwing generator after the wipe leaves an
+  empty collection and takes the real material with it. A seed that declines to
+  run costs nothing.
+- **It writes TWO collections and `--keep` spares both.** `--keep` deletes only
+  `source: "example"` from `reports` and only `source: "example"` from
+  `interviews`, so a real transcript survives it exactly as a community report
+  does. The default wipe still drops the whole database — and when it is about
+  to drop interviews marked `fieldwork`, the seed says so on its own line,
+  loudly, because a dropped transcript is not recoverable and the person
+  reading that log tail pressed a button seconds ago.
+- **`--count` sizes the example REPORTS, not the cohort.** A cohort is a fixed
+  set of written participants rather than a number to dial, so
+  `DEFAULT_INTERVIEW_TOTAL` is however many are in the table.
 - **The indexes go with the drop, so they are rebuilt.** `reportsCollection()`
   owns them (unique `id`, 2dsphere on `loc`, `source`, `atMs`); asking for the
   collection again is what puts them back. A 2dsphere that quietly did not come
@@ -1059,6 +1155,24 @@ same traps, same severity weights — wired to a layer instead of to the score.
   only one of them is about the place. Same rule, one layer up: outside the
   Netherlands the panel says the table does not cover here rather than drawing
   an empty layer, because a blank crime layer reads as reassurance.
+- **An unmarked interview reads as an EXAMPLE, an unmarked report reads as
+  COMMUNITY.** The two defaults point in opposite directions and both are
+  right: the bad outcome for a report is an invented point promoted to real,
+  and for an interview it is an invented quote promoted to real fieldwork.
+  `test/interviews.test.ts`
+- **A participant is not a point.** No coordinate on an interview, no 2dsphere
+  index on the collection, and no writing one into `reports` "so the map can
+  show it". The collections are separate because the seed invents one of them.
+  `test/interviews.test.ts`
+- **A skipped optional demographic must render as "skipped".** The protocol
+  allows §10's identity item to be skipped, so the field is absent rather than
+  `""` and a skip is never shown as missing data. `test/interviews.test.ts`
+- **A verdict outside safer/no-difference/less-safe is not an answer**, and a
+  place outside the protocol's printed list is a verdict no column can show.
+  Both are dropped rather than kept. `test/interviews.test.ts`
+- **RQ5 must never appear on an interview.** The protocol is explicit that RQ5
+  is covered by the later think-aloud evaluation, not by this instrument, so
+  the parser filters it out. `test/interviews.test.ts`
 - **A 502 from `/api/osm/*` does not always mean OpenStreetMap.** Two of the
   seven forwarded services are the Dutch government's, so both the client's
   `forwarderFailure()` and the route's own 502/429 bodies name the upstream from

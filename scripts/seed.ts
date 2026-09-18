@@ -8,7 +8,7 @@
  * environment first, so `MONGO_URI` arrives exactly as it does when the server
  * starts.
  *
- *   npm run seed              wipe the database, then write the example reports
+ *   npm run seed              wipe the database, then write the example data
  *   npm run seed -- --force   the button: wipe and rewrite, ignoring every
  *                             keep/skip flag and every SEED_* env var
  *   npm run seed -- --keep    keep every report a person typed; replace only
@@ -22,16 +22,30 @@
  * a wipe of demo rows. `--keep` is the switch that spares them, and it is the
  * one to reach for on anything but a fresh box.
  *
- * WHAT IT WRITES IS MADE UP. Every point carries `source: "example"`, and the
+ * WHAT IT WRITES IS MADE UP. Every record carries `source: "example"`, and the
  * app marks those differently everywhere they appear — see `src/lib/seed-data.ts`
- * for why that is not decoration. This exists so the filters and the map can be
- * demonstrated before the interviews are done, and it is meant to be cleared
- * when they are: one click in the panel, or `npm run seed -- --no-demo`.
+ * and `src/lib/seed-interviews.ts` for why that is not decoration. This exists
+ * so the filters, the map and the research panel can be demonstrated before the
+ * interviews are done, and it is meant to be cleared when they are: one click
+ * in the panel, or `npm run seed -- --no-demo`.
+ *
+ * TWO COLLECTIONS, NEVER ONE:
+ *
+ *   `reports`     — points on the crime layer. Placeholder notes only.
+ *   `interviews`  — synthetic participants answering the protocol's questions.
+ *
+ * They are kept apart because the seed writes invented material into the
+ * second, and an invented quote must never end up in the same collection as a
+ * real one. Do not "simplify" this into one collection with a `kind` field.
  */
 
-import { fromDoc, mongoUri, databaseName, db, reportsCollection, REPORTS, toDoc } from "../src/lib/db.ts";
+import {
+  fromDoc, mongoUri, databaseName, db, interviewsCollection, INTERVIEWS,
+  reportsCollection, REPORTS, toDoc, toInterviewDoc,
+} from "../src/lib/db.ts";
 import { resolveSeedFlags } from "../src/lib/seed-flags.ts";
 import { buildSeedReports, DEFAULT_SEED_TOTAL } from "../src/lib/seed-data.ts";
+import { buildSeedInterviews, DEFAULT_INTERVIEW_TOTAL } from "../src/lib/seed-interviews.ts";
 
 const flags = resolveSeedFlags({ argv: process.argv.slice(2), env: process.env });
 
@@ -69,6 +83,15 @@ async function main(): Promise<number> {
       })
     : [];
 
+  // Same rule, same reason: built before the wipe, so a generator that throws
+  // cannot leave the database empty. `--count` deliberately does NOT size this
+  // — it means example REPORTS, and a cohort is a fixed set of written
+  // participants rather than a number to dial. `DEFAULT_INTERVIEW_TOTAL` is
+  // however many are in the table.
+  const interviews = flags.demo
+    ? buildSeedInterviews({ total: DEFAULT_INTERVIEW_TOTAL, days: 45 })
+    : [];
+
   const collection = await reportsCollection();
   if (!collection) {
     console.error("Could not open the reports collection.");
@@ -78,10 +101,29 @@ async function main(): Promise<number> {
   const before = await collection.countDocuments({});
   const community = await collection.countDocuments({ source: "community" });
 
+  const interviewsBefore = await interviewsCollection();
+  if (!interviewsBefore) {
+    console.error("Could not open the interviews collection.");
+    return 1;
+  }
+  const interviewsWere = await interviewsBefore.countDocuments({});
+  // Interviews from actual fieldwork. Counted BEFORE the wipe and named in the
+  // log, because these are transcripts of a sitting somebody consented to and
+  // there is no other copy — the same cost as a community report, and higher
+  // per record.
+  const fieldwork = await interviewsBefore.countDocuments({ source: "fieldwork" });
+
   // ── Wipe ──────────────────────────────────────────────────────────────────
   if (flags.keep) {
     const dropped = await collection.deleteMany({ source: "example" });
     console.log(`--keep: removed ${dropped.deletedCount} old example reports; kept ${community} entered by people.`);
+    // The same on the other collection, and `source: "example"` is the filter
+    // for the same reason: a real transcript must survive a --keep seed.
+    const droppedInterviews = await interviewsBefore.deleteMany({ source: "example" });
+    console.log(
+      `--keep: removed ${droppedInterviews.deletedCount} old example interviews; ` +
+        `kept ${fieldwork} from fieldwork.`,
+    );
   } else {
     // dropDatabase, not deleteMany: dropping also clears collection options and
     // the whole index catalogue, so nothing survives from a previous shape of
@@ -97,8 +139,17 @@ async function main(): Promise<number> {
       .filter((name) => !name.startsWith("system."));
     console.log(
       `wiping ${databaseName(uri)} — ${names.length} collection(s), ${before} reports, ` +
-        `${community} of them entered by people.  [${names.join(" ") || "empty"}]`,
+        `${community} of them entered by people, ${interviewsWere} interviews, ` +
+        `${fieldwork} of them from fieldwork.  [${names.join(" ") || "empty"}]`,
     );
+    if (fieldwork > 0) {
+      // Loud, and on its own line. A dropped transcript is not recoverable and
+      // the person reading this log tail pressed a button seconds ago.
+      console.log(
+        `⚠  ${fieldwork} interview(s) from REAL FIELDWORK are about to be dropped. ` +
+          `--keep would have spared them.`,
+      );
+    }
     await database.dropDatabase();
   }
 
@@ -113,25 +164,55 @@ async function main(): Promise<number> {
   const indexes = await rebuilt.indexes();
   console.log(`indexes on ${REPORTS}: ${indexes.map((index) => index.name).join(", ")}`);
 
-  if (reports.length === 0) {
+  // And the interviews collection's own indexes — unique `id`, unique `code`,
+  // `source`, `atMs`. Asking for the collection is what rebuilds them.
+  const rebuiltInterviews = await interviewsCollection();
+  if (!rebuiltInterviews) {
+    console.error("Could not reopen the interviews collection after the wipe.");
+    return 1;
+  }
+  const interviewIndexes = await rebuiltInterviews.indexes();
+  console.log(`indexes on ${INTERVIEWS}: ${interviewIndexes.map((index) => index.name).join(", ")}`);
+
+  if (interviews.length > 0) {
+    await rebuiltInterviews.bulkWrite(
+      interviews.map((interview) => ({
+        updateOne: {
+          filter: { id: interview.id },
+          update: { $set: toInterviewDoc(interview) },
+          upsert: true,
+        },
+      })),
+      { ordered: false },
+    );
+  }
+
+  if (reports.length === 0 && interviews.length === 0) {
     console.log(flags.demo ? "nothing to write." : "no example data written (--no-demo).");
     console.log(`reports now: ${await rebuilt.countDocuments({})}`);
+    console.log(`interviews now: ${await rebuiltInterviews.countDocuments({})}`);
     return 0;
   }
 
   // One ordered:false bulk write: a duplicate id from a re-run should not stop
   // the rest, and 180 individual round trips is 180 round trips.
-  await rebuilt.bulkWrite(
-    reports.map((report) => ({
-      updateOne: { filter: { id: report.id }, update: { $set: toDoc(report) }, upsert: true },
-    })),
-    { ordered: false },
-  );
+  if (reports.length > 0) {
+    await rebuilt.bulkWrite(
+      reports.map((report) => ({
+        updateOne: { filter: { id: report.id }, update: { $set: toDoc(report) }, upsert: true },
+      })),
+      { ordered: false },
+    );
+  }
 
   const after = await rebuilt.countDocuments({});
   const examples = await rebuilt.countDocuments({ source: "example" });
   const remaining = await rebuilt.countDocuments({ source: "community" });
   const sample = await rebuilt.findOne({ source: "example" });
+
+  const interviewsNow = await rebuiltInterviews.countDocuments({});
+  const exampleInterviews = await rebuiltInterviews.countDocuments({ source: "example" });
+  const fieldworkNow = await rebuiltInterviews.countDocuments({ source: "fieldwork" });
 
   // The summary block. Every platform on this box ends its seed with one, in
   // plain text on stdout, because it is read by a person in the panel's log
@@ -150,11 +231,37 @@ async function main(): Promise<number> {
   console.log(`      entered by people   ${remaining}${flags.keep ? "  (kept)" : ""}`);
   if (sample) console.log(`      sample              ${JSON.stringify(fromDoc(sample))}`);
   console.log("");
-  console.log("  ⚠  NONE OF THIS HAPPENED. It is generated data so the crime filter can");
-  console.log("     be demonstrated before the interviews exist. The app draws every one");
-  console.log("     of these as a hollow dashed marker, says EXAMPLE DATA in its popup,");
-  console.log("     and shows a banner in the panel while any are loaded.");
-  console.log("     Clear them from the panel, or with:  npm run seed -- --no-demo");
+  console.log(`  🎙  INTERVIEWS          ${interviewsWere} → ${interviewsNow}`);
+  console.log(`      synthetic           ${exampleInterviews}   (wrote ${interviews.length})`);
+  console.log(`      from fieldwork      ${fieldworkNow}${flags.keep ? "  (kept)" : ""}`);
+  if (interviews.length > 0) {
+    // What the cohort actually contains, because the value of this data is its
+    // spread and an operator cannot see that from a count. These are the
+    // numbers the research panel shows, printed here so a reseed can be
+    // sanity-checked from the log tail alone.
+    const cohort = interviews.map((one) => one.demographics);
+    const cities = new Set(cohort.map((one) => one.city)).size;
+    const ages = new Set(cohort.map((one) => one.ageBand)).size;
+    const modes = new Set(cohort.map((one) => one.mainMode)).size;
+    const identity = cohort.filter((one) => one.identityNote).length;
+    const contributors = interviews.filter((one) => one.needs.wouldContribute).length;
+    const neutral = interviews.filter((one) => one.needs.prefersNeutral).length;
+    console.log(`      spread              ${cities} cities · ${ages} age bands · ${modes} main modes`);
+    console.log(`      answered §10 opt-in ${identity} of ${interviews.length}  (the rest skipped it, as allowed)`);
+    console.log(`      would contribute    ${contributors} yes / ${interviews.length - contributors} no`);
+    console.log(`      prefer no profiling ${neutral}`);
+  }
+  console.log("");
+  console.log("  ⚠  NONE OF THIS HAPPENED AND NOBODY SAID IT. It is generated data, so the");
+  console.log("     crime filter and the research panel can be demonstrated before the");
+  console.log("     interviews are done. Reports draw as hollow dashed markers and say");
+  console.log("     EXAMPLE DATA in the popup; every interview card is tagged SYNTHETIC and");
+  console.log("     the panel carries a banner while any are loaded.");
+  console.log("");
+  console.log("     No participant below exists. Do not quote a number or a sentence from");
+  console.log("     this data in a report — it is shaped to exercise the screens, and it is");
+  console.log("     not calibrated against anything.");
+  console.log("     Clear it from the panel, or with:  npm run seed -- --no-demo");
   console.log("");
   console.log(line);
   console.log("");
