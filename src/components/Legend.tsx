@@ -231,6 +231,10 @@ export default function Legend({ tone, open, onOpen, shown, onShow, skyNote, onO
             fill={pick(PLACE, tone)} stroke={ground} strokeWidth="1.2" /></Glyph>}
           label="A place to go" sub="🚉 🏥 🛡️ 🛒 ☕ … on hover or close zoom"
         />
+        <Row
+          swatch={<Glyph><circle cx="20" cy="11" r="3.5" fill={pick(PLACE, tone)} stroke={ground} strokeWidth="1" /></Glyph>}
+          label="The same, zoomed out" sub="A dot until there is room for the heart."
+        />
       </Group>
 
       <Group

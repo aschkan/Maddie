@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { distanceToPathM } from "../src/lib/geo.ts";
-import { fetchLayers, SAFE_SPOTS, type LayerData, type LitWay, type Lamp, type Spot } from "../src/lib/layers.ts";
+import { layerQuery, parseLayers, SAFE_SPOTS, type BBox, type LayerData, type LitWay, type Lamp, type Spot } from "../src/lib/layers.ts";
 import { fetchRoutes, parseRoutes, type LatLng, type Profile, type Route } from "../src/lib/osrm.ts";
 import { fetchFacts, type RouteFacts, type SampleRead } from "../src/lib/overpass.ts";
 import { USER_AGENT } from "../src/lib/proxy-pool.ts";
@@ -65,8 +65,13 @@ const OVERPASS = process.argv.includes("--via-server")
 const CORRIDOR_M = 350;
 /** The layer query is asked cell by cell; one query over the whole area is capped. */
 const CELL_DEG = 0.01;
-/** Overpass hands out two slots per IP. Being polite costs a minute. */
-const PAUSE_MS = 1_500;
+/**
+ * The gap between queries. Overpass hands out two slots per IP, and going
+ * DIRECT it also blocks an IP outright, for many minutes, after a burst — a
+ * 1.5 s pace got a few answers and then a lockout every time. Fifteen seconds
+ * is slow and finishes; through the forwarder each query leaves by its own exit.
+ */
+const PAUSE_MS = process.argv.includes("--via-server") ? 1_500 : 15_000;
 
 const OUT = fileURLToPath(new URL("../src/lib/scenario-recording.json", import.meta.url));
 
@@ -96,7 +101,7 @@ function remember<T>(key: string, value: T): T {
  * Through the forwarder it is not this machine's IP being limited: every retry
  * leaves by a different exit, so a short pause is enough.
  */
-const RATE_LIMIT_REST_MS = process.argv.includes("--via-server") ? 8_000 : 65_000;
+const RATE_LIMIT_REST_MS = process.argv.includes("--via-server") ? 8_000 : 120_000;
 
 /*
  * The app's own User-Agent, on every request this script makes.
@@ -135,7 +140,12 @@ globalThis.fetch = async (input, init = {}) => {
    * false. Better to fail the run than to record that.
    */
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (/interpreter|osm\/overpass/.test(url) && response.ok) {
+  // Only a ROUTE read can never be empty — it asks for the ways `around:` a
+  // line through central Utrecht. A layer query over a 250 m square can
+  // truthfully come back with no places in it, and refusing that answer made
+  // the recorder retry a correct reply eighteen times and then give up.
+  const body = typeof init.body === "string" ? decodeURIComponent(init.body) : "";
+  if (/interpreter|osm\/overpass/.test(url) && response.ok && body.includes("around:")) {
     const text = await response.text();
     try {
       const body = JSON.parse(text) as { elements?: unknown[] };
@@ -258,6 +268,105 @@ function near(point: LatLng, paths: LatLng[][]): boolean {
   return paths.some((path) => distanceToPathM(point, path) <= CORRIDOR_M);
 }
 
+type LayerReply = { ok: true; data: LayerData } | { ok: false; error: string };
+
+/**
+ * One layer query, with a timeout the recorder can afford.
+ *
+ * `fetchLayers` asks Overpass for 25 seconds, which is right for a page a
+ * person is waiting on and wrong here: a busy Overpass answers "timed out" to
+ * a short allowance on any query, however small — a 250 m square of central
+ * Utrecht did, three times running. A script can wait ninety seconds.
+ */
+async function askLayers(cell: BBox, kinds: string[], lighting: boolean): Promise<LayerReply> {
+  const query = layerQuery(cell, kinds, lighting, 90);
+  if (!query) return { ok: true, data: { spots: [], lamps: [], litWays: [], truncated: false } };
+  try {
+    const response = await fetch(OVERPASS, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (response.status === 429) return { ok: false, error: "rate limit" };
+    if (response.status === 504) return { ok: false, error: "timed out" };
+    if (!response.ok) return { ok: false, error: `Overpass answered ${response.status}` };
+    return { ok: true, data: parseLayers(await response.json()) };
+  } catch {
+    return { ok: false, error: "could not reach Overpass" };
+  }
+}
+
+/**
+ * The layers for one cell: the places and the lighting as TWO queries.
+ *
+ * Asked together, a city-centre cell is hundreds of lit streets with full
+ * geometry plus every kind of place, in one reply. Apart, each is light — and a
+ * cell where only one of them fails costs one retry, not both.
+ */
+async function layersFor(
+  cell: BBox, kinds: string[], depth = 0, only: "places" | "lighting" | null = null,
+): Promise<LayerReply> {
+  // A whole cell keeps the key earlier runs saved it under; a quarter, or one
+  // half of a cell, gets its own.
+  const cellKey = depth === 0 && only === null
+    ? `cell2|${cell.south.toFixed(4)},${cell.west.toFixed(4)}`
+    : `cell2|${cell.south.toFixed(4)},${cell.west.toFixed(4)}|${cell.north.toFixed(4)}|${only ?? "both"}`;
+  const held = cache[cellKey] as LayerReply | undefined;
+  if (held) return held;
+
+  const parts: LayerData[] = [];
+  const halves = ([["places", kinds, false], ["lighting", [], true]] as const)
+    .filter(([label]) => only === null || only === label);
+  for (const [label, wantKinds, lighting] of halves) {
+    let found = await askLayers(cell, [...wantKinds], lighting);
+    for (let attempt = 2; !found.ok && attempt <= READ_TRIES; attempt++) {
+      console.warn(`  ! cell ${cell.south.toFixed(3)},${cell.west.toFixed(3)} ${label}, attempt ${attempt - 1}: ${found.error}`);
+      await pause(/rate limit|could not reach/i.test(found.error) ? RATE_LIMIT_REST_MS : PAUSE_MS * 2 * attempt);
+      found = await askLayers(cell, [...wantKinds], lighting);
+    }
+    await pause(PAUSE_MS);
+    if (!found.ok && /timed out|answered 50[234]/i.test(found.error) && depth < 2) {
+      // The same question keeps timing out: ask a quarter of it, four times.
+      console.warn(`  ! cell ${cell.south.toFixed(4)},${cell.west.toFixed(4)} ${label} keeps timing out — asking for its quarters`);
+      const midLat = (cell.south + cell.north) / 2;
+      const midLng = (cell.west + cell.east) / 2;
+      const quarters: BBox[] = [
+        { south: cell.south, west: cell.west, north: midLat, east: midLng },
+        { south: cell.south, west: midLng, north: midLat, east: cell.east },
+        { south: midLat, west: cell.west, north: cell.north, east: midLng },
+        { south: midLat, west: midLng, north: cell.north, east: cell.east },
+      ];
+      const pieces: LayerData[] = [];
+      for (const quarter of quarters) {
+        const piece = await layersFor(quarter, lighting ? [] : [...wantKinds], depth + 1, lighting ? "lighting" : "places");
+        if (!piece.ok) return piece;
+        pieces.push(piece.data);
+      }
+      found = {
+        ok: true,
+        data: {
+          spots: pieces.flatMap((piece) => piece.spots),
+          lamps: pieces.flatMap((piece) => piece.lamps),
+          litWays: pieces.flatMap((piece) => piece.litWays),
+          truncated: pieces.some((piece) => piece.truncated),
+        },
+      };
+    }
+    if (!found.ok) return found;
+    parts.push(found.data);
+  }
+  const merged: LayerReply = {
+    ok: true,
+    data: {
+      spots: parts.flatMap((part) => part.spots),
+      lamps: parts.flatMap((part) => part.lamps),
+      litWays: parts.flatMap((part) => part.litWays),
+      truncated: parts.some((part) => part.truncated),
+    },
+  };
+  return remember(cellKey, merged);
+}
+
 async function recordLayers(paths: LatLng[][]): Promise<LayerData> {
   const all = paths.flat();
   const south = Math.min(...all.map((p) => p.lat)) - 0.004;
@@ -278,17 +387,7 @@ async function recordLayers(paths: LatLng[][]): Promise<LayerData> {
       const middle = { lat: (cell.south + cell.north) / 2, lng: (cell.west + cell.east) / 2 };
       if (!paths.some((path) => distanceToPathM(middle, path) <= CORRIDOR_M + 900)) continue;
 
-      const cellKey = `cell|${cell.south.toFixed(4)},${cell.west.toFixed(4)}`;
-      let found = cache[cellKey] as Awaited<ReturnType<typeof fetchLayers>> | undefined;
-      if (!found) {
-        found = await fetchLayers(cell, kinds, true, { base: OVERPASS });
-        for (let attempt = 2; !found.ok && attempt <= READ_TRIES; attempt++) {
-          await pause(/rate limit|could not reach/i.test(found.error) ? RATE_LIMIT_REST_MS : PAUSE_MS * 6 * attempt);
-          found = await fetchLayers(cell, kinds, true, { base: OVERPASS });
-        }
-        await pause(PAUSE_MS);
-        if (found.ok) remember(cellKey, found);
-      }
+      const found = await layersFor(cell, kinds);
       if (!found.ok) throw new Error(`layers ${cell.south.toFixed(3)},${cell.west.toFixed(3)}: ${found.error}`);
       if (found.data.truncated) console.warn(`  ! cell ${cell.south.toFixed(3)},${cell.west.toFixed(3)} hit a cap — some of it is missing`);
 

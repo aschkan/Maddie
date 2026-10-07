@@ -103,6 +103,7 @@ Reports and police figures are **never** part of the route reading. Reports are 
 
 ### 4.1 Places to go: the pink heart (refined)
 
+- **A dot when zoomed out, a heart when zoomed in.** Below zoom 15 a place is a 3 px pink dot: a city centre has hundreds of cafés and stations, and at the zoom that fits a 3 km walk on a phone, hundreds of hearts become one pink mass on top of the route. The colour and meaning stay the same; the shape arrives when there is room to read it.
 - **One heart for every kind of place.** Station, hospital, police station, late shop, bar, pharmacy and the rest all share the same pink heart, 24 × 22 px, with a 1.6 px outline in the basemap's colour so it stands off both tones.
 - **The kind is hidden until asked for**, as the supervisor proposed: *"In the beginning my default view is just this pink safe space thing … if you really want to see … you can hover over a safe space and suddenly you see the exact icons."* The glyph (🚉 🏥 🛡️ 🛒 ☕ …) appears in a small tag above the heart **on hover**, **from zoom 17 in**, and in the **popup**.
 - **Popup, first line:** "Place to go · Train or metro", then the name, then opening hours *as mapped* (only `24/7` is interpreted, because half-reading opening hours produces a confident "open now" for a shop that has closed).
@@ -165,7 +166,7 @@ Basemap filters (one tile host, filtered in CSS):
 | **Your trip** | — | A (ring) · B (pin) · ★ Preferred pill · another way round (faded line) | why A and B have no colour; tap a faded line to compare |
 | **How the route reads** | — | Favourable · Mixed · Look closer · Not enough map data, or still reading (dashed). Each has a one-line explanation | what is counted, the thresholds (70+, 45–69, under 45), that it is a reading of the map and not a promise, that reports and police figures are not in it. Link: *Why this route? →* |
 | **Light** | on/off | strong glow (mostly lit) · faint glow (partly lit) · no glow (unlit, or not mapped) · a lit street · street lamps | `lit=yes`, why an unmarked street is not necessarily dark, how the glow's strength is set |
-| **Places to go** | on/off | a place to go (heart), kinds on hover or close zoom | what counts as a place, that it is not a guarantee of help. Link: *Choose which places count →* |
+| **Places to go** | on/off | a place to go (heart), kinds on hover or close zoom · the same, zoomed out (dot) | what counts as a place, that it is not a guarantee of help. Link: *Choose which places count →* |
 | **Reports** | on/off | last 3 months · within the last year · older than a year | entered by people, never scored, an empty map ≠ nothing happened. Link: *Filter or add a report →* |
 | **Police figures** | on/off (off) | fewer · around the middle · more · most recorded offences (four hatch densities) | CBS, per neighbourhood per month, never in the reading; more recorded offences does not make a street worse to walk |
 

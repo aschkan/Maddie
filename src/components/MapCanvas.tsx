@@ -64,6 +64,17 @@ const TILE_URL = endpoint("tile");
 /** From this zoom the hearts show what kind of place they are. */
 export const CLOSE_ZOOM = 17;
 
+/**
+ * Below this zoom a place to go is a small pink DOT, not a heart.
+ *
+ * A city centre has hundreds of cafés, stations and shops; at a zoom that fits
+ * a 3 km walk on a phone, hundreds of 24 px hearts become one pink mass on top
+ * of the route — the one thing the screen exists to show. The dot keeps the
+ * colour and the meaning ("a place to go"); the shape arrives when there is
+ * room to read it.
+ */
+export const HEART_ZOOM = 15;
+
 
 /**
  * A — a hollow ring. It marks where you are, which you already know, so it is
@@ -283,6 +294,13 @@ export interface MapCanvasProps {
   tone: Tone;
 }
 
+/** The map's zoom, as state — the places layer draws differently by it. */
+function TrackZoom({ onZoom }: { onZoom: (zoom: number) => void }) {
+  const map = useMapEvents({ zoomend: () => onZoom(map.getZoom()) });
+  useEffect(() => { onZoom(map.getZoom()); }, [map, onZoom]);
+  return null;
+}
+
 /** Turns a click anywhere on the map into a point. */
 function ClickToPick({ onPick }: { onPick: ((point: LatLng) => void) | null }) {
   useMapEvents({
@@ -414,6 +432,7 @@ export default function MapCanvas({
   onPick, onMoveStart, onMoveEnd, movableEnds, onTileError, onView, tone,
 }: MapCanvasProps) {
   const [map, setMap] = useState<L.Map | null>(null);
+  const [zoom, setZoom] = useState(14);
   const [fitToken, setFitToken] = useState(0);
   const refit = useCallback(() => setFitToken((n) => n + 1), []);
 
@@ -486,6 +505,7 @@ export default function MapCanvas({
       <ClickToPick onPick={reportMode ? onReport : onPick} />
       <KeepSized />
       <WatchView onView={onView} />
+      <TrackZoom onZoom={setZoom} />
       <FitToRoute routes={routes} token={fitToken} sheet={sheetSnap} />
 
       {/* ── police figures: hatched areas, under everything ────────────────
@@ -518,14 +538,22 @@ export default function MapCanvas({
         <Polyline
           key={way.id}
           positions={way.path.map((p) => [p.lat, p.lng])}
-          pathOptions={{ color: light, weight: tone === "night" ? 3 : 2.5, opacity: tone === "night" ? 0.7 : 0.6, interactive: false }}
+          // Thin and faint when zoomed out: a city's worth of lit streets at
+          // full weight is a yellow mass over the route, and the glow on the
+          // route already says which stretches of IT are lit.
+          pathOptions={{
+            color: light,
+            weight: zoom < HEART_ZOOM ? 1.2 : tone === "night" ? 3 : 2.5,
+            opacity: zoom < HEART_ZOOM ? 0.35 : tone === "night" ? 0.7 : 0.6,
+            interactive: false,
+          }}
         />
       ))}
       {showLighting && layers.lamps.map((lamp) => (
         <CircleMarker
           key={lamp.id}
           center={[lamp.point.lat, lamp.point.lng]}
-          radius={tone === "night" ? 2.4 : 2}
+          radius={zoom < HEART_ZOOM ? 1.4 : tone === "night" ? 2.4 : 2}
           pathOptions={{ color: light, fillColor: light, fillOpacity: 0.95, weight: 0, interactive: false }}
         />
       ))}
@@ -632,7 +660,24 @@ export default function MapCanvas({
       )}
 
       {/* ── places to go ─────────────────────────────────────────────────── */}
-      {layers.spots.map((spot) => (
+      {zoom < HEART_ZOOM && layers.spots.map((spot) => (
+        <CircleMarker
+          key={`dot-${spot.id}`}
+          center={[spot.point.lat, spot.point.lng]}
+          radius={3}
+          pathOptions={{
+            color: tone === "night" ? "#0b0d12" : "#ffffff", weight: 1,
+            fillColor: pick(PLACE, tone), fillOpacity: 0.95,
+          }}
+        >
+          <Popup>
+            <span className="pop-kind kind-place">Place to go · {spot.label}</span>
+            <br />
+            <strong>{spot.name ?? spot.label}</strong>
+          </Popup>
+        </CircleMarker>
+      ))}
+      {zoom >= HEART_ZOOM && layers.spots.map((spot) => (
         <Marker
           key={spot.id}
           position={[spot.point.lat, spot.point.lng]}
