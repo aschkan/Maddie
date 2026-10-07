@@ -83,15 +83,16 @@ test("a route still being read counts as no opinion, not as a zero", () => {
   assert.equal(result.preferred, null);
 });
 
-test("whatever is said about a preferred route, it is not called safe", () => {
+test("whatever is said about a preferred route, the words safe and danger never appear", () => {
   // The word on the badge and in this sentence is the whole claim. "Safe" is a
-  // promise nothing in this app can keep.
+  // promise nothing in this app can keep — and "Preferred, not safe", the
+  // first version, still put the word on the screen for a skimming reader.
   const result = compareRoutes(
     [route(1000, 700), route(1200, 850)],
     [scored(40), scored(85)],
   );
-  assert.doesNotMatch(result.reason, /\bsafe\b(?! —)/i);
-  assert.match(result.reason, /not safe/i);
+  assert.doesNotMatch(result.reason, /safe|danger/i);
+  assert.match(result.reason, /not a guarantee/i);
 });
 
 test("no routes is an empty answer rather than an exception", () => {

@@ -21,9 +21,13 @@
   --line: #dde1ea;
   --text: #14171e;
   --muted: #5c6575;
-  --accent: #5b3df5;
+  /* The UI accent is the trip's INK, not a hue. Purple used to be the accent
+     AND the destination AND "still loading" AND a crime report; every hue on
+     this page now belongs to exactly one kind of evidence on the map (see
+     `src/lib/palette.ts`), so the chrome is black, white and grey. */
+  --accent: #111827;
   --accent-text: #ffffff;
-  --accent-soft: rgba(91, 61, 245, .12);
+  --accent-soft: rgba(17, 24, 39, .07);
   --button: #eef0f6;
   --button-hover: #e3e7f0;
   --bad: #d13b4d;
@@ -34,19 +38,19 @@
   --shadow-1: 0 1px 2px rgba(18, 24, 40, .06), 0 2px 8px rgba(18, 24, 40, .06);
   --shadow-2: 0 2px 6px rgba(18, 24, 40, .08), 0 12px 32px rgba(18, 24, 40, .16);
 
-  /* The three the brief names. */
-  --crime: #9333ea;
-  --safe: #ff5fa2;
-  --light: #d99b00;
-
-  /* The police-figures layer. Deliberately NOT in the crime purple: an
-     official per-neighbourhood count and a report somebody typed are
-     different objects, and sharing a colour is how they get read as one. */
-  --police: #4a6fa5;
-  --band-low: #3f7f6f;
-  --band-medium: #7d7a3a;
-  --band-high: #a2603a;
-  --band-highest: #9c3f57;
+  /* The map's meanings, one colour each. The SAME values as `palette.ts`
+     (`day` there is this light theme, `night` is the dark one), and
+     `test/palette.test.ts` checks the two files agree. No purple, no red. */
+  --route-good: #0f8a7a;
+  --route-fair: #e07a1f;
+  --route-poor: #9c3d17;
+  --route-unknown: #8a94a6;
+  --light: #e8b100;
+  --place: #ff4f99;
+  --report: #2563d8;
+  --police: #475569;
+  --trip-start: #6b7280;
+  --trip-end: #111827;
 
   /* One radius scale, so nothing is rounded by accident. */
   --r-sm: 10px;
@@ -72,9 +76,9 @@
   --line: #272d3a;
   --text: #e8eaf0;
   --muted: #99a2b2;
-  --accent: #8b6dff;
+  --accent: #f1f5f9;
   --accent-text: #0b0d13;
-  --accent-soft: rgba(139, 109, 255, .18);
+  --accent-soft: rgba(241, 245, 249, .1);
   --button: #1c222e;
   --button-hover: #252c3b;
   --bad: #ef5b6b;
@@ -85,15 +89,16 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .3);
   --shadow-2: 0 2px 6px rgba(0, 0, 0, .5), 0 14px 36px rgba(0, 0, 0, .55);
 
-  --crime: #a855f7;
-  --safe: #ff5fa2;
-  --light: #f5c518;
-
-  --police: #7ba3d9;
-  --band-low: #4f9c88;
-  --band-medium: #a39a45;
-  --band-high: #c47a48;
-  --band-highest: #c25470;
+  --route-good: #2dd4bf;
+  --route-fair: #fb923c;
+  --route-poor: #e4572e;
+  --route-unknown: #8a94a6;
+  --light: #ffe27a;
+  --place: #ff6fae;
+  --report: #76a9ff;
+  --police: #cbd5e1;
+  --trip-start: #9ca3af;
+  --trip-end: #f8fafc;
 }
 
 * { box-sizing: border-box; }
@@ -197,12 +202,17 @@ a { color: var(--accent); }
   text-transform: uppercase; letter-spacing: .05em;
 }
 
+/* A and B — the trip's own ink, never an evidence colour. A is a hollow ring
+   (where you are), B a solid disc (where you are going): different by fill
+   and weight, so they are told apart without a hue between them. */
 .badge {
   display: inline-grid; place-items: center;
-  width: 20px; height: 20px; border-radius: 50%;
-  color: #fff; font-weight: 700; font-size: .72rem;
+  width: 22px; height: 22px; border-radius: 50%;
+  font-weight: 750; font-size: .72rem;
   flex: none;
 }
+.badge-a { background: var(--panel); color: var(--trip-start); box-shadow: inset 0 0 0 2.5px var(--trip-start); }
+.badge-b { background: var(--trip-end); color: var(--panel); }
 
 .input-row { display: flex; gap: .4rem; align-items: stretch; }
 
@@ -300,7 +310,7 @@ button.link {
   max-width: min(92vw, 30rem);
   margin: 0; padding: .55rem .8rem;
   font-size: .84rem; line-height: 1.4; text-align: center;
-  color: #fff; background: var(--crime);
+  color: #fff; background: var(--report);
   border-radius: 999px; box-shadow: var(--shadow-2);
 }
 
@@ -512,73 +522,47 @@ input[type="range"]::-moz-range-thumb {
 .tag.preferred { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .tag.fastest { color: var(--muted); border-color: var(--line); }
 
-/* ── the filter panel ───────────────────────────────────────────────────── */
+/* ── panel cards (Layers, Reports) ─────────────────────────────────────── */
 
-.filters { display: flex; flex-direction: column; gap: .55rem; }
-
-.filter {
-  border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--r-md);
-  background: var(--raised);
-  padding: 0 .75rem;
+.layers, .reports { display: flex; flex-direction: column; gap: .6rem; }
+.card {
+  display: flex; flex-direction: column; gap: .2rem;
+  padding: .55rem .75rem .7rem;
+  background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-md);
 }
-.filter > summary {
-  display: flex; align-items: center; gap: .5rem;
-  min-height: var(--tap);
-  cursor: pointer; font-size: .92rem; font-weight: 620; list-style: none;
-}
-.filter > summary::-webkit-details-marker { display: none; }
-.filter > summary::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: .82rem; }
-.filter[open] > summary::after { content: "▴"; }
-.filter[open] { padding-bottom: .6rem; }
-.filter .count {
-  margin-left: auto; padding: .05rem .45rem;
+.card h3 { margin: 0; font-size: .95rem; font-weight: 650; display: flex; align-items: center; gap: .45rem; }
+.card-head { display: flex; align-items: center; gap: .5rem; min-height: var(--tap); }
+.card-head h3 { flex: 1; }
+.count {
+  padding: .05rem .45rem;
   font-size: .74rem; color: var(--muted); font-weight: 600;
   background: var(--panel); border-radius: 999px;
 }
-.filter .count + ::after { margin-left: .4rem; }
+.count:empty { display: none; }
 
-.swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
-.filter.crime { border-left-color: var(--crime); }
-.filter.crime .swatch { background: var(--crime); }
-.filter.safe { border-left-color: var(--safe); }
-.filter.safe .swatch { background: var(--safe); border-radius: 50%; }
-.filter.light { border-left-color: var(--light); }
-.filter.light .swatch { background: var(--light); }
-.filter.police { border-left-color: var(--police); }
-/* A square, where crime is a square and safe spots are a circle: the shape is
-   the second signal, for anyone reading these side by side in the dark. */
-.filter.police .swatch { background: var(--police); border-radius: 2px; }
-
-/* The band legend. Wraps at phone width rather than scrolling sideways — no
-   horizontal scroll anywhere on this page. */
+/* The police bands, as the hatch the map draws them with: denser is more
+   recorded offences. Texture, not hue — see `palette.ts`. */
 .bands { display: flex; flex-wrap: wrap; gap: .3rem; margin: .1rem 0 .55rem; }
 .band {
-  font-size: .72rem; padding: .2rem .45rem; border-radius: 999px;
-  color: #fff; line-height: 1.3;
+  font-size: .72rem; padding: .2rem .5rem; border-radius: 6px; line-height: 1.3;
+  color: var(--text); border: 1px solid color-mix(in srgb, var(--police) 60%, transparent);
+  background-color: var(--panel);
 }
-.band-low { background: var(--band-low); }
-.band-medium { background: var(--band-medium); }
-.band-high { background: var(--band-high); }
-.band-highest { background: var(--band-highest); }
+.band-low { background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--police) 45%, transparent) 0 1.2px, transparent 1.2px 11px); }
+.band-medium { background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--police) 45%, transparent) 0 1.2px, transparent 1.2px 8px); }
+.band-high { background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--police) 50%, transparent) 0 1.2px, transparent 1.2px 5.5px); }
+.band-highest { background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--police) 55%, transparent) 0 1.3px, transparent 1.3px 3.8px); }
 
-/* The badge on the map itself. An oblong with a number, never a dot — see the
-   note in MapCanvas about why it must not look like a report. */
+/* The badge on the map itself: a label in the police ink, carrying a number —
+   never a dot, so it cannot be read as a report. */
 .cbs-badge {
   display: flex; align-items: center; justify-content: center;
   width: 44px; height: 24px;
-  background: var(--band); border: 1.5px solid rgba(0, 0, 0, .55);
   border-radius: 6px; box-shadow: var(--shadow-1);
 }
-.cbs-badge-n {
-  font: 700 12px/1 system-ui, sans-serif; color: #fff;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, .5);
-}
-/* Same job as `.example-tag`: the first line of the popup says what kind of
-   thing this is, before the number is read. */
-.cbs-tag {
-  display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .03em;
-  color: #fff; background: var(--police); padding: .1rem .35rem; border-radius: 4px;
-}
+.cbs-badge.tone-day { background: #334155; color: #fff; border: 1.5px solid #fff; }
+.cbs-badge.tone-night { background: #e2e8f0; color: #0b0d12; border: 1.5px solid #0b0d12; }
+.cbs-badge-n { font: 700 12px/1 system-ui, sans-serif; }
 .cbs-row { font-size: .82rem; }
 
 .filter-note { margin: .4rem 0 .55rem; font-size: .8rem; color: var(--muted); line-height: 1.5; }
@@ -656,14 +640,10 @@ input[type="range"]::-moz-range-thumb {
 
 /* Verdict colours, one pair per theme: the light-on-dark green that reads
    nicely at night is invisible on white. */
-.v-good { --verdict: #0f8a4d; }
-.v-fair { --verdict: #9a7300; }
-.v-poor { --verdict: #c0491f; }
-.v-unknown { --verdict: #64708a; }
-[data-theme="dark"] .v-good { --verdict: #6ee7a8; }
-[data-theme="dark"] .v-fair { --verdict: #e0c04c; }
-[data-theme="dark"] .v-poor { --verdict: #ef8f5b; }
-[data-theme="dark"] .v-unknown { --verdict: #7c8798; }
+.v-good { --verdict: var(--route-good); }
+.v-fair { --verdict: var(--route-fair); }
+.v-poor { --verdict: var(--route-poor); }
+.v-unknown { --verdict: var(--route-unknown); }
 
 .verdict { border-left-color: var(--verdict); }
 .verdict .v-label { color: var(--verdict); }
@@ -678,16 +658,16 @@ input[type="range"]::-moz-range-thumb {
   font-size: .8rem;
   line-height: 1.5;
   color: var(--text);
-  border: 1px dashed var(--crime);
+  border: 1px dashed var(--report);
   border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--crime) 10%, transparent);
+  background: color-mix(in srgb, var(--report) 10%, transparent);
 }
 .example-banner button {
   display: flex; width: 100%;
   margin-top: .5rem;
   font-size: .82rem;
-  border-color: var(--crime);
-  color: var(--crime);
+  border-color: var(--report);
+  color: var(--report);
   background: transparent;
 }
 .example-tag {
@@ -695,18 +675,24 @@ input[type="range"]::-moz-range-thumb {
   font-size: .68rem;
   font-weight: 700;
   letter-spacing: .04em;
-  color: var(--crime);
+  color: var(--report);
 }
 
 /* ── layer markers ──────────────────────────────────────────────────────── */
 
-.spot-pin { position: relative; width: 26px; height: 24px; }
+/* One heart for every kind of place; the kind is shown only when asked for —
+   on hover, or zoomed in close (`.zoom-close`, set by MapCanvas). Twelve
+   different icons at once is a map nobody can read. */
+.spot-pin { position: relative; width: 24px; height: 22px; }
 .spot-glyph {
-  position: absolute; inset: 0 0 auto 0; top: 2px;
-  display: block; text-align: center; font-size: 11px; line-height: 13px;
-  /* The glyph sits on a pink heart in both themes, so it is not themed. */
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45));
+  position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -2px);
+  display: none; padding: 1px 4px;
+  font-size: 13px; line-height: 16px; white-space: nowrap;
+  background: var(--panel); border: 1px solid var(--place); border-radius: 6px;
+  box-shadow: var(--shadow-1);
 }
+.spot-pin:hover .spot-glyph,
+.leaflet-container.zoom-close .spot-glyph { display: block; }
 
 /* ── Leaflet's own chrome, matched to the page ──────────────────────────────
    These selectors are deliberately more specific than Leaflet's: its stylesheet
@@ -736,13 +722,28 @@ input[type="range"]::-moz-range-thumb {
 
 .leaflet-bottom { bottom: var(--peek); }
 
-/* Night mode inverts the tiles rather than loading a dark basemap from a second
-   host. One provider is one thing that can be unreachable — and a blank
-   background is the worst possible failure on a page about walking after dark.
-   The double hue-rotate puts the greens and blues back the right way round. */
-.tiles-night {
-  filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.75);
+/* The basemap is a CANVAS, not a map with colours of its own: OpenStreetMap's
+   tiles with the colour taken out, so the only colours on the screen are the
+   ones that mean something (`palette.ts`). Parks are not green here — on this
+   map a green-ish teal is a verdict.
+
+   By day: light grey, low contrast, the streets just legible. At night — the
+   theme is dark, or the hour you are planning for is after dark — the same
+   tiles inverted to near-black, so the lit streets and the glow around the lit
+   stretches of your route are what you see first. That is the lighting
+   visualisation: the map goes dark and the light shows.
+
+   Still ONE tile host, filtered in CSS. A second provider is a second thing
+   that can be unreachable, and a blank background is the worst possible
+   failure on a page about walking after dark. */
+.tiles-day {
+  filter: grayscale(1) contrast(.82) brightness(1.07);
 }
+.tiles-night {
+  filter: grayscale(1) invert(1) brightness(.55) contrast(1.15);
+}
+.map .leaflet-container.tone-day { background: #e9ebee; }
+.map .leaflet-container.tone-night { background: #0b0d12; }
 
 /* ────────────────────────────────────────────────────────────────────────────
    Handing the walk to a navigation app
@@ -773,6 +774,313 @@ input[type="range"]::-moz-range-thumb {
 }
 .hand-off:hover { filter: brightness(1.08); }
 .hand-off span { margin-right: .4rem; font-size: .9em; }
+
+
+/* ────────────────────────────────────────────────────────────────────────────
+   The redesign: legend, route labels, recommendation, comparison, scenario.
+   `docs/Maddie-Design-System.md` is the spec. Phone width first, as ever.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+button.small { min-height: 36px; padding: .25rem .7rem; font-size: .82rem; }
+/* Still 44px tall to the thumb: the padding is the target, the text is quiet. */
+.link-quiet {
+  align-self: flex-start;
+  min-height: var(--tap); padding: 0 .1rem;
+  background: none; border: none; color: var(--text);
+  font-size: .86rem; font-weight: 600; text-decoration: underline; text-underline-offset: 3px;
+}
+.link-quiet:hover:not(:disabled) { background: none; }
+
+textarea { width: 100%; resize: vertical; min-height: 4.2rem; font-size: 16px; }
+
+.panel-head { display: flex; flex-direction: column; gap: .15rem; }
+.panel-head h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+
+/* A small swatch in a heading: the same colour AND shape as on the map. */
+.sw { display: inline-block; flex: none; width: 14px; height: 14px; }
+.sw-light { border-radius: 50%; background: var(--light); box-shadow: 0 0 0 4px color-mix(in srgb, var(--light) 35%, transparent); }
+.sw-place { background: var(--place); clip-path: path("M7 13S0 8.6 0 4.4A3.9 3.9 0 0 1 7 2.4 3.9 3.9 0 0 1 14 4.4C14 8.6 7 13 7 13z"); }
+.sw-report { background: var(--report); border-radius: 4px 4px 4px 0; }
+.sw-police {
+  border: 1px solid var(--police); border-radius: 2px;
+  background: repeating-linear-gradient(45deg, var(--police) 0 1.2px, transparent 1.2px 4px);
+}
+
+/* A switch: a checkbox drawn as a track. The whole 44px label is the target. */
+.switch {
+  position: relative; flex: none;
+  display: inline-grid; place-items: center;
+  width: 52px; min-height: var(--tap); cursor: pointer;
+}
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.switch span {
+  width: 40px; height: 24px; border-radius: 999px;
+  background: var(--line); position: relative; transition: background .15s ease;
+}
+.switch span::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--panel); box-shadow: var(--shadow-1); transition: transform .15s ease;
+}
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(16px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The "i" — round, the same everywhere, always a disclosure and never a link. */
+.lg-info {
+  display: inline-grid; place-items: center; flex: none;
+  width: 22px; height: 22px; min-height: 0; padding: 0;
+  border-radius: 50%; border: 1.5px solid var(--muted);
+  background: none; color: var(--muted);
+  font: italic 700 .78rem/1 Georgia, serif;
+}
+button.lg-info { width: var(--tap); height: var(--tap); border: none; position: relative; }
+button.lg-info::before {
+  content: ""; position: absolute; inset: 11px; border-radius: 50%; border: 1.5px solid var(--muted);
+}
+button.lg-info[aria-expanded="true"] { color: var(--text); }
+
+.disclose {
+  align-self: flex-start; gap: .5rem;
+  background: none; border: none; padding: 0 .1rem; font-size: .86rem; color: var(--text);
+}
+.disclose:hover:not(:disabled) { background: none; }
+.how {
+  display: flex; flex-direction: column; gap: .45rem;
+  padding: .6rem .7rem; font-size: .84rem; line-height: 1.55;
+  background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.how p { margin: 0; }
+
+/* ── the legend ─────────────────────────────────────────────────────────────
+   On the map, bottom-left, mirroring the zoom cluster bottom-right. It rides
+   above the sheet like the map's buttons do, and goes away at the top stop. */
+
+.legend-toggle, .legend {
+  position: absolute;
+  left: calc(env(safe-area-inset-left) + .6rem);
+  bottom: calc(var(--peek) + .7rem);
+  z-index: 1000;
+  transition: bottom .22s cubic-bezier(.32, .72, 0, 1);
+}
+.app[data-snap="half"] :is(.legend-toggle, .legend) { bottom: calc(var(--snap-half) * 1dvh + .7rem); }
+.app[data-snap="full"] :is(.legend-toggle, .legend) { display: none; }
+/* While a report is being placed, the map is the thing being tapped. */
+.map.reporting :is(.legend-toggle, .legend) { display: none; }
+
+.legend-toggle {
+  min-height: var(--tap); padding: 0 .9rem 0 .7rem; gap: .5rem;
+  border-radius: 999px; background: var(--panel); box-shadow: var(--shadow-2);
+  font-weight: 650; font-size: .86rem;
+}
+.legend-dots { display: inline-flex; gap: 3px; }
+.legend-dots i { display: block; width: 8px; height: 8px; border-radius: 50%; }
+
+.legend {
+  width: min(calc(100vw - 1.2rem - env(safe-area-inset-left) - env(safe-area-inset-right)), 22rem);
+  max-height: calc(100dvh - var(--peek) - 11rem);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: .35rem .7rem .6rem;
+  background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-2);
+  z-index: 1150;            /* over the trip card, which it may reach on a short phone */
+}
+/* The legend is the key to the MAP, so it takes the map's tone, not the
+   panel's theme: at 22:00 the map is dark, and a white legend would draw the
+   night swatches — white B, pale glow — on white. */
+:is(.legend, .legend-toggle).tone-night {
+  --panel: #141821; --raised: #1b2029; --line: #272d3a;
+  --text: #e8eaf0; --muted: #99a2b2; --accent: #f1f5f9; --accent-text: #0b0d13;
+  color: var(--text);
+}
+:is(.legend, .legend-toggle).tone-day {
+  --panel: #ffffff; --raised: #f6f7fa; --line: #dde1ea;
+  --text: #14171e; --muted: #5c6575; --accent: #111827; --accent-text: #ffffff;
+  color: var(--text);
+}
+.app[data-snap="half"] .legend { max-height: calc(100dvh - var(--snap-half) * 1dvh - 10rem); }
+.legend-top { display: flex; align-items: center; gap: .4rem; }
+.legend-top h2 { flex: 1; margin: 0; font-size: .95rem; }
+.lg-sky { margin: 0 0 .3rem; font-size: .78rem; color: var(--muted); line-height: 1.45; }
+
+.lg-group { border-top: 1px solid var(--line); padding-top: .15rem; }
+.lg-group.is-off ul { opacity: .38; }
+.lg-head { display: flex; align-items: center; gap: .1rem; }
+.lg-head h3 {
+  flex: 1; margin: 0; font-size: .74rem; font-weight: 750; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.lg-group ul { list-style: none; margin: 0 0 .3rem; padding: 0; display: flex; flex-direction: column; gap: .2rem; }
+.lg-row { display: grid; grid-template-columns: 44px 1fr; align-items: center; gap: .5rem; font-size: .84rem; line-height: 1.35; }
+.lg-text small { display: block; color: var(--muted); font-size: .74rem; line-height: 1.4; }
+.lg-swatch { display: block; }
+.lg-explain {
+  margin: 0 0 .4rem; padding: .5rem .6rem;
+  font-size: .8rem; line-height: 1.5; color: var(--text);
+  background: var(--raised); border-radius: var(--r-sm);
+}
+.lg-explain p { margin: 0 0 .35rem; }
+.lg-explain code { font-size: .92em; }
+.lg-pill {
+  justify-self: start; white-space: nowrap;
+  font-size: .62rem; font-weight: 750; padding: .15rem .35rem; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text);
+}
+
+/* ── the label ON each route line ───────────────────────────────────────────
+   "★ Preferred · 21 min" sits on the line itself, so the recommendation is on
+   the map and not only in the panel. Leaflet tooltips, restyled. */
+.leaflet-tooltip.route-tag {
+  padding: .15rem .45rem; border-radius: 999px;
+  font: 650 .72rem/1.3 system-ui, sans-serif; white-space: nowrap;
+  background: var(--panel); color: var(--muted);
+  border: 1px solid var(--line); box-shadow: var(--shadow-1);
+}
+.leaflet-tooltip.route-tag::before { display: none; }
+.leaflet-tooltip.route-tag.is-selected { color: var(--text); font-weight: 750; }
+.leaflet-tooltip.route-tag.is-preferred {
+  background: var(--accent); color: var(--accent-text); border-color: var(--accent);
+  font-size: .78rem; padding: .22rem .6rem;
+}
+.leaflet-tooltip.route-tag.tone-night:not(.is-preferred) { background: #141821; color: #cbd5e1; border-color: #272d3a; }
+.leaflet-tooltip.route-tag.tone-night.is-preferred { background: #f8fafc; color: #0b0d12; border-color: #f8fafc; }
+
+/* ── the route list ─────────────────────────────────────────────────────── */
+.choice { position: relative; }
+.choice.preferred { border-width: 2px; border-color: var(--accent); padding-top: 1.55rem; }
+.choice-ribbon {
+  position: absolute; top: -1px; left: -1px;
+  padding: .15rem .6rem; border-radius: var(--r-md) 0 var(--r-sm) 0;
+  font-size: .72rem; font-weight: 750; letter-spacing: .02em;
+  background: var(--accent); color: var(--accent-text);
+}
+.choice-figures small { color: var(--muted); font-weight: 400; }
+.choice-verdict { display: flex; }
+.chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .1rem .5rem; border-radius: 999px;
+  font-size: .76rem; font-weight: 650;
+  color: var(--verdict); border: 1.5px solid var(--verdict);
+  background: color-mix(in srgb, var(--verdict) 10%, transparent);
+}
+.chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--verdict); }
+.chip.v-unknown::before { background: none; border: 1.5px dashed var(--verdict); width: 6px; height: 6px; }
+.choice-beside {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .7rem;
+  font-size: .76rem; color: var(--muted);
+}
+.beside-report::before, .beside-place::before {
+  content: ""; display: inline-block; width: 9px; height: 9px; margin-right: .3rem; vertical-align: -1px;
+}
+.beside-report::before { background: var(--report); border-radius: 3px 3px 3px 0; }
+.beside-place::before { background: var(--place); border-radius: 50% 50% 50% 0; transform: rotate(-45deg); }
+.choice-why { margin: .3rem .2rem 0; font-size: .8rem; color: var(--muted); line-height: 1.45; }
+.no-pick {
+  margin: 0; padding: .55rem .7rem; font-size: .84rem; line-height: 1.45;
+  border: 1px dashed var(--line); border-radius: var(--r-md);
+}
+
+/* ── the Safety tab ─────────────────────────────────────────────────────── */
+.recommend {
+  margin: 0; padding: .65rem .75rem; font-size: .9rem; line-height: 1.5;
+  border-radius: var(--r-md); background: var(--accent-soft); border: 1px solid var(--line);
+}
+.recommend.none { background: none; border-style: dashed; }
+.verdict { flex-wrap: wrap; }
+.v-explain { flex-basis: 100%; font-size: .8rem; color: var(--muted); line-height: 1.45; }
+.strip-part.is-unknown {
+  background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--panel) 3px 6px);
+}
+
+.compare h3 { margin: .2rem 0 .3rem; font-size: .74rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+/* The one place a table could be wider than a phone: it scrolls INSIDE its
+   own box, the page never does. Three routes fit at 360px as it is. */
+.compare-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+.compare-table { width: 100%; border-collapse: collapse; font-size: .8rem; table-layout: fixed; }
+.compare-table th, .compare-table td {
+  padding: .4rem .3rem; text-align: left; vertical-align: top;
+  border-bottom: 1px solid var(--line); overflow-wrap: anywhere;
+}
+.compare-table thead th { padding: 0; }
+.compare-table tbody th { width: 30%; font-weight: 600; color: var(--text); }
+.compare-table tbody th small { display: block; font-weight: 400; color: var(--muted); font-size: .72rem; }
+.compare-table .is-selected { background: var(--accent-soft); }
+.compare-table tr.is-off td { color: var(--muted); text-decoration: line-through; }
+.compare-table tr.row-rule th {
+  padding-top: .7rem; font-size: .7rem; font-weight: 750; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); border-bottom-style: dashed;
+}
+.th-button {
+  width: 100%; min-height: var(--tap); padding: .2rem .3rem; justify-content: flex-start;
+  background: none; border: none; border-radius: 0; font-size: .8rem; font-weight: 700;
+}
+.th-button:hover:not(:disabled) { background: var(--raised); }
+
+/* ── the Reports tab ────────────────────────────────────────────────────── */
+.stories { list-style: none; margin: .2rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.story {
+  display: flex; flex-direction: column; gap: .15rem;
+  padding: .5rem .6rem; background: var(--panel);
+  border: 1px solid var(--line); border-left: 3px solid var(--report); border-radius: var(--r-sm);
+  font-size: .84rem; line-height: 1.45;
+}
+.story-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; }
+.story-head small, .story > small { color: var(--muted); font-size: .74rem; }
+.story-note.none { color: var(--muted); font-style: italic; }
+.report-add { margin-top: .4rem; padding-top: .5rem; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: .4rem; }
+
+/* ── the hour, and what it means ────────────────────────────────────────── */
+.when-light { padding: .1rem .5rem; border-radius: 999px; border: 1px solid var(--line); }
+.when-light.sky-night { background: #0b0d12; color: var(--light); border-color: #0b0d12; }
+.when-light.sky-twilight { background: #334155; color: #f1f5f9; border-color: #334155; }
+
+.tab-flag { margin-left: .15rem; font-weight: 750; color: var(--text); }
+
+/* ── popups say what KIND of thing they are, first ──────────────────────── */
+.pop-kind { display: inline-block; font-size: .7rem; font-weight: 750; letter-spacing: .03em; }
+.pop-kind.kind-place { color: var(--place); }
+.pop-kind.kind-report { color: var(--report); }
+.pop-kind.kind-police { color: var(--muted); }
+.pop-note { display: inline-block; margin-top: .2rem; }
+
+/* ── the study scenario ─────────────────────────────────────────────────── */
+.scenario-chip {
+  margin-left: auto; min-height: 36px; padding: .2rem .35rem .2rem .7rem; gap: .2rem;
+  border-radius: 999px; font-size: .78rem; font-weight: 700;
+  background: var(--accent-soft); border: 1px solid var(--line);
+}
+.scenario-chip .lg-info { width: 20px; height: 20px; font-size: .7rem; }
+.scenario-about {
+  margin: 0 .2rem .4rem; padding: .55rem .65rem;
+  font-size: .8rem; line-height: 1.5;
+  background: var(--raised); border-radius: var(--r-md);
+}
+.scenario-about p { margin: 0 0 .4rem; }
+.trip-end.fixed { padding: .2rem .1rem; flex-wrap: wrap; }
+.trip-end.fixed span:not(.badge) { font-weight: 650; }
+.trip-end.fixed small { color: var(--muted); }
+.destinations { display: flex; flex-direction: column; gap: .35rem; }
+.dest {
+  justify-content: flex-start; flex-wrap: wrap; gap: 0 .5rem; text-align: left;
+  padding: .45rem .7rem;
+}
+.dest small { color: var(--muted); font-size: .76rem; }
+.dest.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.empty button { margin-top: .4rem; }
+.empty p { margin: 0; }
+
+/* ── /research ──────────────────────────────────────────────────────────── */
+.research-page {
+  max-width: 46rem; margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 1rem) 1rem calc(env(safe-area-inset-bottom) + 2rem);
+}
+.research-top h1 { margin: .2rem 0; font-size: 1.3rem; }
+html:has(.research-page), html:has(.research-page) body { height: auto; }
 
 /* ────────────────────────────────────────────────────────────────────────────
    From a tablet up: the sheet stops being a sheet and becomes a sidebar. The
@@ -812,6 +1120,15 @@ input[type="range"]::-moz-range-thumb {
   /* No sheet to ride above at this width — the panel is beside the map. */
   .map-tools, .app[data-snap] .map-tools { bottom: calc(env(safe-area-inset-bottom) + 1.6rem); display: flex; }
   .reporting-banner, .app[data-snap] .reporting-banner { bottom: 1.6rem; display: block; }
+
+  /* The legend sits in the map's bottom-left corner, open by default, with
+     room above it for the trip card. */
+  .legend-toggle, .legend, .app[data-snap] :is(.legend-toggle, .legend) {
+    display: flex; bottom: calc(env(safe-area-inset-bottom) + 1.6rem); left: 1rem;
+  }
+  .legend, .app[data-snap] .legend { display: block; max-height: calc(100dvh - 15rem); }
+  .destinations { flex-direction: row; }
+  .dest { flex: 1; flex-direction: column; align-items: flex-start; }
   .leaflet-bottom { bottom: 0; }
 }
 
@@ -850,7 +1167,7 @@ input[type="range"]::-moz-range-thumb {
 .iv-code {
   font-weight: 700; font-variant-numeric: tabular-nums;
   padding: .1rem .4rem; border-radius: 4px;
-  background: var(--crime); color: #fff; font-size: .78rem;
+  background: var(--accent); color: var(--accent-text); font-size: .78rem;
 }
 .iv-who { color: var(--muted); }
 
@@ -859,7 +1176,7 @@ input[type="range"]::-moz-range-thumb {
 .iv-tag {
   margin: .6rem .7rem 0; padding: .3rem .5rem;
   font-size: .72rem; font-weight: 700; letter-spacing: .03em;
-  color: #fff; background: var(--crime); border-radius: 4px;
+  color: var(--accent-text); background: var(--accent); border-radius: 4px;
 }
 
 .iv-demo {

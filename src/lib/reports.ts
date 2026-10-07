@@ -178,3 +178,19 @@ export function saveReports(
 export function newReportId(now: number, random: number): string {
   return `r${now.toString(36)}${Math.floor(random * 1e6).toString(36)}`;
 }
+
+/**
+ * How old a report is, as the three steps the legend shows.
+ *
+ * Recency is drawn as OPACITY: a report from last month is solid, one from
+ * last year is faded, one from before that is faint. The supervisor's point —
+ * "perhaps you don't care about something that happened 10 years ago" — is a
+ * judgement for the person reading the map, so the map shows age rather than
+ * hiding old reports.
+ */
+export function reportAge(at: string, now: number): "recent" | "year" | "older" {
+  const days = (now - Date.parse(at)) / 86_400_000;
+  if (!Number.isFinite(days) || days < 90) return "recent";
+  return days < 365 ? "year" : "older";
+}
+export const AGE_OPACITY = { recent: 1, year: 0.62, older: 0.32 } as const;

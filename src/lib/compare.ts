@@ -91,6 +91,15 @@ export function compareRoutes(
   return {
     preferred: best.index,
     fastest,
-    reason: `Better lit and busier than the alternatives by ${margin} points. Preferred, not safe — this is what the map records, not a guarantee.`,
+    /*
+     * Says what the number IS, not which factor won: with factors switched off
+     * in Layers, "better lit" could be untrue of a route preferred on frontage
+     * alone. The Safety tab's table is where the factors are compared.
+     *
+     * And no "safe", in any construction. "Preferred, not safe" was the first
+     * version; the supervisor's objection is to the word itself on the screen,
+     * because a reader skims past the "not".
+     */
+    reason: `It reads ${margin} points better than the next way round on what the map records here. A suggestion, not a guarantee.`,
   };
 }

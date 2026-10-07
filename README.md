@@ -3,15 +3,23 @@
 Set a start and a destination, compare the ways round, and see what
 OpenStreetMap actually records about each one.
 
-![Leaflet + OpenStreetMap](https://img.shields.io/badge/map-Leaflet%20%2B%20OpenStreetMap-7c5cff)
+![Leaflet + OpenStreetMap](https://img.shields.io/badge/map-Leaflet%20%2B%20OpenStreetMap-0f8a7a)
 
 - **Click the map** to drop **A**, then **B** — or type an address and pick a
   suggestion. Drag either pin to move it and the routes follow.
 - **Compare the alternatives.** Each way round is read from the map and scored;
-  one may be marked **Preferred**. Never "safe" — see below.
-- **Layers**: safe spots (pink hearts), lighting (yellow), and a crime layer
-  whose data is not what you would expect it to be.
-- **Light and night mode**, remembered between visits.
+  one may be marked **★ Preferred** — on the line itself and first in the list.
+  Never "safe" — see below.
+- **Four tabs, one task each**: *Route* (your options and our suggestion),
+  *Safety* (why), *Layers* (what counts for you), *Reports* (yours and other
+  people's, and the police figures).
+- **Everything at once on the map**: the route coloured by how it reads, a glow
+  where it is lit, pink hearts for places to go, blue bubbles for reports, a
+  hatch for police figures — with a legend showing every possible state.
+- **Night is on the map**: plan for 22:00 and the map goes dark and the lit
+  streets glow.
+- **A controlled Utrecht scenario** for the study's interviews:
+  `/?scenario=utrecht`.
 - **Drive, walk or cycle**, with distance and travel time.
 - **No API keys.** Nothing to sign up for, nothing to bill.
 
@@ -141,6 +149,45 @@ app is for is deciding *which way round to go*, and that part travels.
 taking care on, the verdict — those stay here, which is why the button says so
 and why it sits under the read rather than above it. Look first, then walk.
 
+## The design system
+
+**[`docs/Maddie-Design-System.md`](docs/Maddie-Design-System.md) is the spec**
+(also as a PDF beside it): every colour with its hex and its one meaning, every
+shape, the legend, the layout, the tabs, the words, and why each choice was
+made. `src/lib/palette.ts` is its colour table in code, and
+`test/palette.test.ts` holds the rules — no purple, no alarm red, no two
+meanings sharing a colour, the stylesheet's tokens equal to the palette's, and
+no *safe* or *danger* on a participant's screen.
+
+The rules, short: one colour one meaning; colour is spent only on evidence
+about the streets, so your own trip (A, B, the routes you did not pick) is
+black, white and grey; grey and dashed means "not known"; and each factor has
+its own channel — line colour for how a stretch reads, a glow for light,
+opacity for a report's age, a hatch for police figures, shape for what kind of
+marker — so they combine instead of taking turns.
+
+## The study scenario — `/?scenario=utrecht`
+
+One controlled situation for the interviews, the same for every participant:
+start at Utrecht Centraal, choose Biltstraat, Overvecht or Utrecht Science
+Park, walk or cycle, 22:00 to begin with. The routes, the per-point reads
+behind their scores and the places and lighting around them are **recorded**
+(`npm run scenario` → `src/lib/scenario-recording.json`) and replayed, so no
+rate limit or changed tag can make two participants see different streets; the
+score is still computed live from them, so the hour slider and the Layers
+switches work as normal. The 70 reports are generated from a fixed clock by the
+seed's own generator — invented, never sent to the server, labelled in the
+*Study scenario* chip's info. See the header of `src/lib/scenario.ts`.
+
+```bash
+npm run scenario               # record, straight from OSRM and Overpass
+npm run scenario -- --via-server   # through the deployed forwarder instead
+```
+
+Re-record only between rounds of interviews, and commit the file. It refuses
+an empty Overpass answer: every query is in central Utrecht, so empty means a
+mirror that does not hold the Netherlands, never "nothing here".
+
 ## "Preferred", not "safe"
 
 With two or three ways round on screen, each is read from OpenStreetMap and
@@ -161,7 +208,8 @@ OpenStreetMap ones are a single Overpass query, debounced until the map stops
 moving; the police-figures layer is its own pair of requests. All of them are
 asked only at zoom 14 or closer — the area below that is too big to ask about.
 
-**Safe spots — pink hearts.** Taxi ranks, police, hospitals, fire stations, 24/7
+**Places to go — pink hearts.** One heart for every kind; the kind shows on
+hover, from zoom 17, and in the popup. Taxi ranks, police, hospitals, fire stations, 24/7
 gyms, shopping centres, supermarkets, petrol stations, bars and cafés,
 libraries, pharmacies, pedestrianised streets, stations. Somewhere with a door,
 a light and usually a person: places to walk *towards*, not places guaranteed to
@@ -170,11 +218,12 @@ interpreted — only `24/7` is read, because it is the one value with no room fo
 a wrong reading, and a confident "open now" that sends someone to a locked door
 at 2 a.m. is the harm to avoid.
 
-**Lighting — yellow.** Streets tagged `lit=yes` as lines, individual
-`highway=street_lamp` nodes as dots. An unmarked street is one nobody has
+**Light — yellow, and a glow.** Streets tagged `lit=yes` as lines, individual
+`highway=street_lamp` nodes as dots, and a soft glow around each stretch of
+your route as strong as the share of it mapped lit. An unmarked street is one nobody has
 surveyed, not a dark one.
 
-**Crime — purple.** There is no open dataset of where harassment, catcalling,
+**Reports — blue speech bubbles**, fainter with age. There is no open dataset of where harassment, catcalling,
 sexual assault or rape happened. Police forces publish counts per neighbourhood
 per month, which cannot tell one street from the next one over, and the
 categories that matter most here are the least likely to have been reported at
@@ -191,7 +240,7 @@ the browser that entered them. The panel prints which, because a report somebody
 believed they had filed, visible to nobody, is worse than not being able to file
 one.
 
-**Police figures — the neighbourhood, shaded.** The official figures, live from
+**Police figures — the neighbourhood, hatched.** The official figures, live from
 CBS, and a separate layer on purpose. Offences recorded by the police, from CBS StatLine table
 `47022NED` ("Geregistreerde misdrijven; soort misdrijf, wijk, buurt,
 maandcijfers"), whose offence classification is the police's own. **The whole neighbourhood is flagged**: shaded to its band, with its outline
@@ -556,11 +605,12 @@ is left, and every request identifies itself with a real `User-Agent`.
 in one move, and is faster than any of this. Point the `overpass` entry in
 `src/lib/osm-forward.ts` at it and the chain has nothing left to do.
 
-## The interviews — the Research tab
+## The interviews — `/research`
 
 The app is the prototype for a study, and the study's instrument is a
 semi-structured interview: *Requirements Interviews — Women's Safety-Related
-Urban Mobility Decisions*. The **Research** tab holds the interviews and what
+Urban Mobility Decisions*. The **Research** page (`/research`; it was a fifth tab on the map, and is not part of what a
+participant is shown) holds the interviews and what
 they add up to, and the store is shaped section for section like the protocol,
 so real transcripts can be typed into it later without a migration.
 

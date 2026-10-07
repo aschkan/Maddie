@@ -62,6 +62,8 @@ Rules:
 - Never invent a number, a street name, or anything not in the input.
 - Never state a score. It is shown separately.
 - If the data is thin, say the map is thin. "Unknown" is never "fine".
+- Never call a route or a street safe, unsafe or dangerous. Say what the map
+  records — lit streets, lamps, open shops, parkland — and let the reader decide.
 - Two or three sentences. Plain, calm, second person. No preamble, no bullet
   points, no markdown.`;
 

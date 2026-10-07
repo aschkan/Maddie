@@ -13,7 +13,7 @@
  */
 
 import { narrate } from "@/lib/ai";
-import { assess, type Timing } from "@/lib/score";
+import { ALL_FACTORS, assess, FACTORS, type Factors, type Timing } from "@/lib/score";
 import type { LatLng } from "@/lib/osrm";
 import type { RouteFacts } from "@/lib/overpass";
 
@@ -65,6 +65,21 @@ function readPoint(value: unknown): LatLng | null {
  * with, and rebuilding the instant from the hour would quietly answer for a
  * different evening.
  */
+/**
+ * The Layers tab's switches. Anything unreadable means "all on" — the default
+ * every route is scored with — never "all off", which would turn a malformed
+ * request into a verdict of "nothing to compare on".
+ */
+function readFactors(value: unknown): Factors {
+  if (!value || typeof value !== "object") return ALL_FACTORS;
+  const raw = value as Record<string, unknown>;
+  const out = { ...ALL_FACTORS };
+  for (const factor of FACTORS) {
+    if (raw[factor.id] === false) out[factor.id] = false;
+  }
+  return out;
+}
+
 function readInstant(value: unknown): Date | undefined {
   if (typeof value !== "string") return undefined;
   const ms = Date.parse(value);
@@ -79,7 +94,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Expected JSON." }, { status: 400 });
   }
 
-  const payload = body as { facts?: unknown; hour?: unknown; point?: unknown; at?: unknown };
+  const payload = body as { facts?: unknown; hour?: unknown; point?: unknown; at?: unknown; factors?: unknown };
   const facts = readFacts(payload.facts);
   if (!facts) {
     return Response.json({ error: "Those route facts are not usable." }, { status: 400 });
@@ -95,7 +110,9 @@ export async function POST(request: Request): Promise<Response> {
   const point = readPoint(payload.point);
   const timing: Timing = point ? { hour, point, at: readInstant(payload.at) } : hour;
 
-  const assessment = assess(facts, timing);
+  // The same switches the page scored with, so the sentence explains the
+  // number on the screen rather than a different one.
+  const assessment = assess(facts, timing, readFactors(payload.factors));
 
   /*
    * No score, no narration.

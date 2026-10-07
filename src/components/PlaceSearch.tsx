@@ -16,7 +16,11 @@ import type { LatLng } from "@/lib/osrm";
 interface Props {
   label: string;
   badge: string;
-  accent: string;
+  /**
+   * `a` or `b`. A class rather than a colour: the ends of a trip are drawn in
+   * the trip's own ink, never in an evidence colour — see `palette.ts` rule 2.
+   */
+  end: "a" | "b";
   value: LatLng | null;
   text: string;
   onText: (text: string) => void;
@@ -24,7 +28,7 @@ interface Props {
   onClear: () => void;
 }
 
-export default function PlaceSearch({ label, badge, accent, value, text, onText, onPick, onClear }: Props) {
+export default function PlaceSearch({ label, badge, end, value, text, onText, onPick, onClear }: Props) {
   const [hits, setHits] = useState<Place[]>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -80,7 +84,7 @@ export default function PlaceSearch({ label, badge, accent, value, text, onText,
   return (
     <div className="field" ref={box}>
       <label className="field-label" htmlFor={id}>
-        <span className="badge" style={{ background: accent }}>{badge}</span>
+        <span className={`badge badge-${end}`}>{badge}</span>
         {label}
       </label>
 

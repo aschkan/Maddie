@@ -21,7 +21,14 @@ short list of things that will bite you while editing.
 - `src/lib/handoff.ts` — the walk, handed to Google Maps, **with our route as
   waypoints**. This is how navigation happens; there is none in the app. Pure,
   tested.
-- `src/lib/verdict.ts` — how a verdict is written and coloured, in one place.
+- `src/lib/verdict.ts` — how a verdict is WORDED, in one place. Colours are in
+  `palette.ts`.
+- `src/lib/palette.ts` — every colour on the map and its ONE meaning. The design
+  system's colour table in code. **Read § "The design system" below.**
+- `src/lib/alongside.ts` — reports and places NEAR each route, counted beside
+  the score and never in it.
+- `src/lib/scenario.ts` + `scripts/scenario.ts` + `src/lib/scenario-recording.json`
+  — the controlled Utrecht scenario for the interviews. **Read its header.**
 - `src/lib/compare.ts` — which route is preferred, and when to say none is.
 - `src/lib/reports.ts` — the crime layer. Entered by people, never scored.
 - `src/lib/nl-crime.ts` — the POLICE figures, from CBS. Per neighbourhood per
@@ -51,8 +58,13 @@ short list of things that will bite you while editing.
 - `src/app/api/osm/[service]/[[...path]]/route.ts` — OSM through this server.
 - `src/components/BottomSheet.tsx` — the panel, as a sheet with three stops.
 - `src/components/TripCard.tsx` — A and B, floating over the map; collapses.
-- `src/components/` — the map, the planner, the filters, the comparison, the
-  search box, the safety panel.
+- `src/components/Legend.tsx` — the legend, on the map: every state, an ⓘ per
+  group, a switch per layer.
+- `src/components/` — the map, the planner, the four tabs (`RouteChoices` in
+  Route, `SafetyPanel`, `LayersPanel`, `ReportsPanel`), the search box.
+  `ResearchView` is `/research` — the interviews, off the participant's tab bar.
+- `docs/Maddie-Design-System.md` (+ `.pdf`) — **the spec for how all of it looks
+  and what every part means.**
 
 Tiles, routing, search and the OSM query are asked for by the browser but go
 **through this server by default** — `/api/osm/*`, resolved in
@@ -539,12 +551,101 @@ wording tweak.
 line and moves by several points on a handful of samples; badging a 63 over a 61
 invents a distinction the map cannot support.
 
+## The design system — one colour, one meaning
+
+**`docs/Maddie-Design-System.md` is the spec**, written from the two supervision
+meetings, and `test/palette.test.ts` holds the parts a code change can quietly
+break. The rules that will be undone by accident:
+
+- **Purple is retired from the map, entirely.** It meant the destination,
+  "still loading", a crime report and the UI accent at once, and a supervisor
+  read the reports as "cool places to visit". Not "kept out of the routes" —
+  gone, so it cannot come back meaning two things. The test checks every hue.
+- **No alarm red.** The far end of the route scale is rust (`#9c3d17` /
+  `#e4572e`): "look closer", not "danger".
+- **Colour is spent only on evidence.** A, B, the routes you did not pick and
+  the UI accent are black, white and grey. "Why does the starting point need a
+  colour?" Putting a hue on A or B is a second meaning for that hue.
+- **Grey + DASHED = not known**, both for "nobody mapped this" and "still
+  reading". A grey solid line is not a state this map has.
+- **Each factor has its own channel**: line colour = how a stretch reads; GLOW
+  (under the casing) = how much of it is lit; opacity = a report's age; hatch =
+  police figures; shape = what kind of marker. Light is never a line colour on
+  the route — that is how the first prototype's yellow read as a category of
+  road. Two factors on one channel is the bug.
+- **The legend lists every POSSIBLE state, not the ones on screen**, and takes
+  the MAP's tone (`.legend.tone-night`), not the panel's theme: it is the key
+  to the map, and the night swatches drawn on a white card are invisible.
+- **The map's tone is night when the theme is dark OR the planned hour is not
+  daylight.** That is the night mode the supervisor asked for — "it does
+  nothing to the map" was the complaint. One tile host, filtered in CSS
+  (`.tiles-day` / `.tiles-night`, both greyscale).
+- **The words.** No *safe*, *unsafe*, *safest* or *danger(ous)* in anything a
+  participant reads — including "Preferred, not safe" and "not the same as more
+  dangerous", both of which shipped and both of which the test now catches. The
+  verdicts are *Favourable · Mixed · Look closer · Not enough map data*. The tab
+  is still called *Safety*: it names the subject, not a verdict about a street.
+  `ResearchPanel` is exempt — it quotes the protocol's own wording.
+- **CSS tokens = palette values.** The chips in the panel and the lines on the
+  map are one answer; the test parses `globals.css` and compares.
+
+### The tabs are tasks, and Research is not one of them
+
+Route (options + the ★ suggestion) → Safety (why; changes nothing) → Layers
+(what COUNTS — `FACTORS` in `score.ts` — and what is drawn) → Reports (your
+experience and other people's, and the police figures). The supervisor's line
+between the last two: changing what counts is Layers; "based on my experience,
+this is what is going on there" is Reports. The interviews moved to
+`/research` — the study team's view, not a tool for the walk home.
+
+### Factors switch terms off; they never re-weight
+
+`assess(facts, timing, factors)` — every factor on is byte-for-byte the old
+reading (`test/factors.test.ts` pins it). Lighting off also lifts the coverage
+gate, which is a question about lighting data only. All off is `unknown`, never
+the formula's starting 55. `segmentRoute` takes the SAME switches; a stretch
+judged differently from its route contradicts it. `/api/assess` takes them too,
+so the model explains the number on the screen.
+
+### Beside, never inside
+
+`alongside.ts` counts reports (75 m) and places (100 m) per route for the route
+cards and the Safety table, under a heading that says they are not part of the
+reading. The supervisor's "three dots on your path, five on the other" — shown,
+compared, and NOT weighted into the score, for every reason in § "The crime
+layer holds no crime data". Nothing under `score.ts`, `segments.ts` or
+`compare.ts` may import it. Whether reports should enter the reading is an open
+question in the design doc, for the supervisors — not a tidy-up.
+
+## The study scenario — recorded, so every participant sees the same streets
+
+`/?scenario=utrecht`. Read the header of `src/lib/scenario.ts`. The rules:
+
+- **Nothing that decides what a participant sees is fetched live.** Routes,
+  reads, places, lamps and lit streets come from `scenario-recording.json`;
+  reports from `scenarioReports()` with a fixed `SCENARIO_NOW`. The SCORE is
+  live (same `assess()`), which is why the hour and the factors still work.
+  Driving is disabled rather than fetched — a live request is the one thing a
+  controlled session must not make.
+- **A report added in the scenario stays in the session.** Never `add()` —
+  that posts to `/api/reports`, and the next participant must see the same map.
+- **The recording must have ≥2 routes per destination per mode**;
+  `test/scenario.test.ts` reads the committed file and fails otherwise. OSRM's
+  foot router often offers one, so each destination names `via` points.
+- **The recorder REFUSES an empty Overpass reply** (central Utrecht has no
+  empty 300 m) and caches every answer in `.data/scenario-cache.json` so a run
+  that dies resumes. `--via-server` goes through the deployed forwarder, with
+  a comment appended to each query because the forwarder caches a 200 for ten
+  minutes by query text — a refused empty answer would otherwise come back from
+  its cache on every retry.
+- **Re-record between rounds of interviews, never between sessions.**
+
 ## Two crime layers, and neither of them is scored
 
 There is no open point-level dataset for harassment, catcalling, sexual assault
 or rape. Official figures are per neighbourhood per month — the same objection
 as below — and the categories that matter most are the least reported. So the
-purple layer holds **reports people entered**, starting empty, and it never
+reports layer holds **reports people entered**, starting empty, and it never
 reaches `score.ts`.
 
 The police figures are now on the map too, as a SEPARATE layer
@@ -561,7 +662,7 @@ soften anything above; it is why the two are separate:
   may import either module.
 - **They are never merged, and never share a colour or a shape.** A report is
   one person at one place; the police figure is a monthly count over an area.
-  Purple dot versus a SHADED NEIGHBOURHOOD with an oblong-of-a-number in the
+  A blue speech bubble versus a HATCHED NEIGHBOURHOOD with an oblong-of-a-number in the
   middle of it, and the popup's first line says which kind of thing it is.
 - **The neighbourhood is drawn as an AREA, from PDOK's WFS.** `pdokwfs` is the
   third forwarded Dutch upstream and `parseBoundaries` reads it. Shading the
@@ -574,14 +675,14 @@ soften anything above; it is why the two are separate:
   figures**, and a failure returns no outlines rather than failing the layer.
   A shaded area with no number behind it means nothing; losing the shading
   costs some precision, losing the layer costs the figure.
-- **The purple layer's empty state still means what it said.** "Nobody wrote
+- **The reports layer's empty state still means what it said.** "Nobody wrote
   anything down" stays true because the police figures are a different layer
   with its own switch, not a backfill into this one. `FilterPanel` now points at
   that layer from the crime note so the reader knows the official figures exist
   and where; if the two are ever merged, that sentence becomes a lie.
 - **The police table cannot cover this app's subject and the panel says so.**
   Harassment and catcalling are not chargeable offences, so they are in no
-  police table anywhere. That is the gap the purple layer exists for.
+  police table anywhere. That is the gap the reports layer exists for.
 - **More recorded offences is not more dangerous**, and that sentence is on the
   screen, not just here. Reporting rates, footfall and policing all move these
   numbers.
@@ -595,7 +696,7 @@ That instruction — "if a real dataset is ever wired in, the empty-state senten
 in `FilterPanel` has to change with it" — has now been carried out, and the way
 it was carried out is the thing to preserve. The official dataset went into its
 OWN layer rather than into this one, so "an empty map means nobody wrote
-anything down" is still literally true of the purple layer; the crime note now
+anything down" is still literally true of the reports layer; the crime note now
 points at the police layer so the reader is not left thinking no official
 figures exist. Merging the two would break that sentence, and there is no
 version of the merge that does not.
@@ -1233,6 +1334,13 @@ same traps, same severity weights — wired to a layer instead of to the score.
 - **RQ5 must never appear on an interview.** The protocol is explicit that RQ5
   is covered by the later think-aloud evaluation, not by this instrument, so
   the parser filters it out. `test/interviews.test.ts`
+- **Only WORLD Overpass instances go in the mirror rotation.** `overpass.osm.ch`
+  (Switzerland only) was in `SERVICES.overpass.bases` and answered every Dutch
+  query it was handed with a 200 and an EMPTY element list — the route read as
+  "nobody has mapped this", the layers as "nothing here", cached for ten
+  minutes, with no error anywhere. A live probe of the forwarder returned 0 and
+  then 616 elements for the same query depending on the mirror it landed on.
+  `test/overpass-mirrors.test.ts`
 - **A 502 from `/api/osm/*` does not always mean OpenStreetMap.** Three of the
   eight forwarded services are the Dutch government's, so both the client's
   `forwarderFailure()` and the route's own 502/429 bodies name the upstream from
@@ -1291,9 +1399,19 @@ same traps, same severity weights — wired to a layer instead of to the score.
   version flashes white on every load — on a page people open at night.
   `RoutePlanner` keeps `data-theme` in step afterwards; the two read the same
   key, and changing one means changing the other.
-- **Night mode inverts the tiles in CSS** (`.tiles-night`) rather than loading a
-  dark basemap. A second tile host is a second thing that can be unreachable,
+- **The basemap is OSM's tiles made GREY in CSS** (`.tiles-day`), and inverted
+  near-black at night (`.tiles-night`), rather than a dark basemap loaded. A second tile host is a second thing that can be unreachable,
   and a blank background is the worst failure this page can have.
 - **Marker icons are cached at module scope** (`HEARTS` in `MapCanvas`). Leaflet
   compares icons by identity, so a fresh `divIcon` per render tears down and
   rebuilds every marker on the map on every keystroke.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

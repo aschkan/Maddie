@@ -38,8 +38,18 @@ export const SERVICES: Record<string, Service> = {
     bases: [
       "https://overpass-api.de/api/interpreter",
       "https://overpass.kumi.systems/api/interpreter",
-      "https://overpass.osm.ch/api/interpreter",
       "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+      /*
+       * NOT `overpass.osm.ch`, which was here. It holds SWITZERLAND ONLY, and a
+       * Dutch query sent to it is answered 200 with a well-formed, EMPTY list —
+       * no ways, no lamps, no places. Nothing errors; the forwarder caches it
+       * for ten minutes; the route reads as "nobody has mapped this" and the
+       * layers as "nothing here", both false claims about OpenStreetMap that
+       * the rotation hands out to whichever request lands on that mirror.
+       * Found recording the Utrecht scenario: a probe of the live forwarder
+       * came back empty with that instance's own `timestamp_osm_base`.
+       * Only WORLD instances belong in this list; `test/overpass-mirrors.test.ts`.
+       */
     ],
     methods: ["POST", "GET"],
     cache: "no-store",

@@ -21,7 +21,7 @@
 import { formatDistance } from "./format.ts";
 import type { LatLng } from "./osrm.ts";
 import type { RouteFacts, SampleRead } from "./overpass.ts";
-import { assess, type Timing, type Verdict } from "./score.ts";
+import { ALL_FACTORS, assess, type Factors, type Timing, type Verdict } from "./score.ts";
 
 /**
  * How long a stretch is.
@@ -156,7 +156,7 @@ function windows(reads: SampleRead[]): SampleRead[][] {
  * as nothing: the caller draws whatever it is given, and an empty list would
  * silently leave a short walk uncoloured.
  */
-export function segmentRoute(reads: SampleRead[], timing: Timing): Segment[] {
+export function segmentRoute(reads: SampleRead[], timing: Timing, factors: Factors = ALL_FACTORS): Segment[] {
   const cut = windows(reads);
   const segments: Segment[] = [];
 
@@ -178,7 +178,9 @@ export function segmentRoute(reads: SampleRead[], timing: Timing): Segment[] {
     if (joint) path.push(joint.point);
 
     const facts = factsFor(window, fromM, toM);
-    const assessment = assess(facts, timing);
+    // The route's own switches, never a stretch's own: a stretch judged with
+    // a factor the whole route ignores would contradict the route it is in.
+    const assessment = assess(facts, timing, factors);
 
     segments.push({
       fromM,

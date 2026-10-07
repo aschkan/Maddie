@@ -15,7 +15,8 @@
     "test": "node --test \"test/**/*.test.ts\"",
     "check": "tsc --noEmit && eslint . && node --test \"test/**/*.test.ts\"",
     "seed": "node scripts/seed.ts",
-    "proxies": "node scripts/proxies.ts"
+    "proxies": "node scripts/proxies.ts",
+    "scenario": "node scripts/scenario.ts"
   },
   "dependencies": {
     "leaflet": "1.9.4",

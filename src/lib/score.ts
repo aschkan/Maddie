@@ -42,6 +42,73 @@ export interface When {
 /** A bare hour still works — it just cannot know where the sun is. */
 export type Timing = number | When;
 
+/**
+ * The things the score is built from, each of which a person can switch off.
+ *
+ * This is the Layers tab's "what counts" — the supervisor's third tab, "where
+ * you can influence what safety means". Somebody who walks through parks
+ * because they are busy with runners until late can say the parkland penalty
+ * does not apply to them, and the routes re-rank in front of them.
+ *
+ * It is NOT a second set of weights. Switching a factor off removes its term
+ * from the one formula below; it never re-weights the others. A route scored
+ * with every factor on is scored exactly as it always was, and the stretches
+ * of a route are scored with the same switches as the route itself — see
+ * `segments.ts`, which passes them through rather than keeping its own copy.
+ */
+export type Factor = "lighting" | "lamps" | "frontage" | "parkland" | "tunnels";
+
+export type Factors = Readonly<Record<Factor, boolean>>;
+
+export const ALL_FACTORS: Factors = {
+  lighting: true,
+  lamps: true,
+  frontage: true,
+  parkland: true,
+  tunnels: true,
+};
+
+/** What each factor is, in the order the Layers tab lists them. */
+export const FACTORS: readonly { id: Factor; label: string; explain: string }[] = [
+  {
+    id: "lighting",
+    label: "Lit streets",
+    explain:
+      "How much of the way OpenStreetMap records as lit (lit=yes) against unlit (lit=no). " +
+      "Counts for most of the score after dark and very little by day. Untagged streets are " +
+      "unknown, never counted as dark.",
+  },
+  {
+    id: "lamps",
+    label: "Street lamps",
+    explain: "Individually mapped street lamps per kilometre. Only after dusk.",
+  },
+  {
+    id: "frontage",
+    label: "Open frontage",
+    explain:
+      "Shops, cafés and bars along the way — doors, windows and people. Many of them raise " +
+      "the score; almost none lowers it after dark.",
+  },
+  {
+    id: "parkland",
+    label: "Parkland",
+    explain:
+      "Stretches through parks and woods. After dark they count against a route, because they " +
+      "empty out; by day they count slightly in its favour.",
+  },
+  {
+    id: "tunnels",
+    label: "Tunnels and underpasses",
+    explain: "Each one on the way counts against the route, more after dark.",
+  },
+];
+
+/** True when nothing has been switched off — the case every test pins. */
+export function allOn(factors: Factors): boolean {
+  return FACTORS.every((factor) => factors[factor.id]);
+}
+
 export interface Assessment {
   /** 0–100, higher is better. Null when the map says too little to judge. */
   score: number | null;
@@ -153,9 +220,25 @@ export function lightingFor(timing: Timing): Lighting {
   };
 }
 
-export function assess(facts: RouteFacts, timing: Timing): Assessment {
+export function assess(facts: RouteFacts, timing: Timing, factors: Factors = ALL_FACTORS): Assessment {
   const { light, sunDeg, note } = lightingFor(timing);
   const findings: string[] = note ? [note] : [];
+
+  /*
+   * Everything switched off is a question with no evidence left to answer it.
+   * Saying "Mixed" here would be the 55 the formula starts from, presented as
+   * a reading of the streets.
+   */
+  if (FACTORS.every((factor) => !factors[factor.id])) {
+    return {
+      score: null,
+      verdict: "unknown",
+      confidence: 0,
+      light,
+      sunDeg,
+      findings: [...findings, "Every factor is switched off in Layers, so there is nothing to compare these routes on."],
+    };
+  }
 
   const known = facts.litSamples + facts.unlitSamples;
   const rawLitFraction = fraction(facts.litSamples, known);
@@ -188,7 +271,9 @@ export function assess(facts: RouteFacts, timing: Timing): Assessment {
    * earlier version let exactly that rescue a route with 1% coverage into a
    * green "looks fine".
    */
-  if (coverage < 0.25 && lampsPerKm < 10) {
+  // Only a question about LIGHTING coverage. With lighting switched off the
+  // score is built from the other factors, which every sample carries.
+  if (factors.lighting && coverage < 0.25 && lampsPerKm < 10) {
     return {
       score: null,
       verdict: "unknown",
@@ -198,19 +283,21 @@ export function assess(facts: RouteFacts, timing: Timing): Assessment {
       findings: [
         ...findings,
         `OpenStreetMap records lighting for ${Math.round(coverage * 100)}% of this route, which is too little to judge it.`,
-        "That is a gap in the map, not a dark street — and not a safe one either.",
+        "That is a gap in the map, not a dark street — and not a reassurance either.",
       ],
     };
   }
 
   let score = 55;
-  score += (litKnownFraction - 0.5) * LIT_WEIGHT[light];
+  if (factors.lighting) score += (litKnownFraction - 0.5) * LIT_WEIGHT[light];
 
   const dark = DARK_WEIGHT[light];
   if (dark > 0) {
     // Lighting is most of the answer once the sun is down, so the things that
     // make being alone in the dark worse are weighed here and nowhere else.
-    if (lampsPerKm >= 20) {
+    if (!factors.lamps) {
+      // Switched off in Layers: lamps neither help nor hurt.
+    } else if (lampsPerKm >= 20) {
       score += 8 * dark;
       findings.push(`${facts.lamps} street lamps mapped along it.`);
     } else if (lampsPerKm > 0 && lampsPerKm < 5) {
@@ -218,7 +305,7 @@ export function assess(facts: RouteFacts, timing: Timing): Assessment {
       findings.push(`Only ${plural(facts.lamps, "street lamp", "street lamps")} mapped along ${km.toFixed(1)} km.`);
     }
 
-    if (facts.greenSamples > facts.samples * 0.25) {
+    if (factors.parkland && facts.greenSamples > facts.samples * 0.25) {
       score -= 12 * dark;
       findings.push(
         light === "night"
@@ -226,33 +313,33 @@ export function assess(facts: RouteFacts, timing: Timing): Assessment {
           : "A quarter or more of it runs through parkland, which empties out as the light goes.",
       );
     }
-    if (venuesPerKm < 3) {
+    if (factors.frontage && venuesPerKm < 3) {
       score -= 8 * dark;
       findings.push(`Little open frontage — ${plural(facts.venues, "shop or cafe", "shops or cafes")} along the way.`);
     }
   } else {
     // By day lighting barely matters; company and crossings do.
-    if (facts.greenSamples > facts.samples * 0.25) {
+    if (factors.parkland && facts.greenSamples > facts.samples * 0.25) {
       score += 4;
       findings.push("Much of it runs through parkland.");
     }
   }
 
-  if (venuesPerKm >= 12) {
+  if (factors.frontage && venuesPerKm >= 12) {
     score += 10;
     findings.push(`Busy frontage — ${facts.venues} shops, cafes or bars along it.`);
   }
-  if (facts.tunnels > 0) {
+  if (factors.tunnels && facts.tunnels > 0) {
     score -= 6 + 8 * dark;
     findings.push(`${plural(facts.tunnels, "tunnel or underpass", "tunnels or underpasses")} on the way.`);
   }
   if (facts.footwaySamples > facts.samples * 0.5) {
     findings.push("Mostly on footpaths rather than beside traffic.");
   }
-  if (facts.unlitSamples > 0) {
+  if (factors.lighting && facts.unlitSamples > 0) {
     findings.push(`${facts.unlitSamples} of ${facts.samples} points are on streets mapped as unlit.`);
   }
-  if (facts.litSamples > 0) {
+  if (factors.lighting && facts.litSamples > 0) {
     findings.push(`${facts.litSamples} of ${facts.samples} points are on streets mapped as lit.`);
   }
 
@@ -260,12 +347,15 @@ export function assess(facts: RouteFacts, timing: Timing): Assessment {
 
   // Coverage caps how much any of this can be trusted, and a short route is
   // thin evidence however well mapped it is.
-  const confidence = Math.min(1, coverage * 0.8 + Math.min(facts.samples / 40, 1) * 0.2);
+  // With lighting switched off, lighting coverage says nothing about what the
+  // score was built from — every sample carries the other factors.
+  const evidence = factors.lighting ? coverage : 1;
+  const confidence = Math.min(1, evidence * 0.8 + Math.min(facts.samples / 40, 1) * 0.2);
 
   const verdict: Verdict = score >= 70 ? "good" : score >= 45 ? "fair" : "poor";
 
   // 0.6, not 0.5: with exactly half the route unmapped this still needs saying.
-  if (coverage < 0.6) {
+  if (factors.lighting && coverage < 0.6) {
     findings.unshift(
       `Lighting is mapped for ${Math.round(coverage * 100)}% of the route; the rest is unknown rather than dark.`,
     );

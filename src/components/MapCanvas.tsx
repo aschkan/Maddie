@@ -7,25 +7,53 @@
  * `ssr: false`. Leaflet reaches for `window` at module scope, so rendering it
  * on the server fails at import time rather than at paint time, which makes the
  * error look unrelated to the map.
+ *
+ * WHAT IS DRAWN, AND HOW — `docs/Maddie-Design-System.md` is the spec, and
+ * `src/lib/palette.ts` holds every colour. The short version, bottom to top:
+ *
+ *   1. A GREY basemap — OpenStreetMap's own tiles, desaturated in CSS, and
+ *      near-black whenever the map is showing night (the theme is dark, or the
+ *      hour you are planning for is after dark). A canvas, not a map full of
+ *      colours of its own: every colour on top of it has to mean something.
+ *   2. Police figures — HATCHED over the whole neighbourhood. Texture, not hue.
+ *   3. Lighting — thin yellow lines along lit streets, small yellow dots for
+ *      lamps.
+ *   4. The routes you did not pick — your trip's ink, faded, each labelled.
+ *   5. The chosen route — a GLOW of light around the stretches that are lit,
+ *      then a casing, then the line itself coloured stretch by stretch by how
+ *      the evidence reads. Grey and dashed where nothing is known, or while it
+ *      is still being read.
+ *   6. Places to go (pink hearts), reports (blue speech bubbles, fading with
+ *      age), the police badges, and A and B on top of everything.
+ *
+ * Several factors are visible AT ONCE because each one has its own channel —
+ * line colour, glow, texture, shape — rather than each one taking a turn at
+ * the same colour in a different tab.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMap, useMapEvents,
+  CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, Tooltip,
+  useMap, useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+import { formatDuration } from "@/lib/format";
 import type { LatLng, Route } from "@/lib/osrm";
 import { alwaysOpen, type BBox, type LayerData } from "@/lib/layers";
 import { endpoint } from "@/lib/endpoints";
-import { CRIME_CATEGORIES, type Report } from "@/lib/reports";
+import { AGE_OPACITY, CRIME_CATEGORIES, reportAge, type Report } from "@/lib/reports";
 import { MARK_EXAMPLE_DATA } from "@/lib/demo-mode";
 import {
-  CRIME_BAND_LABEL, crimeBand, topCategories, type PlacedCrimeSummary,
+  CRIME_BAND_LABEL, crimeBand, topCategories, type CrimeBand, type PlacedCrimeSummary,
 } from "@/lib/nl-crime";
+import {
+  ALTERNATIVE, ALTERNATIVE_OPACITY, END, LIGHT, PLACE, POLICE, REPORT, ROUTE, START,
+  UNKNOWN_DASH, pick, type Tone,
+} from "@/lib/palette";
 import type { Segment } from "@/lib/segments";
-import { VERDICT_COLOUR } from "@/lib/verdict";
+import { verdictColour } from "@/lib/verdict";
 
 /**
  * Where the tiles come from — this server by default, which is the only answer
@@ -33,157 +61,187 @@ import { VERDICT_COLOUR } from "@/lib/verdict";
  */
 const TILE_URL = endpoint("tile");
 
-/** The colours the brief names. Crime purple, safe spots pink, lighting yellow. */
-export const CRIME = "#a855f7";
-export const SAFE = "#ff5fa2";
-export const LIGHT = "#f5c518";
+/** From this zoom the hearts show what kind of place they are. */
+export const CLOSE_ZOOM = 17;
+
 
 /**
- * Pins drawn as inline SVG rather than Leaflet's own PNGs.
- *
- * Leaflet's default marker points at image files by relative path, and every
- * bundler rewrites those paths — which is why "my markers are invisible" is the
- * single most common react-leaflet question. A divIcon has no asset to lose,
- * and it lets A and B be told apart at a glance.
+ * A — a hollow ring. It marks where you are, which you already know, so it is
+ * the quietest thing on the map. Inline SVG rather than Leaflet's PNG markers,
+ * which every bundler loses the path to.
  */
-function pin(letter: string, colour: string): L.DivIcon {
+function startPin(tone: Tone): L.DivIcon {
+  const ink = pick(START, tone);
+  const fill = tone === "night" ? "#0b0d12" : "#ffffff";
   return L.divIcon({
-    className: "",           // Leaflet adds a white box without this
+    className: "",
     html: `
-      <svg width="30" height="42" viewBox="0 0 30 42" xmlns="http://www.w3.org/2000/svg">
-        <path d="M15 41C15 41 28 25.5 28 15A13 13 0 1 0 2 15c0 10.5 13 26 13 26z"
-              fill="${colour}" stroke="#0b0d12" stroke-width="2"/>
-        <circle cx="15" cy="15" r="9" fill="#0b0d12"/>
-        <text x="15" y="19.5" text-anchor="middle" font-size="12"
-              font-family="system-ui, sans-serif" font-weight="700" fill="#fff">${letter}</text>
+      <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg" aria-label="Start, A">
+        <circle cx="14" cy="14" r="11" fill="${fill}" stroke="${ink}" stroke-width="3"/>
+        <text x="14" y="18.5" text-anchor="middle" font-size="12" font-weight="700"
+              font-family="system-ui, sans-serif" fill="${ink}">A</text>
       </svg>`,
-    iconSize: [30, 42],
-    iconAnchor: [15, 41],    // the tip of the pin, not its middle
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
   });
 }
 
-/** The pink heart the brief asks for, with the category's own glyph inside. */
-function heart(glyph: string): L.DivIcon {
+/** B — a solid pin, the trip's own ink. The one end that needs finding. */
+function endPin(tone: Tone): L.DivIcon {
+  const ink = pick(END, tone);
+  const letter = tone === "night" ? "#0b0d12" : "#ffffff";
+  return L.divIcon({
+    className: "",
+    html: `
+      <svg width="32" height="44" viewBox="0 0 32 44" xmlns="http://www.w3.org/2000/svg" aria-label="Destination, B">
+        <path d="M16 43C16 43 30 27 30 16A14 14 0 1 0 2 16c0 11 14 27 14 27z"
+              fill="${ink}" stroke="${letter}" stroke-width="2"/>
+        <text x="16" y="21" text-anchor="middle" font-size="14" font-weight="800"
+              font-family="system-ui, sans-serif" fill="${letter}">B</text>
+      </svg>`,
+    iconSize: [32, 44],
+    iconAnchor: [16, 43],    // the tip of the pin, not its middle
+  });
+}
+
+/**
+ * A place to go: one pink heart for every kind of place.
+ *
+ * The kind's glyph is IN the marker but hidden until it is asked for — on
+ * hover, or from `CLOSE_ZOOM` in. The supervisor's suggestion, and the right
+ * default: twelve different icons at once is impossible to read, and "there
+ * is somewhere to go here" is the useful first answer.
+ */
+function heart(glyph: string, tone: Tone): L.DivIcon {
   return L.divIcon({
     className: "",
     html: `
       <div class="spot-pin">
-        <svg width="26" height="24" viewBox="0 0 26 24" xmlns="http://www.w3.org/2000/svg">
+        <svg width="24" height="22" viewBox="0 0 26 24" xmlns="http://www.w3.org/2000/svg">
           <path d="M13 22.5S1.5 15.4 1.5 8.3A6.3 6.3 0 0 1 13 4.6 6.3 6.3 0 0 1 24.5 8.3c0 7.1-11.5 14.2-11.5 14.2z"
-                fill="${SAFE}" stroke="#4a0f2a" stroke-width="1.4"/>
+                fill="${pick(PLACE, tone)}" stroke="${tone === "night" ? "#0b0d12" : "#ffffff"}" stroke-width="1.6"/>
         </svg>
         <span class="spot-glyph">${glyph}</span>
       </div>`,
-    iconSize: [26, 24],
-    iconAnchor: [13, 22],
+    iconSize: [24, 22],
+    iconAnchor: [12, 20],
   });
 }
 
 /**
- * One icon object per glyph, kept outside the component.
- *
  * Leaflet compares icons by identity, so building a new one each render makes
- * it tear down and rebuild every marker on the map on every keystroke.
+ * it tear down and rebuild every marker on the map on every keystroke. Every
+ * icon below is cached at module scope, keyed by everything that changes it.
  */
-const HEARTS = new Map<string, L.DivIcon>();
+const ICONS = new Map<string, L.DivIcon>();
 
-function heartFor(glyph: string): L.DivIcon {
-  const existing = HEARTS.get(glyph);
+function cached(key: string, make: () => L.DivIcon): L.DivIcon {
+  const existing = ICONS.get(key);
   if (existing) return existing;
-  const made = heart(glyph);
-  HEARTS.set(glyph, made);
+  const made = make();
+  ICONS.set(key, made);
   return made;
 }
 
 /**
- * A report someone entered: a solid purple dot.
+ * A report: a speech bubble, because each one is somebody telling you
+ * something. Blue — calm, not an alarm — and faded by age.
  *
- * The example one below is deliberately NOT a colour variation. A fabricated
- * point on a real street has to be obviously not the same object as a real
- * report, at a glance, on a phone, in the dark — so it is hollow and dashed,
- * which reads as "outline, not filled in" rather than as another category.
+ * The example variant (only when `MARK_EXAMPLE_DATA` is on) is hollow and
+ * dashed, which reads as "outline, not filled in" rather than as another
+ * category.
  */
-function crimePin(): L.DivIcon {
+function bubble(tone: Tone, age: keyof typeof AGE_OPACITY, example: boolean): L.DivIcon {
+  const blue = pick(REPORT, tone);
+  const edge = tone === "night" ? "#0b0d12" : "#ffffff";
+  const body = "M3 4.5A3.5 3.5 0 0 1 6.5 1h11A3.5 3.5 0 0 1 21 4.5v8A3.5 3.5 0 0 1 17.5 16H11l-4.5 4.5V16h0A3.5 3.5 0 0 1 3 12.5z";
   return L.divIcon({
     className: "",
-    html: `
-      <svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="10" cy="10" r="7.5" fill="${CRIME}" stroke="#1c0a2b" stroke-width="2"/>
-        <path d="M10 5.6v5.2M10 13.6v.6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
-      </svg>`,
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-  });
-}
-
-function examplePin(): L.DivIcon {
-  return L.divIcon({
-    className: "",
-    html: `
-      <svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="10" cy="10" r="7" fill="none" stroke="${CRIME}"
-                stroke-width="2" stroke-dasharray="3 2.6" opacity="0.85"/>
-      </svg>`,
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
+    html: example
+      ? `<svg width="22" height="22" viewBox="0 0 24 22" xmlns="http://www.w3.org/2000/svg">
+           <path d="${body}" fill="none" stroke="${blue}" stroke-width="2" stroke-dasharray="3 2.4"/>
+         </svg>`
+      : `<svg width="22" height="22" viewBox="0 0 24 22" xmlns="http://www.w3.org/2000/svg"
+              style="opacity:${AGE_OPACITY[age]}">
+           <path d="${body}" fill="${blue}" stroke="${edge}" stroke-width="1.5"/>
+           <circle cx="8" cy="8.6" r="1.4" fill="${edge}"/><circle cx="12" cy="8.6" r="1.4" fill="${edge}"/>
+           <circle cx="16" cy="8.6" r="1.4" fill="${edge}"/>
+         </svg>`,
+    iconSize: [22, 22],
+    iconAnchor: [7, 21],
   });
 }
 
 /**
- * The police-figures badge.
- *
- * Deliberately NOT a dot and NOT in the report palette. A neighbourhood figure
- * and a report of something that happened to somebody are different objects —
- * one is a monthly count over an area, the other is one person at one place —
- * and the map has to make that difference visible before either popup is
- * opened. So this is a rounded oblong carrying a NUMBER, pinned to the
- * neighbourhood's centroid, in its own blue-grey ramp.
- *
- * ⚠ The centroid is where the LABEL goes, not where anything happened. The
- * figure is for the whole neighbourhood, which is why the badge reads as a
- * label rather than as a marker and why the popup says so in as many words.
+ * The police-figures badge: an oblong carrying a NUMBER, at the
+ * neighbourhood's centroid. A label for the hatched area, never a point where
+ * anything happened — which is why it is not a dot and not blue.
  */
-const BAND_FILL: Record<string, string> = {
-  low: "#3f7f6f",
-  medium: "#7d7a3a",
-  high: "#a2603a",
-  highest: "#9c3f57",
-};
-
-const BADGES = new Map<string, L.DivIcon>();
-
-function badgeFor(band: string, text: string): L.DivIcon {
-  const key = `${band}|${text}`;
-  const existing = BADGES.get(key);
-  if (existing) return existing;
-  const made = L.divIcon({
+function badge(band: CrimeBand, text: string, tone: Tone): L.DivIcon {
+  return L.divIcon({
     className: "",
     html: `
-      <div class="cbs-badge" style="--band:${BAND_FILL[band] ?? BAND_FILL.medium}">
+      <div class="cbs-badge cbs-${band} tone-${tone}">
         <span class="cbs-badge-n">${text}</span>
       </div>`,
     iconSize: [44, 24],
     iconAnchor: [22, 12],
   });
-  BADGES.set(key, made);
-  return made;
+}
+
+/** Hatch spacing per band, in px: denser is more recorded offences. */
+const HATCH_GAP: Record<CrimeBand, number> = { low: 11, medium: 8, high: 5.5, highest: 3.8 };
+const BANDS: CrimeBand[] = ["low", "medium", "high", "highest"];
+
+/**
+ * The hatch patterns, as an SVG the polygons can point at with `url(#…)`.
+ *
+ * Leaflet writes `fillColor` straight into the path's `fill` attribute, and an
+ * SVG `url()` reference resolves against the whole document — so the police
+ * polygons, drawn with an SVG renderer, can be filled with a pattern defined
+ * here. The rest of the map stays on canvas.
+ */
+function HatchDefs({ tone }: { tone: Tone }) {
+  const ink = pick(POLICE, tone);
+  return (
+    <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
+      <defs>
+        {BANDS.map((band) => (
+          <pattern
+            key={band}
+            id={`hatch-${band}`}
+            width={HATCH_GAP[band]}
+            height={HATCH_GAP[band]}
+            patternUnits="userSpaceOnUse"
+            patternTransform="rotate(45)"
+          >
+            <line x1="0" y1="0" x2="0" y2={HATCH_GAP[band]} stroke={ink} strokeWidth="1.3" strokeOpacity="0.75" />
+          </pattern>
+        ))}
+      </defs>
+    </svg>
+  );
 }
 
 export interface MapCanvasProps {
   start: LatLng | null;
   end: LatLng | null;
-  /** Every route OSRM offered. The selected one is drawn on top, in colour. */
+  /** Every route on offer. The selected one is drawn on top, in colour. */
   routes: Route[];
   selected: number;
+  /** The route the comparison recommends, or null when none stands out. */
+  preferred: number | null;
+  /** The quickest route. Labelled, never coloured. */
+  fastest: number | null;
   /**
    * The selected route cut into stretches, each with its own verdict.
    *
-   * Empty while the route is still being read, and then the plain line is
-   * drawn instead — an uncoloured route is "not read yet", which is true,
-   * whereas colouring it all one comfortable shade would not be.
+   * Empty while the route is still being read, and then a grey DASHED line is
+   * drawn instead — "not known yet", which is true, in the same grey and dash
+   * as a stretch the map says nothing about. One statement, one look.
    */
   segments: Segment[];
-  /** The stretch worth warning about, if there is one. Drawn with a halo. */
+  /** The stretch worth a closer look, if there is one. Drawn with a halo. */
   highlight: Segment | null;
   /**
    * How far open the panel is.
@@ -195,7 +253,11 @@ export interface MapCanvasProps {
   onSelectRoute: (index: number) => void;
   centre: LatLng;
   layers: LayerData;
+  /** Whether the lighting layer and the glow around the route are drawn. */
+  showLighting: boolean;
   reports: Report[];
+  /** What "now" is for the age of a report. The scenario fixes it. */
+  reportNow: number;
   /**
    * Police-recorded figures for the neighbourhoods on screen.
    *
@@ -208,28 +270,33 @@ export interface MapCanvasProps {
   reportMode: boolean;
   onReport: (point: LatLng) => void;
   onRemoveReport: (id: string) => void;
-  /** A map click sets whichever point is next. */
-  onPick: (point: LatLng) => void;
+  /** A map click sets whichever point is next. Null when the ends are fixed. */
+  onPick: ((point: LatLng) => void) | null;
   onMoveStart: (point: LatLng) => void;
   onMoveEnd: (point: LatLng) => void;
+  /** False in the scenario, where every participant starts from the same place. */
+  movableEnds: boolean;
   onTileError: () => void;
   /** Fires after panning or zooming settles, with the new visible box. */
   onView: (view: { bbox: BBox; zoom: number }) => void;
-  night: boolean;
+  /** Day or night — the basemap and every colour on it follow this. */
+  tone: Tone;
 }
 
 /** Turns a click anywhere on the map into a point. */
-function ClickToPick({ onPick }: { onPick: (point: LatLng) => void }) {
+function ClickToPick({ onPick }: { onPick: ((point: LatLng) => void) | null }) {
   useMapEvents({
     click(event) {
-      onPick({ lat: event.latlng.lat, lng: event.latlng.lng });
+      onPick?.({ lat: event.latlng.lat, lng: event.latlng.lng });
     },
   });
   return null;
 }
 
 /**
- * Report the visible box, once things have stopped moving.
+ * Report the visible box, once things have stopped moving — and mark the
+ * container when it is zoomed in close enough for the hearts to say what they
+ * are.
  *
  * Overpass hands out a couple of query slots per IP, so a query per frame of a
  * pan is the fastest way to a 429 that then blocks every other layer too.
@@ -240,12 +307,14 @@ function WatchView({ onView }: { onView: MapCanvasProps["onView"] }) {
   useEffect(() => {
     function report() {
       const bounds = map.getBounds();
+      const zoom = map.getZoom();
+      map.getContainer().classList.toggle("zoom-close", zoom >= CLOSE_ZOOM);
       onView({
         bbox: {
           south: bounds.getSouth(), west: bounds.getWest(),
           north: bounds.getNorth(), east: bounds.getEast(),
         },
-        zoom: map.getZoom(),
+        zoom,
       });
     }
     report();
@@ -270,14 +339,19 @@ function WatchView({ onView }: { onView: MapCanvasProps["onView"] }) {
  * layer data came back would yank the map away from wherever it was panned to.
  * `token` is bumped by the ⤢ button, and `sheet` changes when the panel is
  * dragged — both are re-fits that a key alone would not notice.
+ *
+ * Fitted to ALL the routes, not just the selected one: the comparison is the
+ * task, and an alternative that runs off the edge of the screen cannot be
+ * compared with anything.
  */
-function FitToRoute({ route, token, sheet }: { route: Route | undefined; token: number; sheet: string }) {
+function FitToRoute({ routes, token, sheet }: { routes: Route[]; token: number; sheet: string }) {
   const map = useMap();
-  const key = route ? `${route.metres}:${route.path.length}` : "";
+  const key = routes.map((route) => `${route.metres}:${route.path.length}`).join("|");
 
   useEffect(() => {
-    if (!route || route.path.length < 2) return;
-    const bounds = L.latLngBounds(route.path.map((p) => [p.lat, p.lng] as [number, number]));
+    const points = routes.flatMap((route) => route.path);
+    if (points.length < 2) return;
+    const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number]));
 
     /* The sheet takes 220ms to settle, and measuring it mid-slide fits the
        route into a box that no longer exists a moment later. */
@@ -292,7 +366,7 @@ function FitToRoute({ route, token, sheet }: { route: Route | undefined; token: 
       const bottom = narrow ? height(".sheet") : 0;
 
       /* 52px of slack on top of whatever is covering the map: a pin is
-         anchored at its tip and stands 41px above it, so fitting the LINE to
+         anchored at its tip and stands 43px above it, so fitting the LINE to
          the edge cuts the head off the pin at either end. */
       map.fitBounds(bounds, {
         paddingTopLeft: [26, top + 52],
@@ -301,7 +375,7 @@ function FitToRoute({ route, token, sheet }: { route: Route | undefined; token: 
     }, 260);
 
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands in for the route's identity
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands in for the routes' identity
   }, [map, key, token, sheet]);
 
   return null;
@@ -311,14 +385,9 @@ function FitToRoute({ route, token, sheet }: { route: Route | undefined; token: 
  * Tell Leaflet when its container changed shape.
  *
  * Leaflet caches the container's size and only re-measures on a window resize.
- * Nothing else here resizes the window — but entering navigation removes the
- * sidebar, and the map's element grows into the space without Leaflet noticing.
- * The result is tiles that stop dead partway across, with a band of empty
- * container beside them, which looks exactly like a half-loaded map.
- *
- * A `ResizeObserver` on the container catches every cause of it — the sidebar
- * going, the sheet being dragged, a desktop window resize, an on-screen
- * keyboard — rather than one prop being watched and the next one being missed.
+ * The sheet being dragged, a desktop window resize or an on-screen keyboard all
+ * change the container without one, and the result is tiles that stop dead
+ * partway across — which looks exactly like a half-loaded map.
  */
 function KeepSized() {
   const map = useMap();
@@ -334,19 +403,23 @@ function KeepSized() {
   return null;
 }
 
+/** The share of a stretch OpenStreetMap records as lit — what the glow shows. */
+function litShare(segment: Segment): number {
+  return segment.facts.samples > 0 ? segment.facts.litSamples / segment.facts.samples : 0;
+}
+
 export default function MapCanvas({
-  start, end, routes, selected, segments, highlight, sheetSnap, onSelectRoute, centre, layers, reports,
-  policeAreas, reportMode, onReport, onRemoveReport,
-  onPick, onMoveStart, onMoveEnd, onTileError, onView, night,
+  start, end, routes, selected, preferred, fastest, segments, highlight, sheetSnap, onSelectRoute,
+  centre, layers, showLighting, reports, reportNow, policeAreas, reportMode, onReport, onRemoveReport,
+  onPick, onMoveStart, onMoveEnd, movableEnds, onTileError, onView, tone,
 }: MapCanvasProps) {
   const [map, setMap] = useState<L.Map | null>(null);
   const [fitToken, setFitToken] = useState(0);
   const refit = useCallback(() => setFitToken((n) => n + 1), []);
 
-  const startIcon = useMemo(() => pin("A", "#16a34a"), []);
-  const endIcon = useMemo(() => pin("B", "#7c5cff"), []);
-  const alert = useMemo(() => crimePin(), []);
-  const example = useMemo(() => examplePin(), []);
+  // The police hatch needs real SVG elements to point a pattern at; the rest
+  // of the map stays on canvas, where hundreds of lamps are one DOM node.
+  const svgRenderer = useMemo(() => L.svg({ padding: 0.5 }), []);
 
   // One report is enough: a blocked tile host fires this for every tile in view.
   const [reported, setReported] = useState(false);
@@ -356,8 +429,26 @@ export default function MapCanvas({
     [],
   );
 
+  const ink = pick(ALTERNATIVE, tone);
+  const light = pick(LIGHT, tone);
+  // The casing is the BASEMAP's colour, not a fixed dark: it is what separates
+  // the line from the streets under it, so it has to be the opposite of the line.
+  const casing = tone === "night" ? "#05070b" : "#ffffff";
+  const chosen = routes[selected];
+
+  /** "Preferred · 21 min" — the words on the line itself, so nothing has to be looked up. */
+  const routeLabel = (index: number, route: Route) => {
+    const parts: string[] = [];
+    if (preferred === index) parts.push("★ Preferred");
+    else parts.push(`Route ${index + 1}`);
+    if (fastest === index && routes.length > 1) parts.push("fastest");
+    parts.push(formatDuration(route.seconds));
+    return parts.join(" · ");
+  };
+
   return (
     <>
+    <HatchDefs tone={tone} />
     <MapContainer
       center={[centre.lat, centre.lng]}
       zoom={14}
@@ -370,17 +461,16 @@ export default function MapCanvas({
       // Hundreds of lamps and lit streets as SVG elements is hundreds of DOM
       // nodes; on canvas it is one.
       preferCanvas
+      className={`tone-${tone}`}
       style={{ height: "100%", width: "100%" }}
     >
       <TileLayer
-        // OpenStreetMap's own tiles. Free, no key, and their usage policy asks
-        // that heavy users run their own — this is fine for a small app.
-        //
-        // Night mode inverts these in CSS rather than switching to a dark tile
-        // host. A second provider is a second thing that can be unreachable,
-        // and a map whose background silently fails to load is the worst
-        // possible way to render a page about walking somewhere after dark.
-        className={night ? "tiles-night" : ""}
+        // OpenStreetMap's own tiles, made a grey canvas in CSS (`.tiles-day`,
+        // `.tiles-night`). Not a second tile host: a second provider is a
+        // second thing that can be unreachable, and a map whose background
+        // silently fails to load is the worst way to render a page about
+        // walking somewhere after dark.
+        className={`tiles-${tone}`}
         url={TILE_URL}
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         maxZoom={19}
@@ -396,89 +486,162 @@ export default function MapCanvas({
       <ClickToPick onPick={reportMode ? onReport : onPick} />
       <KeepSized />
       <WatchView onView={onView} />
-      <FitToRoute route={routes[selected]} token={fitToken} sheet={sheetSnap} />
+      <FitToRoute routes={routes} token={fitToken} sheet={sheetSnap} />
+
+      {/* ── police figures: hatched areas, under everything ────────────────
+          The least precise thing on the map — one figure for a whole shape —
+          so it sits under the route and never obscures it. `interactive:
+          false`: the badge is what you tap. A solid edge, not a dashed one,
+          because the figure applies to everything inside it equally. */}
+      {policeAreas.map((area) => {
+        if (!area.rings || area.rings.length === 0) return null;
+        const band = crimeBand(area.severityPerMonth);
+        return (
+          <Polygon
+            key={`shape-${area.areaCode}-${tone}`}
+            positions={area.rings.map((one) => one.map((p) => [p.lat, p.lng] as [number, number]))}
+            renderer={svgRenderer}
+            pathOptions={{
+              color: pick(POLICE, tone),
+              weight: 1.4,
+              opacity: 0.6,
+              fillColor: `url(#hatch-${band})`,
+              fillOpacity: 1,
+              interactive: false,
+            }}
+          />
+        );
+      })}
 
       {/* ── lighting ─────────────────────────────────────────────────────── */}
-      {layers.litWays.map((way) => (
+      {showLighting && layers.litWays.map((way) => (
         <Polyline
           key={way.id}
           positions={way.path.map((p) => [p.lat, p.lng])}
-          color={LIGHT}
-          weight={4}
-          opacity={0.55}
+          pathOptions={{ color: light, weight: tone === "night" ? 3 : 2.5, opacity: tone === "night" ? 0.7 : 0.6, interactive: false }}
         />
       ))}
-      {layers.lamps.map((lamp) => (
+      {showLighting && layers.lamps.map((lamp) => (
         <CircleMarker
           key={lamp.id}
           center={[lamp.point.lat, lamp.point.lng]}
-          radius={2.5}
-          pathOptions={{ color: LIGHT, fillColor: LIGHT, fillOpacity: 0.9, weight: 0 }}
+          radius={tone === "night" ? 2.4 : 2}
+          pathOptions={{ color: light, fillColor: light, fillOpacity: 0.95, weight: 0, interactive: false }}
         />
       ))}
 
-      {/* ── the routes ───────────────────────────────────────────────────── */}
+      {/* ── the routes you did not pick ───────────────────────────────────── */}
       {routes.map((route, index) => {
         if (index === selected) return null;
         return (
           <Polyline
-            key={`alt-${index}`}
+            key={`alt-${index}-${tone}`}
             positions={route.path.map((p) => [p.lat, p.lng])}
-            color="#8892a6"
-            weight={5}
-            opacity={0.6}
-            dashArray="1 9"
+            pathOptions={{ color: ink, weight: 5, opacity: ALTERNATIVE_OPACITY }}
             eventHandlers={{ click: () => onSelectRoute(index) }}
-          />
+          >
+            <Tooltip permanent direction="center" className={`route-tag tone-${tone}${preferred === index ? " is-preferred" : ""}`}>
+              {routeLabel(index, route)}
+            </Tooltip>
+          </Polyline>
         );
       })}
-      {routes[selected] && (
+
+      {/* ── the chosen route ─────────────────────────────────────────────── */}
+      {chosen && (
         <>
-          {/* A dark casing under the line, so it stays readable over any tile. */}
+          {/* LIGHT, as light: a soft glow around each stretch, as strong as
+              the share of it OpenStreetMap records as lit. Two widths fake a
+              falloff. Under the casing, so the route colour is never tinted —
+              the line says how the evidence reads, the glow says whether it
+              is lit, and both are readable at once. */}
+          {showLighting && segments.map((segment) => {
+            const share = litShare(segment);
+            if (share <= 0.05) return null;
+            const path = segment.path.map((p) => [p.lat, p.lng] as [number, number]);
+            return (
+              <Polyline
+                key={`glow-${segment.fromM}-${tone}`}
+                positions={path}
+                pathOptions={{ color: light, weight: 24, opacity: 0.22 * share, lineCap: "round", interactive: false }}
+              />
+            );
+          })}
+          {showLighting && segments.map((segment) => {
+            const share = litShare(segment);
+            if (share <= 0.05) return null;
+            return (
+              <Polyline
+                key={`glow2-${segment.fromM}-${tone}`}
+                positions={segment.path.map((p) => [p.lat, p.lng])}
+                pathOptions={{ color: light, weight: 15, opacity: 0.45 * share, lineCap: "round", interactive: false }}
+              />
+            );
+          })}
+
+          {/* The casing — the basemap's own colour, so the line stands off any street. */}
           <Polyline
-            positions={routes[selected].path.map((p) => [p.lat, p.lng])}
-            color="#0b0d12" weight={9} opacity={0.5}
+            positions={chosen.path.map((p) => [p.lat, p.lng])}
+            pathOptions={{ color: casing, weight: 10, opacity: 0.9, interactive: false }}
           />
 
-          {/* The stretch the panel names, widened so it can be found by eye.
-              Under the coloured segments, not over them: a halo that hid the
+          {/* The stretch worth a closer look, widened so it can be found by
+              eye. Under the coloured line, not over it: a halo that hid the
               verdict colour would replace the answer with a pointer to it. */}
           {highlight && (
             <Polyline
               positions={highlight.path.map((p) => [p.lat, p.lng])}
-              color={VERDICT_COLOUR[highlight.verdict]}
-              weight={17}
-              opacity={0.3}
+              pathOptions={{ color: verdictColour(highlight.verdict, tone), weight: 18, opacity: 0.3, interactive: false }}
             />
           )}
 
-          {/* Coloured by stretch once the route has been read. Grey stretches
-              are ones OpenStreetMap says too little about — not dark ones. */}
           {segments.length > 0 ? (
             segments.map((segment) => (
               <Polyline
-                key={`seg-${segment.fromM}`}
+                key={`seg-${segment.fromM}-${tone}`}
                 positions={segment.path.map((p) => [p.lat, p.lng])}
-                color={VERDICT_COLOUR[segment.verdict]}
-                weight={5}
+                pathOptions={{
+                  color: verdictColour(segment.verdict, tone),
+                  weight: preferred === selected ? 7 : 6,
+                  // Grey AND dashed where the map says nothing: "not known",
+                  // never a colour that could be read as a verdict.
+                  dashArray: segment.verdict === "unknown" ? UNKNOWN_DASH : undefined,
+                  lineCap: segment.verdict === "unknown" ? "butt" : "round",
+                }}
               />
             ))
           ) : (
+            /* Still being read: the same grey and dash as "not known". */
             <Polyline
-              positions={routes[selected].path.map((p) => [p.lat, p.lng])}
-              color="#7c5cff" weight={5}
+              positions={chosen.path.map((p) => [p.lat, p.lng])}
+              pathOptions={{ color: pick(ROUTE.unknown, tone), weight: 6, dashArray: UNKNOWN_DASH, lineCap: "butt" }}
             />
           )}
+
+          {/* The label rides on its own invisible line, so it sits in the
+              middle of the route without any stretch owning it. */}
+          <Polyline
+            positions={chosen.path.map((p) => [p.lat, p.lng])}
+            pathOptions={{ opacity: 0, weight: 1, interactive: false }}
+          >
+            <Tooltip permanent direction="center" className={`route-tag is-selected tone-${tone}${preferred === selected ? " is-preferred" : ""}`}>
+              {routeLabel(selected, chosen)}
+            </Tooltip>
+          </Polyline>
         </>
       )}
 
-      {/* ── safe spots ───────────────────────────────────────────────────── */}
+      {/* ── places to go ─────────────────────────────────────────────────── */}
       {layers.spots.map((spot) => (
-        <Marker key={spot.id} position={[spot.point.lat, spot.point.lng]} icon={heartFor(spot.icon)}>
+        <Marker
+          key={spot.id}
+          position={[spot.point.lat, spot.point.lng]}
+          icon={cached(`heart|${spot.icon}|${tone}`, () => heart(spot.icon, tone))}
+        >
           <Popup>
-            <strong>{spot.name ?? spot.label}</strong>
+            <span className="pop-kind kind-place">Place to go · {spot.label}</span>
             <br />
-            {spot.label}
+            <strong>{spot.name ?? spot.label}</strong>
             {spot.openingHours && (
               <>
                 <br />
@@ -493,36 +656,7 @@ export default function MapCanvas({
         </Marker>
       ))}
 
-      {/* ── police figures, by neighbourhood ─────────────────────────────── */}
-      {/* Before the reports, so a report dot always draws ON TOP of a badge:
-          a real report is the more specific statement and must never end up
-          hidden under an area label. */}
-      {/* The neighbourhood itself, shaded by band.
-          UNDER the badges and under the route, and translucent, because this
-          is the least precise thing on the map: one figure for the whole
-          shape. It must never obscure the route line, which is the answer the
-          page exists to give. Drawn before the badges so a badge is always
-          readable on top of its own area. */}
-      {policeAreas.map((area) => (
-        area.rings && area.rings.length > 0 ? (
-          <Polygon
-            key={`shape-${area.areaCode}`}
-            positions={area.rings.map((one) => one.map((p) => [p.lat, p.lng] as [number, number]))}
-            pathOptions={{
-              color: BAND_FILL[crimeBand(area.severityPerMonth)] ?? BAND_FILL.medium,
-              fillColor: BAND_FILL[crimeBand(area.severityPerMonth)] ?? BAND_FILL.medium,
-              fillOpacity: 0.16,
-              weight: 1.5,
-              opacity: 0.55,
-              // The figure applies to the whole area equally, so the boundary
-              // is a real edge rather than a gradient — a dashed edge would
-              // read as "approximately here", which is the opposite of true.
-              interactive: false,
-            }}
-          />
-        ) : null
-      ))}
-
+      {/* ── police figures: the badge on each hatched area ───────────────── */}
       {policeAreas.map((area) => {
         const band = crimeBand(area.severityPerMonth);
         const perMonth = Math.round(area.offencesPerMonth);
@@ -530,20 +664,15 @@ export default function MapCanvas({
           <Marker
             key={area.areaCode}
             position={[area.point.lat, area.point.lng]}
-            icon={badgeFor(band, String(perMonth))}
+            icon={cached(`cbs|${band}|${perMonth}|${tone}`, () => badge(band, String(perMonth), tone))}
           >
             {/*
               `maxHeight` rather than a CSS cap, because Leaflet's own auto-pan
               reads this number: it scrolls the content AND shifts the map so
-              the popup fits, which CSS alone cannot do. This is the tallest
-              popup on the map — the breakdown, the withheld-cell note and the
-              whole-neighbourhood sentence are all load-bearing and none may be
-              cut — and unbounded it grows past the top of a phone screen and
-              spills behind the trip card, which reads as the popup being
-              broken rather than as it being long.
+              the popup fits, which CSS alone cannot do.
             */}
             <Popup maxHeight={260}>
-              <span className="cbs-tag">POLICE FIGURES — WHOLE NEIGHBOURHOOD</span>
+              <span className="pop-kind kind-police">Police figures · whole neighbourhood</span>
               <br />
               <strong>{area.areaName}</strong>
               <br />
@@ -575,9 +704,9 @@ export default function MapCanvas({
               )}
               <br />
               <small>
-                CBS table {area.table}, {area.areaCode}. This is a count for the whole
-                {area.rings ? " shaded area" : " neighbourhood"}, not a place where anything
-                happened, and it does not affect the route score.
+                CBS table {area.table}, {area.areaCode}. A count for the whole
+                {area.rings ? " hatched area" : " neighbourhood"}, not a place where anything
+                happened, and it does not affect the route comparison.
                 {!area.rings && " The outline for this neighbourhood could not be loaded, so only this marker is shown."}
               </small>
             </Popup>
@@ -587,29 +716,28 @@ export default function MapCanvas({
 
       {/* ── reports ──────────────────────────────────────────────────────── */}
       {reports.map((report) => {
-        // Gated on `MARK_EXAMPLE_DATA`, which is off: seeded reports draw as a
-        // solid dot like any other, so the map can be judged as it will look.
-        // The `source` field is untouched in the database — see `demo-mode.ts`.
+        // Gated on `MARK_EXAMPLE_DATA`, which is off: seeded reports draw like
+        // any other, so the map can be judged as it will look. The `source`
+        // field is untouched in the database — see `demo-mode.ts`.
         const invented = report.source === "example" && MARK_EXAMPLE_DATA;
+        const age = reportAge(report.at, reportNow);
         return (
           <Marker
             key={report.id}
             position={[report.point.lat, report.point.lng]}
-            icon={invented ? example : alert}
+            icon={cached(`bubble|${tone}|${age}|${invented}`, () => bubble(tone, age, invented))}
           >
             <Popup>
               {/* First line, before the category: whatever else the reader
                   takes from this popup, they take that this did not happen. */}
               {invented && <><span className="example-tag">EXAMPLE DATA — NOT A REAL REPORT</span><br /></>}
-              <strong>{categoryLabel.get(report.category) ?? report.category}</strong>
+              <span className="pop-kind kind-report">Report · {categoryLabel.get(report.category) ?? report.category}</span>
               <br />
               {new Date(report.at).toLocaleString()}
-              {/* The district. Named plainly, because "scattered in X" read as
-                  generated output — and with the placeholder marking off, a
-                  popup that announces how it was made is the one thing on the
-                  map that does not look like the product. */}
               {report.area && <><br />{report.area}</>}
-              {report.note && <><br />{report.note}</>}
+              {report.note && <><br /><span className="pop-note">{report.note}</span></>}
+              <br />
+              <small>Entered by a person. Shown beside the route comparison, never inside it.</small>
               <br />
               <button type="button" className="link" onClick={() => onRemoveReport(report.id)}>
                 {invented ? "Remove this example" : "Remove this report"}
@@ -622,8 +750,9 @@ export default function MapCanvas({
       {start && (
         <Marker
           position={[start.lat, start.lng]}
-          icon={startIcon}
-          draggable
+          icon={cached(`A|${tone}`, () => startPin(tone))}
+          draggable={movableEnds}
+          zIndexOffset={1000}
           eventHandlers={{
             dragend: (event) => {
               const { lat, lng } = event.target.getLatLng();
@@ -636,8 +765,9 @@ export default function MapCanvas({
       {end && (
         <Marker
           position={[end.lat, end.lng]}
-          icon={endIcon}
-          draggable
+          icon={cached(`B|${tone}`, () => endPin(tone))}
+          draggable={movableEnds}
+          zIndexOffset={1000}
           eventHandlers={{
             dragend: (event) => {
               const { lat, lng } = event.target.getLatLng();
@@ -655,9 +785,9 @@ export default function MapCanvas({
       <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => map?.zoomOut()}>−</button>
       <button
         type="button"
-        aria-label="Fit the route on screen"
-        title="Fit the route on screen"
-        disabled={!routes[selected]}
+        aria-label="Fit the routes on screen"
+        title="Fit the routes on screen"
+        disabled={routes.length === 0}
         onClick={refit}
       >
         ⤢
