@@ -288,6 +288,8 @@ export interface MapCanvasProps {
   /** False in the scenario, where every participant starts from the same place. */
   movableEnds: boolean;
   onTileError: () => void;
+  /** Every visible tile loaded — clears a warning a failure left behind. */
+  onTilesLoaded: () => void;
   /** Fires after panning or zooming settles, with the new visible box. */
   onView: (view: { bbox: BBox; zoom: number }) => void;
   /** Day or night — the basemap and every colour on it follow this. */
@@ -429,7 +431,7 @@ function litShare(segment: Segment): number {
 export default function MapCanvas({
   start, end, routes, selected, preferred, fastest, segments, highlight, sheetSnap, onSelectRoute,
   centre, layers, showLighting, reports, reportNow, policeAreas, reportMode, onReport, onRemoveReport,
-  onPick, onMoveStart, onMoveEnd, movableEnds, onTileError, onView, tone,
+  onPick, onMoveStart, onMoveEnd, movableEnds, onTileError, onTilesLoaded, onView, tone,
 }: MapCanvasProps) {
   const [map, setMap] = useState<L.Map | null>(null);
   const [zoom, setZoom] = useState(14);
@@ -498,6 +500,17 @@ export default function MapCanvas({
             if (reported) return;
             setReported(true);
             onTileError();
+          },
+          /*
+           * Every visible tile arrived: whatever failed before is over. Without
+           * this the warning outlived its cause — a few seconds of 502 while the
+           * app restarted for a deploy left "the background is blank" pinned
+           * over a map that had loaded perfectly, until somebody reloaded.
+           */
+          load: () => {
+            if (!reported) return;
+            setReported(false);
+            onTilesLoaded();
           },
         }}
       />

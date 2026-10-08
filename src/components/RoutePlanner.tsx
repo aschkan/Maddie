@@ -827,6 +827,7 @@ export default function RoutePlanner() {
           onMoveEnd={setEnd}
           movableEnds={!scenarioOn}
           onTileError={() => setTilesFailed(true)}
+          onTilesLoaded={() => setTilesFailed(false)}
           onView={setView}
           tone={tone}
         />
