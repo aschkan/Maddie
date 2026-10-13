@@ -1,27 +1,29 @@
 # Maddie
 
-Set a start and a destination, compare the ways round, and see what
-OpenStreetMap actually records about each one.
+An **evidence dashboard** for urban mobility: community reports, mapped
+lighting and nearby places, and the ways round from A to B compared factor by
+factor. **There is no overall safety score** — each factor is shown in the
+chart its data asks for, and the reader decides.
 
 ![Leaflet + OpenStreetMap](https://img.shields.io/badge/map-Leaflet%20%2B%20OpenStreetMap-0f8a7a)
 
-- **Click the map** to drop **A**, then **B** — or type an address and pick a
-  suggestion. Drag either pin to move it and the routes follow.
-- **Compare the alternatives.** Each way round is read from the map and scored;
-  one may be marked **★ Preferred** — on the line itself and first in the list.
-  Never "safe" — see below.
-- **Four tabs, one task each**: *Route* (your options and our suggestion),
-  *Safety* (why), *Layers* (what counts for you), *Reports* (yours and other
-  people's, and the police figures).
-- **Everything at once on the map**: the route coloured by how it reads, a glow
-  where it is lit, pink hearts for places to go, blue bubbles for reports, a
-  hatch for police figures — with a legend showing every possible state.
-- **Night is on the map**: plan for 22:00 and the map goes dark and the lit
-  streets glow.
-- **A controlled Utrecht scenario** for the study's interviews:
-  `/?scenario=utrecht`.
-- **Drive, walk or cycle**, with distance and travel time.
+- **Explore** (`/`) — one map and coordinated views: reports by type (bars),
+  when they occurred (brushable histogram), lighting by neighbourhood (stacked,
+  with *unknown* hatched), distance from report to your route, share by type
+  (donut) and reports over time (lines). Select an area, a bar or an hour range
+  and every view follows.
+- **Compare** (`/compare`) — three routes, five factors, no score: dot plots
+  per factor, a radar, a table, and a timeline of where along each route the
+  lighting, places, reports and parks differ. Brush a stretch to see it on the
+  map. The trade-off slider filters routes, it never re-scores them.
+- **Area detail** (`/area?d=centrum`) — counts, months × type, hour × weekday,
+  provenance, and neighbourhoods per km of road.
+- **Utrecht's study trips are recorded**, so Compare works with no network.
+- **Walk it in Google Maps** — the route travels as waypoints.
 - **No API keys.** Nothing to sign up for, nothing to bill.
+
+**[`docs/Maddie-Evidence-Dashboard.md`](docs/Maddie-Evidence-Dashboard.md) is the
+spec**, and `docs/reference/` holds the pictures the boards are built to.
 
 ## Running it
 
@@ -37,31 +39,11 @@ npm run check      # typecheck, lint, and 146 tests — all offline
 
 ## The page is mobile first
 
-The whole thing is written for a **360px phone** and widened from there, because
-that is where it is used: outside, one-handed, often in the dark.
-
-**The map is the page.** The trip card floats over the top of it and collapses
-to a single line the moment both ends are set — before that it is two address
-fields, and after that it is something you glance at. The panel is a sheet you
-drag up from the bottom, with three stops: collapsed it shows the verdict, the
-distance and the tabs and nothing else; half-open it shows the routes; fully
-open it shows everything. The map's own buttons ride above it, bottom-right,
-where a thumb already is.
-
-**The panel's contents are three tabs**, not one long scroll — Route, Safety,
-Layers. The scroll was six screens deep on a phone, and the safety read, which
-is the thing the page exists for, was four of them down. The tab bar sits at
-the bottom below 900px: the top of a phone screen is the hardest place to reach
-with the hand that is holding it.
-
-Nothing interactive is smaller than 44px, no input is under 16px (anything less
-and iOS Safari zooms the page on focus and never zooms back), long values wrap
-instead of widening the page, and the header, tab bar and map buttons all
-respect `safe-area-inset-*`.
-
-From 900px up the sheet becomes a sidebar and the tabs move to the top of it.
-That is the only breakpoint, and it adds to the phone rules rather than undoing
-them — there is no `max-width` query in the stylesheet at all.
+Every rule in `globals.css` is written for a **360px phone** and widened with
+`min-width` queries (760px, and 1180px for the dashboard grid in the reference
+pictures). There is no `max-width` query. On a phone the map comes first, the
+filters fold behind a toggle, nothing interactive is under 44px, inputs are
+16px (iOS zooms on anything smaller), and long values wrap.
 
 ## The safety read
 
@@ -151,22 +133,18 @@ and why it sits under the read rather than above it. Look first, then walk.
 
 ## The design system
 
-**[`docs/Maddie-Design-System.md`](docs/Maddie-Design-System.md) is the spec**
-(also as a PDF beside it): every colour with its hex and its one meaning, every
-shape, the legend, the layout, the tabs, the words, and why each choice was
-made. `src/lib/palette.ts` is its colour table in code, and
-`test/palette.test.ts` holds the rules — no purple, no alarm red, no two
-meanings sharing a colour, the stylesheet's tokens equal to the palette's, and
-no *safe* or *danger* on a participant's screen.
+**[`docs/Maddie-Evidence-Dashboard.md`](docs/Maddie-Evidence-Dashboard.md) § 2**
+is the colour table, and `src/lib/palette.ts` is that table in code.
+`test/palette.test.ts` enforces it: purple is a community report and nothing
+else, there is no alarm red, no two meanings share a colour, the stylesheet's
+tokens equal the palette's, and no *safe* or *danger* appears on a
+participant's screen. Unknown lighting is hatched and never folded into lit or
+unlit. The three routes differ by line style. Selection is blue.
 
-The rules, short: one colour one meaning; colour is spent only on evidence
-about the streets, so your own trip (A, B, the routes you did not pick) is
-black, white and grey; grey and dashed means "not known"; and each factor has
-its own channel — line colour for how a stretch reads, a glow for light,
-opacity for a report's age, a hatch for police figures, shape for what kind of
-marker — so they combine instead of taking turns.
+The earlier spec, `docs/Maddie-Design-System.md`, described the verdict-based
+map with tabs. It is kept for its history.
 
-## The study scenario — `/?scenario=utrecht`
+## The study scenario — choose Utrecht
 
 One controlled situation for the interviews, the same for every participant:
 start at Utrecht Centraal, choose Biltstraat, Overvecht or Utrecht Science

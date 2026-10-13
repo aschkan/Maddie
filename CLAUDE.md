@@ -56,15 +56,26 @@ short list of things that will bite you while editing.
 - `src/app/api/reports/route.ts` — the crime layer's storage.
 - `src/app/api/interviews/route.ts` — the interviews, READ-ONLY. No POST, ever.
 - `src/app/api/osm/[service]/[[...path]]/route.ts` — OSM through this server.
-- `src/components/BottomSheet.tsx` — the panel, as a sheet with three stops.
-- `src/components/TripCard.tsx` — A and B, floating over the map; collapses.
-- `src/components/Legend.tsx` — the legend, on the map: every state, an ⓘ per
-  group, a switch per layer.
-- `src/components/` — the map, the planner, the four tabs (`RouteChoices` in
-  Route, `SafetyPanel`, `LayersPanel`, `ReportsPanel`), the search box.
-  `ResearchView` is `/research` — the interviews, off the participant's tab bar.
-- `docs/Maddie-Design-System.md` (+ `.pdf`) — **the spec for how all of it looks
-  and what every part means.**
+- `src/lib/evidence.ts` — the dashboard's arithmetic: report types, point in
+  district, projecting onto a route, lighting runs, the brushed interval.
+  **Decomposes; never aggregates.** Pure, tested.
+- `src/lib/cities.ts` — the cities and districts the boards show. Outlines are
+  hand-traced; lighting/road figures are EXAMPLE values. **Read its header.**
+- `src/lib/example-reports.ts` — the boards' synthetic reports, generated in
+  the browser, never stored, labelled on every board.
+- `src/components/EvidenceProvider.tsx` — city, theme, reports, chosen route,
+  shared by every board (wrapped in `layout.tsx`).
+- `src/components/ExploreBoard.tsx` (`/`), `CompareBoard.tsx` (`/compare`),
+  `AreaBoard.tsx` (`/area?d=…`) — the three evidence boards.
+- `src/components/charts.tsx` — every chart, one component per chart TYPE.
+- `src/components/ExploreMap.tsx`, `CompareMap.tsx`, `mapBits.tsx` — Leaflet.
+- `src/components/Timeline.tsx` — "where do differences occur", brushable.
+- `ResearchView` is `/research` — the interviews, not part of the boards.
+- `docs/Maddie-Evidence-Dashboard.md` — **the spec for the boards**, and
+  `docs/reference/` — the pictures they are built to.
+- `docs/Maddie-Design-System.md` (+ `.pdf`) — the EARLIER spec (verdicts, tabs,
+  sheet). Superseded for the screen by the evidence-dashboard doc; kept for its
+  history and for the rules that still hold (words, unknown ≠ unlit).
 
 Tiles, routing, search and the OSM query are asked for by the browser but go
 **through this server by default** — `/api/osm/*`, resolved in
@@ -215,7 +226,7 @@ drag of a single pixel was a different query string: a different question to
 Overpass, a different cache key, another of the two slots it hands out per IP.
 `snapBox`/`gridStep` round the visible box outward onto a six-cells-across
 grid, so a pan inside one cell asks the question already answered. Measured
-over sixty small pans: 60 distinct queries before, 9 after. `RoutePlanner`
+over sixty small pans: 60 distinct queries before, 9 after. `useLiveLayers`
 also keeps the last question asked and skips the fetch outright when it has
 not changed, and backs off for a minute when Overpass says it is limiting us
 — retrying into a limit on every pan is what holds it open, and each of those
@@ -418,60 +429,47 @@ nothing to explain but the gap, and a model asked to comment anyway produces a
 sentence that sounds like an answer. That was observed: a fluent "most of this
 walk is on lit streets" printed directly under "Not enough map data".
 
-## The page is MOBILE FIRST — literally
+## The UI is three evidence boards — and shows NO SCORE
 
-`globals.css` is written for a **360px phone** and widened with `min-width`
-queries. It was a two-column desktop sheet with a single `max-width: 820px`
-patch under it, which on a phone gave the panel a 55vh box to scroll inside and
-the map whatever was left. **`README.md` § "The page is mobile first" is the
-spec.** The rules that will be undone by accident:
+**`docs/Maddie-Evidence-Dashboard.md` is the spec; `docs/reference/` holds the
+pictures.** Explore (`/`), Compare (`/compare`), one area (`/area?d=…`). The
+team's position, from their voice notes: Maddie was "too much of a smart app"
+and must be a visualization system — each factor in the chart its data type
+asks for, the reader decides. The rules that will be undone by accident:
 
-- **Every rule starts at phone width.** There is no `max-width` block in the
-  stylesheet, and a new one is a sign the rule above it was written for a
-  desktop and patched afterwards. The only `min-width` queries are the two at
-  the bottom of the file, and they ADD to the rules above rather than undoing
-  them.
-- **`--tap: 44px`, and nothing interactive is under it.** Including the sheet's
-  grab handle and the filter checkboxes — for those the whole `.check` row is
-  the target, not the 21px box in the corner of it.
-- **16px minimum on inputs.** Anything under it makes iOS Safari zoom the page
-  on focus, and it never zooms back.
-- **No horizontal scroll.** `overflow-wrap: anywhere` on the body; long values
-  wrap rather than widening the page. Addresses and street names are long.
-- **The tab bar is at the BOTTOM** below 900px, because the top of a phone
-  screen is the hardest place to reach with the hand holding it. Above 900px it
-  moves to the top of the sidebar, where the eye starts.
-- **`safe-area-inset-*`** on the trip card, the tab bar and the map's buttons.
-- **The map is the page.** Everything else floats over it: the trip card at the
-  top, the sheet at the bottom, one cluster of map buttons bottom-right where a
-  thumb already is. Leaflet's own zoom control is off (`zoomControl={false}`) —
-  it lives top-left, which is both unreachable and under the trip card.
+- **No overall score, no verdict, no "Preferred" badge on any board.**
+  `score.ts`, `segments.ts`, `compare.ts`, `verdict.ts` and `/api/assess` still
+  exist and are still tested, but nothing on screen calls them. Putting a
+  number back is a change to what the app claims, not a feature.
+- **Decompose.** Route factors are separate dot plots / radar spokes / table
+  rows. The radar's axes each have their OWN scale and the card says a bigger
+  polygon is not a better route — keep that sentence.
+- **Unknown lighting is HATCHED**, its own category, everywhere.
+- **Brush and link.** Neighbourhood, bar/slice focus and the hour brush filter
+  every other view on Explore; the brushed interval on Compare highlights the
+  map. A view that ignores the selection is a bug.
+- **The subtitle says "Synthetic example data" whenever any example is shown**
+  (`usingExamples`). Example reports carry `source: "example"` and an invented
+  narrative shows "EXAMPLE — NOT A REAL REPORT" — on these boards that
+  labelling is part of the design, independent of `MARK_EXAMPLE_DATA`.
+- **The trade-off slider FILTERS, never re-scores** (`withinBudget`).
+- **Compare reads the Utrecht RECORDING** for scenario trips (no network) and
+  OSRM + Overpass live otherwise. "Nearby places" are `PLACE_KINDS` in
+  `useMapData.ts` — no bars/restaurants, which swamp a city centre.
 
-### The sheet, and the things that have to move with it
+### Mobile first — literally
 
-- **Three stops, not free positioning.** `peek` / `half` / `full`. A sheet that
-  stays wherever you let go ends up at some useless in-between height, and
-  there is no right answer to "where was it last time" on a page opened once a
-  week. Tapping the handle cycles; dragging snaps to the nearest.
-- **The stops are defined ONCE, in the stylesheet** (`--peek`, `--snap-half`,
-  `--snap-full`). `BottomSheet` reads them back with `getComputedStyle` and the
-  map's buttons position against them. Three copies of "how far up is half" is
-  three places for it to stop being the same number.
-- **`data-snap` is on `.app`, not just the sheet.** The map's own buttons and
-  the reporting banner have to climb out from under the panel when it opens, and
-  they are not inside it.
-- **`FitToRoute` measures the furniture rather than assuming it.** The card
-  covers the top of the map and the sheet covers the bottom, so fitting into the
-  whole viewport hides both ends of the route. It reads the two elements' real
-  heights after the sheet has settled — 260ms, because measuring mid-slide fits
-  the route into a box that has stopped existing by the time it paints.
-- **`touch-action: none` on the grab handle.** Without it the browser claims the
-  vertical drag for page scrolling and the sheet never moves.
-- **The trip card collapses the moment both ends are set**, and that is the
-  point of it: two address fields, two labels and two coordinate readouts is a
-  third of a phone screen, permanently, for something touched once.
-- **The card is never inside a scrolling container.** The suggestions dropdown
-  is `position: absolute` under the input, and a scroll parent clips it.
+`globals.css` is written for a **360px phone**; the only `min-width` blocks are
+at the bottom (760px, and 1180px for the reference grid). No `max-width`
+query. `--tap: 44px` on a phone (compacted at 1180px, where a pointer is
+likely); 16px inputs on a phone (iOS zoom); `overflow-wrap: anywhere`; on a
+phone Explore puts the MAP first and folds the filters behind a toggle.
+
+- **`.map-wrap` needs a real height.** A Leaflet container in an auto-height
+  parent collapses to nothing.
+- **Charts draw at their real pixel width** (`useWidth`), not through a
+  scaled viewBox, and take colours from CSS variables so a theme switch
+  repaints them. Leaflet needs hex, so maps use `pick(swatch, tone)`.
 
 ## The score has two resolutions, and one set of weights
 
@@ -523,7 +521,7 @@ undone by accident:
   above, at opposite ends of the day.
 - **The hour is read in the VIEWER's timezone.** `plannedAt()` builds a real
   `Date`, so the platform applies whatever the daylight-saving rules are doing
-  this week. That is why `SafetyPanel` sends `at` as an ISO instant and the API
+  this week. That is why a caller sends `at` as an ISO instant and the API
   does not rebuild it: this box's timezone is whatever it was installed with,
   and rebuilding the hour here would answer for a different evening.
 - **No point means no sun, and it has to say so.** `sunDeg: null` marks a light
@@ -534,13 +532,13 @@ undone by accident:
   an `acos` outside its domain above the Arctic circle; `sunTimes()` reports
   `alwaysUp`/`alwaysDown` rather than letting a NaN print as "Invalid Date"
   under a safety verdict.
-- **Every route in a comparison is judged under ONE sky.** `RoutePlanner` passes
+- **Every route in a comparison is judged under ONE sky.** A caller passes
   the same point for all of them — two routes judged at different sun elevations
   would differ by something that has nothing to do with the streets.
 
-## "Preferred", never "safe"
+## "Preferred", never "safe" (library only — the boards show no badge)
 
-The badge in `RouteChoices` says **Preferred**, and `compare.ts` spells out why
+The badge the old route list showed said **Preferred**, and `compare.ts` spells out why
 in the sentence under it. What the data supports is "better lit and busier than
 the other one" — much smaller than a claim about safety, and the word has to
 match the claim. A rename here is a change to what the app promises, not a
@@ -553,50 +551,19 @@ invents a distinction the map cannot support.
 
 ## The design system — one colour, one meaning
 
-**`docs/Maddie-Design-System.md` is the spec**, written from the two supervision
-meetings, and `test/palette.test.ts` holds the parts a code change can quietly
-break. The rules that will be undone by accident:
+**`docs/Maddie-Evidence-Dashboard.md` § 2 is the table** and
+`test/palette.test.ts` holds it:
 
-- **Purple is retired from the map, entirely.** It meant the destination,
-  "still loading", a crime report and the UI accent at once, and a supervisor
-  read the reports as "cool places to visit". Not "kept out of the routes" —
-  gone, so it cannot come back meaning two things. The test checks every hue.
-- **No alarm red.** The far end of the route scale is rust (`#9c3d17` /
-  `#e4572e`): "look closer", not "danger".
-- **Colour is spent only on evidence.** A, B, the routes you did not pick and
-  the UI accent are black, white and grey. "Why does the starting point need a
-  colour?" Putting a hue on A or B is a second meaning for that hue.
-- **Grey + DASHED = not known**, both for "nobody mapped this" and "still
-  reading". A grey solid line is not a state this map has.
-- **Each factor has its own channel**: line colour = how a stretch reads; GLOW
-  (under the casing) = how much of it is lit; opacity = a report's age; hatch =
-  police figures; shape = what kind of marker. Light is never a line colour on
-  the route — that is how the first prototype's yellow read as a category of
-  road. Two factors on one channel is the bug.
-- **The legend lists every POSSIBLE state, not the ones on screen**, and takes
-  the MAP's tone (`.legend.tone-night`), not the panel's theme: it is the key
-  to the map, and the night swatches drawn on a white card are invisible.
-- **The map's tone is night when the theme is dark OR the planned hour is not
-  daylight.** That is the night mode the supervisor asked for — "it does
-  nothing to the map" was the complaint. One tile host, filtered in CSS
-  (`.tiles-day` / `.tiles-night`, both greyscale).
+- **Purple is a community report and NOTHING else** — and always a dot. It
+  was retired because it once meant three things; the boards bring it back for
+  one, and the test fails if any other colour enters the purple band. The four
+  report types are four lightnesses of it.
+- **No alarm red.** **A and B carry no hue.** **Routes differ by line style**
+  (solid / dashed / dotted) before ink. **Selection is blue** — area, brushed
+  interval, selected row.
 - **The words.** No *safe*, *unsafe*, *safest* or *danger(ous)* in anything a
-  participant reads — including "Preferred, not safe" and "not the same as more
-  dangerous", both of which shipped and both of which the test now catches. The
-  verdicts are *Favourable · Mixed · Look closer · Not enough map data*. The tab
-  is still called *Safety*: it names the subject, not a verdict about a street.
-  `ResearchPanel` is exempt — it quotes the protocol's own wording.
-- **CSS tokens = palette values.** The chips in the panel and the lines on the
-  map are one answer; the test parses `globals.css` and compares.
-
-### The tabs are tasks, and Research is not one of them
-
-Route (options + the ★ suggestion) → Safety (why; changes nothing) → Layers
-(what COUNTS — `FACTORS` in `score.ts` — and what is drawn) → Reports (your
-experience and other people's, and the police figures). The supervisor's line
-between the last two: changing what counts is Layers; "based on my experience,
-this is what is going on there" is Reports. The interviews moved to
-`/research` — the study team's view, not a tool for the walk home.
+  participant reads; the test greps every component's JSX text.
+- **CSS tokens = palette values**; the test parses `globals.css`.
 
 ### Factors switch terms off; they never re-weight
 
@@ -619,7 +586,8 @@ question in the design doc, for the supervisors — not a tidy-up.
 
 ## The study scenario — recorded, so every participant sees the same streets
 
-`/?scenario=utrecht`. Read the header of `src/lib/scenario.ts`. The rules:
+On the boards: choose **Utrecht** as the area; Compare's presets are the scenario's
+recorded trips. Read the header of `src/lib/scenario.ts`. The rules:
 
 - **Nothing that decides what a participant sees is fetched live.** Routes,
   reads, places, lamps and lit streets come from `scenario-recording.json`;
@@ -677,7 +645,7 @@ soften anything above; it is why the two are separate:
   costs some precision, losing the layer costs the figure.
 - **The reports layer's empty state still means what it said.** "Nobody wrote
   anything down" stays true because the police figures are a different layer
-  with its own switch, not a backfill into this one. `FilterPanel` now points at
+  with its own switch, not a backfill into this one. Explore's ⓘ beside "Official crime" points at
   that layer from the crime note so the reader knows the official figures exist
   and where; if the two are ever merged, that sentence becomes a lie.
 - **The police table cannot cover this app's subject and the panel says so.**
@@ -693,7 +661,7 @@ report somebody believed they had filed, visible to nobody, is worse than not
 being able to file one.
 
 That instruction — "if a real dataset is ever wired in, the empty-state sentence
-in `FilterPanel` has to change with it" — has now been carried out, and the way
+in the reports panel has to change with it" — has now been carried out, and the way
 it was carried out is the thing to preserve. The official dataset went into its
 OWN layer rather than into this one, so "an empty map means nobody wrote
 anything down" is still literally true of the reports layer; the crime note now
@@ -1174,12 +1142,9 @@ same traps, same severity weights — wired to a layer instead of to the score.
   with its own formula is how the parts come to disagree with the whole.
 - **A new `@media (max-width: …)` block is the bug, not the fix.** The base rule
   it is patching was written for a desktop; rewrite that instead.
-- **The sheet's stops live in CSS and are read from it.** Hardcoding 54% in
-  `BottomSheet` as well is how the panel and the buttons that dodge it drift
-  apart.
-- **The React Compiler lint rejects reading a ref during render.** `BottomSheet`
-  derives "is this being dragged" from the live height in state instead — a
-  render that depends on a ref is a render React did not cause.
+- **The React Compiler lint rejects reading a ref during render, and
+  reassigning a variable inside a `.map` in JSX.** `Donut` computes each
+  slice's start from the parts before it rather than accumulating an angle.
 - **A bare `npm run seed` now wipes the whole database**, community reports
   included. It used to keep them and replace only the example ones; that is
   `--keep` now. The change was to make one button mean one thing on every
@@ -1397,12 +1362,12 @@ same traps, same severity weights — wired to a layer instead of to the score.
 - **The theme is set by an inline script in `layout.tsx`, before first paint.**
   `localStorage` does not exist during the server render, so a React-only
   version flashes white on every load — on a page people open at night.
-  `RoutePlanner` keeps `data-theme` in step afterwards; the two read the same
+  `EvidenceProvider` keeps `data-theme` in step afterwards; the two read the same
   key, and changing one means changing the other.
 - **The basemap is OSM's tiles made GREY in CSS** (`.tiles-day`), and inverted
   near-black at night (`.tiles-night`), rather than a dark basemap loaded. A second tile host is a second thing that can be unreachable,
   and a blank background is the worst failure this page can have.
-- **Marker icons are cached at module scope** (`HEARTS` in `MapCanvas`). Leaflet
+- **Marker icons are cached at module scope** (`heartIcon` in `mapBits.tsx`). Leaflet
   compares icons by identity, so a fresh `divIcon` per render tears down and
   rebuilds every marker on the map on every keystroke.
 

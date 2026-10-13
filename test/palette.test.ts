@@ -3,14 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 
 import {
-  END, hsl, LIGHT, MEANINGS, PLACE, POLICE, REPORT, ROUTE, START, type Swatch,
+  CONTEXT, hsl, LIGHT, MEANINGS, PARK, PLACE, POLICE, REPORT, ROUTE_INK, SELECTION, TRIP, UNKNOWN, UNLIT,
+  type Swatch,
 } from "../src/lib/palette.ts";
 import { VERDICT_EXPLAIN, VERDICT_LABEL } from "../src/lib/verdict.ts";
 import { FACTORS } from "../src/lib/score.ts";
 import { CRIME_BAND_LABEL } from "../src/lib/nl-crime.ts";
 
 /*
- * The design system's rules, as tests. `docs/Maddie-Design-System.md` is the
+ * The design system's rules, as tests. `docs/Maddie-Evidence-Dashboard.md` is the
  * spec; these are the parts of it a code change can quietly break.
  */
 
@@ -23,16 +24,21 @@ function chroma(hex: string): number {
   return (Math.max(...channels) - Math.min(...channels)) / 255;
 }
 
-test("no colour on the map is purple", () => {
-  // Purple meant the destination, "still loading" AND a crime report at once,
-  // and a participant read the reports as places to visit. It is retired from
-  // the map entirely so it cannot come back meaning two things.
+test("purple means a community report, and nothing else", () => {
+  // Purple once meant the destination, "still loading" AND a report at once,
+  // and a participant read the reports as places to visit. The evidence
+  // boards bring it back for ONE meaning, so every other hue stays out of it.
   for (const entry of MEANINGS) {
+    if (entry.swatch === REPORT) continue;
     for (const hex of tones(entry.swatch)) {
       const { h, s } = hsl(hex);
       if (s < 0.15) continue;
       assert.ok(h < 250 || h > 320, `${entry.meaning} (${hex}) is purple — hue ${Math.round(h)}°`);
     }
+  }
+  for (const hex of tones(REPORT)) {
+    const { h } = hsl(hex);
+    assert.ok(h >= 250 && h <= 320, `a report (${hex}) should be the purple — hue ${Math.round(h)}°`);
   }
 });
 
@@ -61,17 +67,13 @@ test("one colour, one meaning: no two meanings share a colour", () => {
 });
 
 test("the start and the destination carry no hue — colour is kept for evidence", () => {
-  // "Why does the starting point need a colour?" — it does not. The ends of a
-  // trip are not evidence about the streets.
-  for (const hex of [...tones(START), ...tones(END)]) {
-    // CHROMA, not HSL saturation: near-black ink has a high saturation and no
-    // visible hue at all.
-    assert.ok(chroma(hex) < 0.1, `${hex} carries a hue — an end of the trip should not`);
-  }
-  // …and they still differ from each other, by lightness, in both tones.
-  for (const tone of ["day", "night"] as const) {
-    assert.ok(Math.abs(hsl(START[tone]).l - hsl(END[tone]).l) > 0.15, `A and B are too alike at ${tone}`);
-  }
+  // "Why does the starting point need a colour?" — it does not.
+  for (const hex of tones(TRIP)) assert.ok(chroma(hex) < 0.1, `${hex} carries a hue — an end of the trip should not`);
+});
+
+test("the three routes differ by line style, not only by ink", async () => {
+  const { ROUTE_DASH } = await import("../src/lib/palette.ts");
+  assert.equal(new Set(ROUTE_DASH.map(String)).size, ROUTE_INK.length);
 });
 
 test("police figures are a texture in a neutral ink, never a hue a report could be confused with", () => {
@@ -91,15 +93,14 @@ test("the stylesheet's tokens are the palette's colours", () => {
   const light = block(":root");
   const dark = block('[data-theme="dark"]');
   const pairs: [string, Swatch][] = [
-    ["--route-good", ROUTE.good], ["--route-fair", ROUTE.fair], ["--route-poor", ROUTE.poor],
-    ["--route-unknown", ROUTE.unknown], ["--light", LIGHT], ["--place", PLACE], ["--report", REPORT],
-    ["--police", POLICE], ["--trip-start", START], ["--trip-end", END],
+    ["--report", REPORT], ["--place", PLACE], ["--lit", LIGHT], ["--unlit", UNLIT], ["--unknown", UNKNOWN],
+    ["--selection", SELECTION], ["--context", CONTEXT], ["--park", PARK], ["--police", POLICE],
+    ["--trip", TRIP], ["--route-a", ROUTE_INK[0]!], ["--route-b", ROUTE_INK[1]!], ["--route-c", ROUTE_INK[2]!],
   ];
   for (const [token, swatch] of pairs) {
     assert.match(light, new RegExp(`${token}:\\s*${swatch.day}`, "i"), `${token} by day should be ${swatch.day}`);
     assert.match(dark, new RegExp(`${token}:\\s*${swatch.night}`, "i"), `${token} at night should be ${swatch.night}`);
   }
-  assert.doesNotMatch(css, /--crime\b/, "the purple crime token is gone and must stay gone");
 });
 
 const UNSAID = /\b(safe|unsafe|safest|danger|dangerous)\b/i;

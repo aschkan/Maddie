@@ -1,5 +1,5 @@
-import RoutePlanner from "@/components/RoutePlanner";
+import ExploreBoard from "@/components/ExploreBoard";
 
 export default function Home() {
-  return <RoutePlanner />;
+  return <ExploreBoard />;
 }

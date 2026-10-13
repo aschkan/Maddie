@@ -1,0 +1,1666 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maddie — Evidence-Dashboard Redesign</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --panel: #ffffff;
+    --panel-2: #f3f4f6;
+    --ink: #0f172a;
+    --ink-2: #475569;
+    --ink-3: #94a3b8;
+    --line: #e2e8f0;
+    --line-2: #cbd5e1;
+    /* data palette — purple-based like the reference */
+    --accent: #7c3aed;        /* purple — primary data */
+    --accent-soft: #ede9fe;   /* purple background */
+    --compare: #cbd5e1;       /* gray — all records / comparison */
+    --geo: #3b82f6;           /* blue — geographic selection */
+    --lit: #fbbf24;           /* amber — mapped lit */
+    --unlit: #475569;         /* dark gray — mapped unlit */
+    --heart: #ec4899;         /* pink — nearby places (hearts) */
+    --route-a: #1e293b;       /* near black for Route A */
+    --route-b: #38bdf8;       /* sky blue for Route B */
+    --route-c: #94a3b8;       /* gray for Route C */
+    --park: #d1d5db;          /* light gray for park segments */
+    --map-bg: #e5e7eb;
+    --map-road: #ffffff;
+    --map-water: #c5d9e8;
+    --map-park: #d4e5c9;
+    --radius: 8px;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #0f172a; --panel: #1e293b; --panel-2: #334155;
+      --ink: #f1f5f9; --ink-2: #cbd5e1; --ink-3: #64748b;
+      --line: #334155; --line-2: #475569;
+      --accent-soft: #4c1d95;
+      --compare: #475569;
+      --map-bg: #1e293b; --map-road: #334155; --map-water: #1e3a5f; --map-park: #1e3a2f;
+      --park: #334155;
+      --route-a: #f1f5f9;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f172a; --panel: #1e293b; --panel-2: #334155;
+    --ink: #f1f5f9; --ink-2: #cbd5e1; --ink-3: #64748b;
+    --line: #334155; --line-2: #475569;
+    --accent-soft: #4c1d95;
+    --compare: #475569;
+    --map-bg: #1e293b; --map-road: #334155; --map-water: #1e3a5f; --map-park: #1e3a2f;
+    --park: #334155;
+    --route-a: #f1f5f9;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--ink); font-family: var(--sans); margin: 0; }
+  body { padding: 32px 16px 96px; line-height: 1.55; }
+  main { max-width: 1240px; margin: 0 auto; }
+
+  header.page {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 24px; margin-bottom: 36px; flex-wrap: wrap;
+  }
+  header.page h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.02em; line-height: 1.15; }
+  header.page p.sub { color: var(--ink-2); margin: 0; max-width: 680px; font-size: 15px; }
+  header.page .tag {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 6px;
+  }
+
+  .theme-switch {
+    display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--panel);
+  }
+  .theme-switch button {
+    all: unset; cursor: pointer; padding: 6px 12px; font-size: 12px; color: var(--ink-2);
+    border-radius: 999px;
+  }
+  .theme-switch button.active { background: var(--ink); color: var(--bg); }
+
+  section.board {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 32px; box-shadow: var(--shadow);
+  }
+  section.board .b-num {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    color: var(--ink-3); text-transform: uppercase;
+  }
+  section.board h2 { font-size: 22px; margin: 6px 0 2px; letter-spacing: -0.015em; }
+  section.board p.lede { color: var(--ink-2); margin: 4px 0 18px; max-width: 820px; font-size: 14px; }
+
+  .frame {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    overflow: hidden;
+  }
+  svg.wire { display: block; width: 100%; height: auto; }
+
+  .notes-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;
+  }
+  @media (max-width: 720px) { .notes-grid { grid-template-columns: 1fr; } }
+
+  .notes-col h3 {
+    font-size: 11px; margin: 0 0 8px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600;
+  }
+  .notes-col ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+  .notes-col ul li { margin-bottom: 6px; }
+  .notes-col ul li b { color: var(--ink); font-weight: 600; }
+
+  .ref-pills { margin-top: 12px; }
+  .pill {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 4px; background: var(--panel-2); color: var(--ink-2);
+    border: 1px solid var(--line); margin-right: 4px; margin-bottom: 4px;
+  }
+  .pill.hot { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+  .principle-row {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 20px;
+  }
+  @media (max-width: 720px) { .principle-row { grid-template-columns: 1fr; } }
+  .principle {
+    padding: 14px; background: var(--panel-2); border-radius: 6px;
+    border: 1px solid var(--line);
+  }
+  .principle h4 {
+    font-size: 12px; margin: 0 0 6px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: .06em; font-weight: 600;
+  }
+  .principle p { margin: 0; font-size: 13px; color: var(--ink-2); }
+
+  footer.closing {
+    margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line);
+    color: var(--ink-2); font-size: 13px;
+  }
+  footer.closing h3 { color: var(--ink); font-size: 16px; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+
+<header class="page">
+  <div>
+    <div class="tag">Thesis · Evidence-dashboard redesign · for Evanthia</div>
+    <h1>Maddie as a visualization system — not a smart app</h1>
+    <p class="sub">No overall safety score. No "recommended route". Coordinated small views where the user compares the actual evidence themselves, in the style of the Visual Decision-Making for Nature-Based Solutions project and Franconeri's chart-chooser method.</p>
+  </div>
+  <div class="theme-switch" role="tablist" aria-label="Theme">
+    <button data-theme="light" class="active">Light</button>
+    <button data-theme="dark">Dark</button>
+  </div>
+</header>
+
+
+<!-- ================================================================ -->
+<!-- WHY THE CHANGE                                                    -->
+<!-- ================================================================ -->
+<section class="board">
+  <span class="b-num">Framing shift</span>
+  <h2>From "safety score" to "evidence exploration"</h2>
+  <p class="lede">The earlier mockups still assumed Maddie should hand the user a verdict (72 Favourable, ★ Recommended Route A). The reference project refuses that. It shows what is known about an area or a route — reports, lighting coverage, nearby places — as separate factors, each in the chart type that fits its data. The user decides.</p>
+
+  <div class="principle-row">
+    <div class="principle">
+      <h4>1 · Decompose, don't aggregate</h4>
+      <p>No single score. Each factor (lighting, reports, nearby places, time) is its own view. Munzner Ch. 3: aggregation hides the structure users need to see.</p>
+    </div>
+    <div class="principle">
+      <h4>2 · Chart matches data type</h4>
+      <p>Categorical → bar chart. Continuous → histogram. Comparison → dot plot small multiples. Spatial → map. From Franconeri's L2 "Vis Chooser per Data Type".</p>
+    </div>
+    <div class="principle">
+      <h4>3 · Brush and link, don't filter</h4>
+      <p>Select a bar → highlights the related points on the map and the related slice on every other chart. One click, five views update. Munzner Ch. 12.</p>
+    </div>
+    <div class="principle">
+      <h4>4 · Show the unknown</h4>
+      <p>Where lighting data is missing, it's a visible striped category — not hidden, not imputed. "Missing lighting stays unknown."</p>
+    </div>
+    <div class="principle">
+      <h4>5 · Reports are context, not inputs</h4>
+      <p>Community reports describe a dataset of lived experience. They are shown alongside routes, not folded into a route score.</p>
+    </div>
+    <div class="principle">
+      <h4>6 · Scientific honesty on the page</h4>
+      <p>"CONCEPT MOCKUP · Synthetic example data". "Observed reports describe this dataset, not incident risk." Every caveat lives on the page itself.</p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ================================================================ -->
+<!-- BOARD 1 — EXPLORE EVIDENCE                                        -->
+<!-- ================================================================ -->
+<section class="board">
+  <span class="b-num">Board 01</span>
+  <h2>Explore urban mobility evidence — the overview dashboard</h2>
+  <p class="lede">Replaces the current blank-map opening screen. One map, four coordinated small views. Selecting a neighbourhood on the map, or a bar on any chart, highlights the related records everywhere — the Munzner / Franconeri brush-and-link pattern. No safety score anywhere.</p>
+
+  <div class="frame">
+    <svg class="wire" viewBox="0 0 1200 760" xmlns="http://www.w3.org/2000/svg" font-family="var(--sans)">
+      <defs>
+        <pattern id="unknown" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="var(--panel-2)"/>
+          <line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-2)" stroke-width="1.5"/>
+        </pattern>
+      </defs>
+
+      <!-- app frame -->
+      <rect width="1200" height="760" fill="var(--panel-2)"/>
+
+      <!-- top bar -->
+      <g>
+        <text x="24" y="40" font-size="22" font-weight="700" fill="var(--ink)">Maddie — Explore urban mobility evidence</text>
+        <text x="24" y="60" font-size="11" font-family="var(--mono)" fill="var(--ink-3)" letter-spacing="1">CONCEPT MOCKUP · Synthetic example data</text>
+        <text x="1176" y="40" text-anchor="end" font-size="12" fill="var(--ink-2)">Select a bar or map area → highlight related records in every view</text>
+      </g>
+
+      <!-- LEFT SIDEBAR: FILTERS -->
+      <g transform="translate(24, 88)">
+        <rect width="200" height="648" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+
+        <!-- Area -->
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Area</text>
+        <rect x="14" y="30" width="172" height="28" rx="4" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="22" y="48" font-size="12" fill="var(--ink)">Utrecht</text>
+        <text x="178" y="48" font-size="12" fill="var(--ink-3)">▾</text>
+
+        <text x="14" y="80" font-size="11" fill="var(--ink-2)">Neighbourhood (4 shown)</text>
+        <!-- checkboxes -->
+        <g font-size="12" fill="var(--ink)">
+          <rect x="14" y="90" width="14" height="14" rx="3" fill="var(--accent)"/>
+          <path d="M18 97 l3 3 l5 -5" stroke="#fff" stroke-width="2" fill="none"/>
+          <text x="34" y="102">Binnenstad</text>
+
+          <rect x="14" y="110" width="14" height="14" rx="3" fill="var(--panel)" stroke="var(--line-2)"/>
+          <text x="34" y="122">Oog in Al</text>
+
+          <rect x="14" y="130" width="14" height="14" rx="3" fill="var(--panel)" stroke="var(--line-2)"/>
+          <text x="34" y="142">Lombok</text>
+
+          <rect x="14" y="150" width="14" height="14" rx="3" fill="var(--panel)" stroke="var(--line-2)"/>
+          <text x="34" y="162">Oost</text>
+        </g>
+
+        <!-- Report source -->
+        <text x="14" y="192" font-size="12" font-weight="600" fill="var(--ink)">Report source</text>
+        <g font-size="12" fill="var(--ink)">
+          <rect x="14" y="200" width="14" height="14" rx="3" fill="var(--accent)"/>
+          <path d="M18 207 l3 3 l5 -5" stroke="#fff" stroke-width="2" fill="none"/>
+          <text x="34" y="212">Community reports</text>
+          <text x="34" y="226" font-size="10" fill="var(--ink-3)">Street points (user-submitted)</text>
+
+          <rect x="14" y="236" width="14" height="14" rx="3" fill="var(--panel)" stroke="var(--line-2)"/>
+          <text x="34" y="248">Official crime <tspan fill="var(--ink-3)">(optional)</tspan></text>
+          <text x="34" y="262" font-size="10" fill="var(--ink-3)">Neighbourhood aggregates</text>
+          <circle cx="178" cy="244" r="7" fill="none" stroke="var(--ink-3)"/>
+          <text x="178" y="248" text-anchor="middle" font-size="9" fill="var(--ink-3)">i</text>
+        </g>
+
+        <!-- Report type -->
+        <text x="14" y="296" font-size="12" font-weight="600" fill="var(--ink)">Report type</text>
+        <g font-size="12" fill="var(--ink)">
+          <rect x="14" y="304" width="14" height="14" rx="3" fill="var(--accent)"/>
+          <path d="M18 311 l3 3 l5 -5" stroke="#fff" stroke-width="2" fill="none"/>
+          <text x="34" y="316">Harassment</text>
+
+          <rect x="14" y="324" width="14" height="14" rx="3" fill="var(--accent)"/>
+          <path d="M18 331 l3 3 l5 -5" stroke="#fff" stroke-width="2" fill="none"/>
+          <text x="34" y="336">Catcalling</text>
+
+          <rect x="14" y="344" width="14" height="14" rx="3" fill="var(--accent)"/>
+          <path d="M18 351 l3 3 l5 -5" stroke="#fff" stroke-width="2" fill="none"/>
+          <text x="34" y="356">Assault</text>
+
+          <rect x="14" y="364" width="14" height="14" rx="3" fill="var(--accent)"/>
+          <path d="M18 371 l3 3 l5 -5" stroke="#fff" stroke-width="2" fill="none"/>
+          <text x="34" y="376">Other</text>
+        </g>
+
+        <!-- Date range -->
+        <text x="14" y="412" font-size="12" font-weight="600" fill="var(--ink)">Date range</text>
+        <rect x="14" y="420" width="172" height="28" rx="4" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="22" y="438" font-size="11" fill="var(--ink)">1 Jan 2024 — 31 Dec 2024</text>
+
+        <!-- Map layers -->
+        <text x="14" y="476" font-size="12" font-weight="600" fill="var(--ink)">Map layers <tspan fill="var(--ink-3)">(optional)</tspan></text>
+        <g font-size="12" fill="var(--ink)">
+          <rect x="14" y="484" width="14" height="14" rx="3" fill="var(--panel)" stroke="var(--line-2)"/>
+          <text x="34" y="496">Street lighting (mapped)</text>
+          <circle cx="178" cy="491" r="4" fill="var(--lit)"/>
+
+          <rect x="14" y="504" width="14" height="14" rx="3" fill="var(--panel)" stroke="var(--line-2)"/>
+          <text x="34" y="516">Nearby places</text>
+          <path d="M172 509 l3 -3 l3 3 l-3 3 z" fill="var(--heart)"/>
+        </g>
+
+        <!-- caveat -->
+        <text x="14" y="620" font-size="10" fill="var(--ink-3)" font-style="italic">Observed reports describe this</text>
+        <text x="14" y="632" font-size="10" fill="var(--ink-3)" font-style="italic">dataset, not incident risk.</text>
+      </g>
+
+      <!-- MAP (center top) -->
+      <g transform="translate(240, 88)">
+        <rect width="580" height="340" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Utrecht — community reports (street points)</text>
+        <!-- top legend -->
+        <g transform="translate(300, 10)" font-size="10" fill="var(--ink-2)">
+          <circle cx="4" cy="8" r="3" fill="var(--accent)"/>
+          <text x="12" y="11">Community report</text>
+          <path d="M94 7 l3 -3 l3 3 l-3 3 z" fill="var(--heart)"/>
+          <text x="106" y="11">Nearby place</text>
+          <rect x="194" y="4" width="12" height="8" fill="none" stroke="var(--geo)" stroke-width="1.5"/>
+          <text x="212" y="11">Selected area (Binnenstad)</text>
+        </g>
+
+        <!-- map area -->
+        <g transform="translate(14, 32)">
+          <rect width="552" height="294" rx="4" fill="var(--map-bg)"/>
+          <!-- roads -->
+          <g stroke="var(--map-road)" stroke-width="4" fill="none">
+            <path d="M0 60 Q 100 55 220 70 T 450 85 L552 90"/>
+            <path d="M0 140 Q 150 135 300 150 T 552 160"/>
+            <path d="M0 220 Q 200 210 380 230 T 552 240"/>
+            <path d="M80 0 Q 85 100 100 200 T 110 294"/>
+            <path d="M240 0 Q 245 80 260 180 T 270 294"/>
+            <path d="M400 0 Q 405 80 420 180 T 430 294"/>
+          </g>
+          <!-- water -->
+          <path d="M460 0 Q 470 60 490 120 T 510 294 L552 294 L552 0 Z" fill="var(--map-water)" opacity=".6"/>
+          <!-- parks -->
+          <ellipse cx="80" cy="60" rx="40" ry="30" fill="var(--map-park)" opacity=".7"/>
+          <ellipse cx="500" cy="200" rx="25" ry="20" fill="var(--map-park)" opacity=".7"/>
+
+          <!-- neighbourhood labels -->
+          <g font-size="11" fill="var(--ink-2)" font-weight="500" opacity=".65" letter-spacing="1">
+            <text x="70" y="130">WEST</text>
+            <text x="260" y="130">BINNENSTAD</text>
+            <text x="420" y="130">OOST</text>
+            <text x="200" y="260">ZUID</text>
+          </g>
+
+          <!-- selected area outline (Binnenstad) -->
+          <path d="M200 70 L330 60 L370 110 L365 180 L310 220 L220 215 L185 160 Z"
+                fill="var(--geo)" fill-opacity=".08"
+                stroke="var(--geo)" stroke-width="2"/>
+
+          <!-- community report dots -->
+          <g fill="var(--accent)">
+            <!-- outside selected -->
+            <circle cx="80" cy="80" r="4"/>
+            <circle cx="110" cy="100" r="4"/>
+            <circle cx="60" cy="150" r="4"/>
+            <circle cx="100" cy="200" r="4"/>
+            <circle cx="150" cy="240" r="4"/>
+            <circle cx="440" cy="110" r="4"/>
+            <circle cx="420" cy="170" r="4"/>
+            <circle cx="400" cy="80" r="4"/>
+            <circle cx="200" cy="250" r="4"/>
+            <circle cx="250" cy="265" r="4"/>
+            <circle cx="320" cy="250" r="4"/>
+            <!-- inside selected (highlighted) -->
+            <circle cx="240" cy="100" r="4.5"/>
+            <circle cx="270" cy="110" r="4.5"/>
+            <circle cx="300" cy="90" r="4.5"/>
+            <circle cx="260" cy="150" r="4.5"/>
+            <circle cx="290" cy="160" r="4.5"/>
+            <circle cx="310" cy="130" r="4.5"/>
+            <circle cx="240" cy="180" r="4.5"/>
+            <circle cx="280" cy="190" r="4.5"/>
+            <circle cx="330" cy="170" r="4.5"/>
+            <circle cx="220" cy="140" r="4.5"/>
+            <circle cx="340" cy="200" r="4.5"/>
+          </g>
+
+          <!-- hearts (nearby places) -->
+          <g fill="var(--heart)">
+            <path d="M220 90 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z" transform="scale(0.5) translate(220,90)"/>
+            <g transform="translate(260,120) scale(0.45)">
+              <path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/>
+            </g>
+            <g transform="translate(300,170) scale(0.45)">
+              <path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/>
+            </g>
+            <g transform="translate(250,200) scale(0.45)">
+              <path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/>
+            </g>
+            <g transform="translate(180,180) scale(0.45)">
+              <path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/>
+            </g>
+            <g transform="translate(380,200) scale(0.45)">
+              <path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/>
+            </g>
+          </g>
+
+          <!-- tooltip -->
+          <g transform="translate(320, 170)">
+            <circle r="7" fill="none" stroke="var(--accent)" stroke-width="2"/>
+            <line x1="7" y1="-7" x2="30" y2="-40" stroke="var(--ink-3)" stroke-width="1"/>
+            <rect x="30" y="-70" width="160" height="48" rx="4" fill="var(--panel)" stroke="var(--line)"/>
+            <text x="42" y="-54" font-size="11" font-weight="600" fill="var(--ink)">Example report</text>
+            <text x="42" y="-40" font-size="10" fill="var(--ink-2)">Evening · Community report</text>
+            <text x="42" y="-28" font-size="10" fill="var(--ink-2)">12 Oct 2024, 20:14</text>
+          </g>
+
+          <!-- scale bar -->
+          <g transform="translate(14, 270)">
+            <line x1="0" y1="0" x2="60" y2="0" stroke="var(--ink)" stroke-width="2"/>
+            <line x1="0" y1="-3" x2="0" y2="3" stroke="var(--ink)" stroke-width="2"/>
+            <line x1="30" y1="-3" x2="30" y2="3" stroke="var(--ink)" stroke-width="2"/>
+            <line x1="60" y1="-3" x2="60" y2="3" stroke="var(--ink)" stroke-width="2"/>
+            <text x="0" y="16" font-size="9" fill="var(--ink-2)">0</text>
+            <text x="27" y="16" font-size="9" fill="var(--ink-2)">1</text>
+            <text x="54" y="16" font-size="9" fill="var(--ink-2)">2 km</text>
+          </g>
+
+          <!-- data-provenance legend -->
+          <g transform="translate(292, 240)">
+            <rect width="260" height="46" rx="4" fill="var(--panel)" opacity=".95" stroke="var(--line)"/>
+            <circle cx="14" cy="14" r="4" fill="var(--accent)"/>
+            <text x="24" y="17" font-size="9" fill="var(--ink-2)">Community reports: street points (user-submitted)</text>
+            <rect x="10" y="26" width="8" height="8" fill="none" stroke="var(--ink-2)" stroke-dasharray="2 2"/>
+            <text x="24" y="33" font-size="9" fill="var(--ink-2)">Official crime: neighbourhood aggregates (off)</text>
+          </g>
+        </g>
+      </g>
+
+      <!-- RIGHT TOP: BAR CHART (reports by type) -->
+      <g transform="translate(840, 88)">
+        <rect width="336" height="340" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Community reports by type</text>
+
+        <!-- legend -->
+        <g transform="translate(14, 36)" font-size="10" fill="var(--ink-2)">
+          <rect width="12" height="10" fill="var(--accent)"/>
+          <text x="16" y="9">Selected area (Binnenstad)</text>
+          <rect x="156" width="12" height="10" fill="var(--compare)"/>
+          <text x="172" y="9">All displayed records</text>
+        </g>
+
+        <!-- bars -->
+        <g transform="translate(100, 68)" font-size="10" fill="var(--ink-2)">
+          <!-- Harassment -->
+          <text x="-10" y="18" text-anchor="end" font-weight="600" fill="var(--ink)">Harassment</text>
+          <rect y="24" width="220" height="14" fill="var(--compare)"/>
+          <rect y="8" width="124" height="14" fill="var(--accent)"/>
+          <text x="128" y="19" font-size="11" font-weight="700" fill="var(--accent)">124</text>
+
+          <!-- Catcalling -->
+          <text x="-10" y="68" text-anchor="end" font-weight="600" fill="var(--ink)">Catcalling</text>
+          <rect y="74" width="150" height="14" fill="var(--compare)"/>
+          <rect y="58" width="86" height="14" fill="var(--accent)"/>
+          <text x="90" y="69" font-size="11" font-weight="700" fill="var(--accent)">86</text>
+
+          <!-- Assault -->
+          <text x="-10" y="118" text-anchor="end" font-weight="600" fill="var(--ink)">Assault</text>
+          <rect y="124" width="78" height="14" fill="var(--compare)"/>
+          <rect y="108" width="37" height="14" fill="var(--accent)"/>
+          <text x="42" y="119" font-size="11" font-weight="700" fill="var(--accent)">37</text>
+
+          <!-- Other -->
+          <text x="-10" y="168" text-anchor="end" font-weight="600" fill="var(--ink)">Other</text>
+          <rect y="174" width="90" height="14" fill="var(--compare)"/>
+          <rect y="158" width="52" height="14" fill="var(--accent)"/>
+          <text x="56" y="169" font-size="11" font-weight="700" fill="var(--accent)">52</text>
+
+          <!-- axis -->
+          <line x1="0" y1="200" x2="220" y2="200" stroke="var(--line-2)"/>
+          <g font-size="9" fill="var(--ink-3)">
+            <text x="0" y="214">0</text>
+            <text x="55" y="214">50</text>
+            <text x="110" y="214">100</text>
+            <text x="165" y="214">150</text>
+            <text x="220" y="214" text-anchor="end">200</text>
+          </g>
+          <text x="110" y="232" text-anchor="middle" font-size="10" fill="var(--ink-2)">Number of reports</text>
+        </g>
+      </g>
+
+      <!-- BOTTOM LEFT: WHEN REPORTS OCCURRED (histogram) -->
+      <g transform="translate(240, 444)">
+        <rect width="296" height="292" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">When reports occurred</text>
+        <text x="282" y="42" text-anchor="end" font-size="10" fill="var(--geo)" font-weight="600">Brush a time range</text>
+        <line x1="222" y1="38" x2="280" y2="38" stroke="var(--geo)" stroke-width="1.5"/>
+        <path d="M222 35 l-4 3 l4 3 Z" fill="var(--geo)"/>
+        <path d="M280 35 l4 3 l-4 3 Z" fill="var(--geo)"/>
+
+        <!-- histogram bars (24 hours) -->
+        <g transform="translate(32, 68)">
+          <!-- brush selection highlight -->
+          <rect x="152" y="0" width="40" height="152" fill="var(--geo)" opacity=".12"/>
+          <rect x="152" y="0" width="40" height="152" fill="none" stroke="var(--geo)" stroke-width="1" stroke-dasharray="3 2"/>
+
+          <!-- bars -->
+          <g fill="var(--accent)">
+            <rect x="0"   y="140" width="8" height="12"/>
+            <rect x="10"  y="138" width="8" height="14"/>
+            <rect x="20"  y="140" width="8" height="12"/>
+            <rect x="30"  y="134" width="8" height="18"/>
+            <rect x="40"  y="130" width="8" height="22"/>
+            <rect x="50"  y="124" width="8" height="28"/>
+            <rect x="60"  y="118" width="8" height="34"/>
+            <rect x="70"  y="110" width="8" height="42"/>
+            <rect x="80"  y="106" width="8" height="46"/>
+            <rect x="90"  y="104" width="8" height="48"/>
+            <rect x="100" y="98"  width="8" height="54"/>
+            <rect x="110" y="92"  width="8" height="60"/>
+            <rect x="120" y="80"  width="8" height="72"/>
+            <rect x="130" y="68"  width="8" height="84"/>
+            <rect x="140" y="52"  width="8" height="100"/>
+            <rect x="150" y="34"  width="8" height="118"/>
+            <rect x="160" y="12"  width="8" height="140"/>
+            <rect x="170" y="26"  width="8" height="126"/>
+            <rect x="180" y="40"  width="8" height="112"/>
+            <rect x="190" y="60"  width="8" height="92"/>
+            <rect x="200" y="80"  width="8" height="72"/>
+            <rect x="210" y="100" width="8" height="52"/>
+            <rect x="220" y="118" width="8" height="34"/>
+            <rect x="230" y="132" width="8" height="20"/>
+          </g>
+
+          <!-- axis -->
+          <line x1="0" y1="152" x2="240" y2="152" stroke="var(--line-2)"/>
+          <g font-size="9" fill="var(--ink-3)">
+            <text x="-10" y="4">40</text>
+            <text x="-10" y="40">30</text>
+            <text x="-10" y="78">20</text>
+            <text x="-10" y="116">10</text>
+            <text x="-10" y="152">0</text>
+            <text x="0" y="168">00</text>
+            <text x="60" y="168">06</text>
+            <text x="120" y="168">12</text>
+            <text x="180" y="168">18</text>
+            <text x="230" y="168">23</text>
+          </g>
+          <text x="-28" y="80" font-size="10" fill="var(--ink-2)" transform="rotate(-90 -28 80)">Report count</text>
+          <text x="120" y="186" text-anchor="middle" font-size="10" fill="var(--ink-2)">Hour of day</text>
+        </g>
+      </g>
+
+      <!-- BOTTOM CENTER: LIGHTING BY NEIGHBOURHOOD (stacked bars) -->
+      <g transform="translate(552, 444)">
+        <rect width="296" height="292" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Lighting data by neighbourhood</text>
+
+        <!-- legend -->
+        <g transform="translate(14, 40)" font-size="10" fill="var(--ink-2)">
+          <rect width="10" height="10" fill="var(--lit)"/>
+          <text x="14" y="9">Mapped lit</text>
+          <rect x="86" width="10" height="10" fill="var(--unlit)"/>
+          <text x="100" y="9">Mapped unlit</text>
+          <rect x="172" width="10" height="10" fill="url(#unknown)"/>
+          <text x="186" y="9">Unknown</text>
+        </g>
+
+        <!-- stacked bars -->
+        <g transform="translate(80, 68)" font-size="10" fill="var(--ink)">
+          <!-- Binnenstad (SELECTED) -->
+          <text x="-10" y="12" text-anchor="end" font-weight="600" fill="var(--geo)">Binnenstad</text>
+          <rect y="4" width="124" height="14" fill="var(--lit)"/>
+          <rect x="124" y="4" width="56" height="14" fill="var(--unlit)"/>
+          <rect x="180" y="4" width="20" height="14" fill="url(#unknown)"/>
+          <text x="62" y="14" text-anchor="middle" font-size="9" font-weight="600" fill="#422006">62%</text>
+          <text x="152" y="14" text-anchor="middle" font-size="9" font-weight="600" fill="#fff">28%</text>
+          <text x="190" y="14" text-anchor="middle" font-size="9" fill="var(--ink)">10%</text>
+
+          <!-- Oog in Al -->
+          <text x="-10" y="38" text-anchor="end" fill="var(--ink)">Oog in Al</text>
+          <rect y="30" width="96" height="14" fill="var(--lit)"/>
+          <rect x="96" y="30" width="84" height="14" fill="var(--unlit)"/>
+          <rect x="180" y="30" width="20" height="14" fill="url(#unknown)"/>
+          <text x="48" y="40" text-anchor="middle" font-size="9" font-weight="600" fill="#422006">48%</text>
+          <text x="138" y="40" text-anchor="middle" font-size="9" font-weight="600" fill="#fff">42%</text>
+          <text x="190" y="40" text-anchor="middle" font-size="9" fill="var(--ink)">10%</text>
+
+          <!-- Oost -->
+          <text x="-10" y="64" text-anchor="end" fill="var(--ink)">Oost</text>
+          <rect y="56" width="110" height="14" fill="var(--lit)"/>
+          <rect x="110" y="56" width="66" height="14" fill="var(--unlit)"/>
+          <rect x="176" y="56" width="24" height="14" fill="url(#unknown)"/>
+          <text x="55" y="66" text-anchor="middle" font-size="9" font-weight="600" fill="#422006">55%</text>
+          <text x="143" y="66" text-anchor="middle" font-size="9" font-weight="600" fill="#fff">33%</text>
+          <text x="188" y="66" text-anchor="middle" font-size="9" fill="var(--ink)">12%</text>
+
+          <!-- Lombok -->
+          <text x="-10" y="90" text-anchor="end" fill="var(--ink)">Lombok</text>
+          <rect y="82" width="140" height="14" fill="var(--lit)"/>
+          <rect x="140" y="82" width="40" height="14" fill="var(--unlit)"/>
+          <rect x="180" y="82" width="20" height="14" fill="url(#unknown)"/>
+          <text x="70" y="92" text-anchor="middle" font-size="9" font-weight="600" fill="#422006">70%</text>
+          <text x="160" y="92" text-anchor="middle" font-size="9" font-weight="600" fill="#fff">20%</text>
+          <text x="190" y="92" text-anchor="middle" font-size="9" fill="var(--ink)">10%</text>
+
+          <!-- axis -->
+          <line x1="0" y1="112" x2="200" y2="112" stroke="var(--line-2)"/>
+          <g font-size="9" fill="var(--ink-3)">
+            <text x="0" y="126">0</text>
+            <text x="40" y="126">20</text>
+            <text x="80" y="126">40</text>
+            <text x="120" y="126">60</text>
+            <text x="160" y="126">80</text>
+            <text x="200" y="126" text-anchor="end">100</text>
+          </g>
+          <text x="100" y="144" text-anchor="middle" font-size="10" fill="var(--ink-2)">Percentage of street length</text>
+        </g>
+      </g>
+
+      <!-- BOTTOM RIGHT: DISTANCE HISTOGRAM -->
+      <g transform="translate(864, 444)">
+        <rect width="312" height="292" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Distance from report to selected route</text>
+
+        <g transform="translate(40, 60)">
+          <!-- bars -->
+          <g fill="var(--accent)">
+            <rect x="0"   y="112" width="12" height="40"/>
+            <rect x="14"  y="90"  width="12" height="62"/>
+            <rect x="28"  y="80"  width="12" height="72"/>
+            <rect x="42"  y="78"  width="12" height="74"/>
+            <rect x="56"  y="84"  width="12" height="68"/>
+            <rect x="70"  y="95"  width="12" height="57"/>
+            <rect x="84"  y="110" width="12" height="42"/>
+            <rect x="98"  y="118" width="12" height="34"/>
+            <rect x="112" y="124" width="12" height="28"/>
+            <rect x="126" y="128" width="12" height="24"/>
+            <rect x="140" y="132" width="12" height="20"/>
+            <rect x="154" y="134" width="12" height="18"/>
+            <rect x="168" y="136" width="12" height="16"/>
+            <rect x="182" y="138" width="12" height="14"/>
+            <rect x="196" y="140" width="12" height="12"/>
+            <rect x="210" y="142" width="12" height="10"/>
+            <rect x="224" y="143" width="12" height="9"/>
+            <rect x="238" y="144" width="12" height="8"/>
+            <rect x="252" y="145" width="12" height="7"/>
+          </g>
+          <!-- axis -->
+          <line x1="0" y1="152" x2="264" y2="152" stroke="var(--line-2)"/>
+          <g font-size="9" fill="var(--ink-3)">
+            <text x="-6" y="4" text-anchor="end">40</text>
+            <text x="-6" y="40" text-anchor="end">30</text>
+            <text x="-6" y="78" text-anchor="end">20</text>
+            <text x="-6" y="116" text-anchor="end">10</text>
+            <text x="-6" y="152" text-anchor="end">0</text>
+            <text x="0" y="168">0</text>
+            <text x="50" y="168">100</text>
+            <text x="100" y="168">200</text>
+            <text x="150" y="168">300</text>
+            <text x="200" y="168">400</text>
+            <text x="250" y="168">500</text>
+          </g>
+          <text x="-28" y="80" font-size="10" fill="var(--ink-2)" transform="rotate(-90 -28 80)">Reports</text>
+          <text x="130" y="186" text-anchor="middle" font-size="10" fill="var(--ink-2)">Distance (m)</text>
+        </g>
+      </g>
+
+      <!-- linking annotation arrow -->
+      <g opacity=".7">
+        <path d="M690 420 Q 680 440 670 455" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-dasharray="3 2"/>
+        <text x="700" y="438" font-size="10" fill="var(--accent)" font-weight="600" font-style="italic">brush → map updates</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="notes-grid">
+    <div class="notes-col">
+      <h3>What's here</h3>
+      <ul>
+        <li><b>Map (center top)</b> — community reports as purple dots, nearby places as pink hearts, selected neighbourhood outlined in blue. No safety heatmap, no "score" colouring</li>
+        <li><b>Bar chart (top right)</b> — report counts by type; purple = selected area, gray = all displayed records. Same chart Franconeri recommends for categorical comparison</li>
+        <li><b>Histogram (bottom left)</b> — reports by hour of day, with a brush selector that re-filters every other view</li>
+        <li><b>Stacked bars (bottom center)</b> — lighting coverage by neighbourhood: lit / unlit / unknown. "Unknown" is a <em>visible category</em>, not hidden</li>
+        <li><b>Histogram (bottom right)</b> — how close reports fall to the user's selected route (if one is chosen)</li>
+      </ul>
+    </div>
+    <div class="notes-col">
+      <h3>Why it's a visualization system now</h3>
+      <ul>
+        <li><b>Chart matches data type</b> — Franconeri L2: categorical → bar; continuous → histogram; part-to-whole → stacked bar. Every panel is the chart its data asks for</li>
+        <li><b>Linked highlighting</b> — click Harassment bar → every chart filters to harassment. Click the map area → every chart re-scopes. Munzner Ch. 12</li>
+        <li><b>Honest about uncertainty</b> — missing lighting data is a striped "Unknown" stripe, not imputed</li>
+        <li><b>Framing is scholarly</b> — "CONCEPT MOCKUP · Synthetic example data" and the caveat line are on the page itself</li>
+        <li><b>No safety verdict</b> — nothing says 72, Favourable, Recommended. The user interprets the evidence</li>
+      </ul>
+      <div class="ref-pills">
+        <span class="pill hot">Franconeri L2 · chart chooser</span>
+        <span class="pill">Munzner Ch. 7 · arrange tables</span>
+        <span class="pill">Munzner Ch. 12 · linking</span>
+        <span class="pill">NbS paper · dashboard pattern</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ================================================================ -->
+<!-- BOARD 2 — COMPARE ROUTE EVIDENCE                                  -->
+<!-- ================================================================ -->
+<section class="board">
+  <span class="b-num">Board 02</span>
+  <h2>Compare route evidence — three routes, five factors, no score</h2>
+  <p class="lede">Replaces the current route cards. One dot plot per factor; one row per route; a timeline below showing where differences occur along each path. The header line is the thesis statement: <em>compare individual factors; there is no overall safety score.</em></p>
+
+  <div class="frame">
+    <svg class="wire" viewBox="0 0 1200 760" xmlns="http://www.w3.org/2000/svg" font-family="var(--sans)">
+      <defs>
+        <pattern id="unknown2" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="var(--panel-2)"/>
+          <line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-2)" stroke-width="1.5"/>
+        </pattern>
+        <marker id="arr" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0, 6 3, 0 6" fill="var(--geo)"/>
+        </marker>
+      </defs>
+
+      <rect width="1200" height="760" fill="var(--panel-2)"/>
+
+      <!-- top bar -->
+      <text x="24" y="40" font-size="22" font-weight="700" fill="var(--ink)">Maddie — Compare route evidence</text>
+      <text x="24" y="60" font-size="11" font-family="var(--mono)" fill="var(--ink-3)" letter-spacing="1">CONCEPT MOCKUP · Synthetic routes and values</text>
+      <text x="1176" y="40" text-anchor="end" font-size="12" fill="var(--ink-2)">Compare individual factors; there is no <tspan font-weight="700" fill="var(--ink)">overall safety score</tspan>.</text>
+
+      <!-- query bar (origin, destination, mode, time) -->
+      <g transform="translate(24, 88)">
+        <rect width="1152" height="48" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <g font-size="10" fill="var(--ink-3)">
+          <text x="14" y="14">Starting point</text>
+          <text x="202" y="14">Destination</text>
+          <text x="390" y="14">Travel mode</text>
+          <text x="520" y="14">Departure</text>
+          <text x="638" y="14">Date</text>
+          <text x="788" y="14">Data source</text>
+        </g>
+        <!-- fields -->
+        <rect x="14" y="18" width="180" height="22" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="24" y="33" font-size="11" fill="var(--ink)">📍 A. Croeselaan 1</text>
+
+        <rect x="202" y="18" width="180" height="22" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="212" y="33" font-size="11" fill="var(--ink)">📍 B. De Uithof</text>
+
+        <rect x="390" y="18" width="122" height="22" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="400" y="33" font-size="11" fill="var(--ink)">🚶 Walk</text>
+
+        <rect x="520" y="18" width="110" height="22" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="530" y="33" font-size="11" fill="var(--ink)">21:00</text>
+
+        <rect x="638" y="18" width="142" height="22" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="648" y="33" font-size="11" fill="var(--ink)">📅 Fri 9 Oct 2026</text>
+
+        <rect x="788" y="18" width="350" height="22" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="798" y="33" font-size="11" fill="var(--ink)">OpenStreetMap + community reports (Utrecht)</text>
+      </g>
+
+      <!-- LEFT: SMALL MAP -->
+      <g transform="translate(24, 148)">
+        <rect width="340" height="248" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <g transform="translate(14, 14)">
+          <rect width="312" height="220" rx="4" fill="var(--map-bg)"/>
+          <!-- roads -->
+          <g stroke="var(--map-road)" stroke-width="3" fill="none">
+            <path d="M0 60 Q 80 55 160 70 T 312 90"/>
+            <path d="M0 140 Q 100 135 200 150 T 312 160"/>
+            <path d="M50 0 V220"/>
+            <path d="M180 0 V220"/>
+            <path d="M250 0 V220"/>
+          </g>
+          <ellipse cx="100" cy="100" rx="30" ry="22" fill="var(--map-park)" opacity=".7"/>
+          <ellipse cx="230" cy="140" rx="35" ry="25" fill="var(--map-park)" opacity=".7"/>
+          <!-- compass -->
+          <g transform="translate(16, 16)" font-size="8" fill="var(--ink-2)">
+            <text x="0" y="8" font-weight="700">N</text>
+            <path d="M4 10 L4 20" stroke="var(--ink-2)" stroke-width="1"/>
+            <path d="M4 20 L2 16 M4 20 L6 16" stroke="var(--ink-2)" stroke-width="1" fill="none"/>
+          </g>
+          <!-- A marker -->
+          <circle cx="40" cy="40" r="10" fill="var(--route-a)"/>
+          <text x="40" y="44" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">A</text>
+          <text x="56" y="38" font-size="10" font-weight="600" fill="var(--ink)">Croeselaan</text>
+          <!-- B marker -->
+          <circle cx="280" cy="180" r="10" fill="var(--route-a)"/>
+          <text x="280" y="184" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">B</text>
+          <text x="264" y="206" font-size="10" font-weight="600" fill="var(--ink)">De Uithof</text>
+
+          <!-- Route A — dark solid -->
+          <path d="M40 40 Q 100 60 160 100 T 280 180" fill="none" stroke="var(--route-a)" stroke-width="3"/>
+          <!-- Route B — sky blue dashed -->
+          <path d="M40 40 L 100 80 L 180 100 L 220 140 L 280 180" fill="none" stroke="var(--route-b)" stroke-width="2.5" stroke-dasharray="4 3"/>
+          <!-- Route C — gray dotted -->
+          <path d="M40 40 L 50 110 L 180 160 L 230 170 L 280 180" fill="none" stroke="var(--route-c)" stroke-width="2.5" stroke-dasharray="1 3"/>
+
+          <!-- route labels -->
+          <rect x="140" y="54" width="50" height="14" rx="3" fill="var(--panel)" stroke="var(--route-a)"/>
+          <text x="165" y="64" text-anchor="middle" font-size="9" font-weight="600" fill="var(--route-a)">Route A</text>
+          <rect x="140" y="104" width="50" height="14" rx="3" fill="var(--panel)" stroke="var(--route-b)"/>
+          <text x="165" y="114" text-anchor="middle" font-size="9" font-weight="600" fill="var(--route-b)">Route B</text>
+          <rect x="140" y="156" width="50" height="14" rx="3" fill="var(--panel)" stroke="var(--route-c)"/>
+          <text x="165" y="166" text-anchor="middle" font-size="9" font-weight="600" fill="var(--route-c)">Route C</text>
+
+          <!-- hearts on map -->
+          <g fill="var(--heart)">
+            <g transform="translate(85, 65) scale(0.45)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(130, 90) scale(0.45)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(200, 130) scale(0.45)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(230, 160) scale(0.45)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+          </g>
+
+          <!-- community dots on map -->
+          <g fill="var(--accent)">
+            <circle cx="150" cy="85" r="3"/>
+            <circle cx="200" cy="110" r="3"/>
+            <circle cx="100" cy="150" r="3"/>
+            <circle cx="220" cy="160" r="3"/>
+          </g>
+
+          <!-- legend inside map -->
+          <g transform="translate(10, 200)" font-size="8" fill="var(--ink-2)">
+            <rect width="110" height="14" fill="var(--panel)" opacity=".9"/>
+            <path d="M2 7 l3 -3 l3 3 l-3 3 z" fill="var(--heart)"/>
+            <text x="10" y="10">Nearby places</text>
+            <line x1="60" y1="7" x2="68" y2="7" stroke="var(--lit)" stroke-width="3"/>
+            <text x="72" y="10">Mapped lit</text>
+            <circle cx="4" cy="22" r="2" fill="var(--accent)"/>
+            <text x="10" y="25">Community reports</text>
+          </g>
+
+          <!-- scale -->
+          <g transform="translate(16, 198)">
+            <line x1="0" y1="0" x2="50" y2="0" stroke="var(--ink)" stroke-width="2"/>
+            <text x="0" y="14" font-size="8" fill="var(--ink-2)">0</text>
+            <text x="25" y="14" font-size="8" fill="var(--ink-2)">1</text>
+            <text x="50" y="14" font-size="8" fill="var(--ink-2)">2 km</text>
+          </g>
+        </g>
+      </g>
+
+      <!-- RIGHT: FIVE DOT PLOTS — Route comparison (individual factors) -->
+      <g transform="translate(380, 148)">
+        <rect width="796" height="248" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Route comparison (individual factors)</text>
+
+        <!-- column headers -->
+        <g font-size="11" font-weight="600" fill="var(--ink)" text-anchor="middle">
+          <text x="118" y="48">Time (min)</text>
+          <text x="268" y="48">Mapped lit (%)</text>
+          <text x="418" y="48">Unknown lighting (%)</text>
+          <text x="568" y="48">Nearby places (count)</text>
+          <text x="718" y="48">Parkland (m)</text>
+        </g>
+
+        <!-- scale labels -->
+        <g font-size="9" fill="var(--ink-3)" text-anchor="middle">
+          <!-- Time -->
+          <text x="48" y="68">0</text><text x="88" y="68">20</text><text x="128" y="68">40</text><text x="168" y="68">60</text>
+          <!-- Mapped lit -->
+          <text x="198" y="68">0</text><text x="233" y="68">25</text><text x="268" y="68">50</text><text x="303" y="68">75</text><text x="338" y="68">100</text>
+          <!-- Unknown -->
+          <text x="348" y="68">0</text><text x="383" y="68">25</text><text x="418" y="68">50</text><text x="453" y="68">75</text><text x="488" y="68">100</text>
+          <!-- Nearby -->
+          <text x="498" y="68">0</text><text x="533" y="68">5</text><text x="568" y="68">10</text><text x="603" y="68">15</text>
+          <!-- Parkland -->
+          <text x="648" y="68">0</text><text x="683" y="68">200</text><text x="718" y="68">400</text><text x="753" y="68">600</text>
+        </g>
+
+        <!-- gridlines -->
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="48" y1="74" x2="188" y2="74"/>
+          <line x1="198" y1="74" x2="338" y2="74"/>
+          <line x1="348" y1="74" x2="488" y2="74"/>
+          <line x1="498" y1="74" x2="638" y2="74"/>
+          <line x1="648" y1="74" x2="788" y2="74"/>
+        </g>
+
+        <!-- rows: A, B, C -->
+        <g font-size="12" font-weight="600" fill="var(--ink)">
+          <text x="26" y="106">A</text>
+          <text x="26" y="152">B</text>
+          <text x="26" y="198">C</text>
+        </g>
+
+        <!-- selected row background (Route B) -->
+        <rect x="36" y="134" width="760" height="34" fill="var(--geo)" opacity=".08"/>
+
+        <!-- separator lines between panels -->
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="192" y1="74" x2="192" y2="212"/>
+          <line x1="342" y1="74" x2="342" y2="212"/>
+          <line x1="492" y1="74" x2="492" y2="212"/>
+          <line x1="642" y1="74" x2="642" y2="212"/>
+        </g>
+
+        <!-- DOT PLOTS -->
+
+        <!-- Time: A=48, B=54, C=58 -->
+        <g font-size="10" font-weight="700">
+          <circle cx="144" cy="102" r="6" fill="var(--route-a)"/>
+          <text x="156" y="105" fill="var(--ink)">48</text>
+
+          <circle cx="156" cy="150" r="6" fill="var(--route-b)"/>
+          <text x="168" y="153" fill="var(--route-b)">54</text>
+
+          <circle cx="164" cy="196" r="6" fill="var(--route-c)"/>
+          <text x="176" y="199" fill="var(--ink-2)">58</text>
+        </g>
+
+        <!-- Mapped lit: A=70, B=85, C=80 -->
+        <g font-size="10" font-weight="700">
+          <circle cx="296" cy="102" r="6" fill="var(--route-a)"/>
+          <text x="308" y="105" fill="var(--ink)">70</text>
+
+          <circle cx="317" cy="150" r="6" fill="var(--route-b)"/>
+          <text x="329" y="153" fill="var(--route-b)">85</text>
+
+          <circle cx="310" cy="196" r="6" fill="var(--route-c)"/>
+          <text x="322" y="199" fill="var(--ink-2)">80</text>
+        </g>
+
+        <!-- Unknown lighting: A=20, B=10, C=15 -->
+        <g font-size="10" font-weight="700">
+          <circle cx="376" cy="102" r="6" fill="var(--route-a)"/>
+          <text x="388" y="105" fill="var(--ink)">20</text>
+
+          <circle cx="362" cy="150" r="6" fill="var(--route-b)"/>
+          <text x="374" y="153" fill="var(--route-b)">10</text>
+
+          <circle cx="369" cy="196" r="6" fill="var(--route-c)"/>
+          <text x="381" y="199" fill="var(--ink-2)">15</text>
+        </g>
+
+        <!-- Nearby places: A=8, B=12, C=10 -->
+        <g font-size="10" font-weight="700">
+          <circle cx="554" cy="102" r="6" fill="var(--route-a)"/>
+          <text x="566" y="105" fill="var(--ink)">8</text>
+
+          <circle cx="582" cy="150" r="6" fill="var(--route-b)"/>
+          <text x="594" y="153" fill="var(--route-b)">12</text>
+
+          <circle cx="568" cy="196" r="6" fill="var(--route-c)"/>
+          <text x="580" y="199" fill="var(--ink-2)">10</text>
+        </g>
+
+        <!-- Parkland: A=400, B=100, C=250 -->
+        <g font-size="10" font-weight="700">
+          <circle cx="718" cy="102" r="6" fill="var(--route-a)"/>
+          <text x="730" y="105" fill="var(--ink)">400</text>
+
+          <circle cx="665" cy="150" r="6" fill="var(--route-b)"/>
+          <text x="677" y="153" fill="var(--route-b)">100</text>
+
+          <circle cx="691" cy="196" r="6" fill="var(--route-c)"/>
+          <text x="703" y="199" fill="var(--ink-2)">250</text>
+        </g>
+      </g>
+
+      <!-- BOTTOM: WHERE DIFFERENCES OCCUR — multi-track timeline -->
+      <g transform="translate(24, 414)">
+        <rect width="820" height="322" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Where do differences occur? <tspan font-size="10" font-weight="400" fill="var(--ink-3)">Brush a route interval to highlight its map segments.</tspan></text>
+
+        <!-- progress axis labels -->
+        <g font-size="10" fill="var(--ink-3)">
+          <text x="150" y="48">0</text>
+          <text x="302" y="48">25</text>
+          <text x="454" y="48">50</text>
+          <text x="606" y="48">75</text>
+          <text x="758" y="48">100</text>
+        </g>
+
+        <!-- gridlines -->
+        <g stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3">
+          <line x1="150" y1="52" x2="150" y2="282"/>
+          <line x1="302" y1="52" x2="302" y2="282"/>
+          <line x1="454" y1="52" x2="454" y2="282"/>
+          <line x1="606" y1="52" x2="606" y2="282"/>
+          <line x1="758" y1="52" x2="758" y2="282"/>
+        </g>
+
+        <!-- ROUTE A row -->
+        <g transform="translate(14, 68)">
+          <text y="12" font-size="11" font-weight="700" fill="var(--ink)">Route A</text>
+          <text y="24" font-size="10" fill="var(--ink-2)">48 min</text>
+          <text y="36" font-size="10" fill="var(--ink-2)">(70% lit)</text>
+          <g font-size="10" fill="var(--ink-2)">
+            <text x="88" y="10">Lighting</text>
+            <text x="88" y="24">Nearby places</text>
+            <text x="88" y="38">Reports</text>
+            <text x="88" y="52">Park / underpass</text>
+          </g>
+        </g>
+        <!-- Route A lighting track -->
+        <g transform="translate(136, 70)">
+          <rect y="0" width="550" height="10" fill="var(--lit)"/>
+          <rect x="340" y="0" width="40" height="10" fill="var(--unlit)"/>
+          <rect x="520" y="0" width="80" height="10" fill="url(#unknown2)" transform="translate(14,0)"/>
+          <rect x="530" y="0" width="22" height="10" fill="var(--unlit)"/>
+          <rect x="552" y="0" width="60" height="10" fill="url(#unknown2)"/>
+        </g>
+        <!-- Route A nearby places (hearts) -->
+        <g transform="translate(136, 94)">
+          <line x1="0" y1="0" x2="612" y2="0" stroke="var(--line)"/>
+          <g fill="var(--heart)">
+            <g transform="translate(80,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(180,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(360,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(500,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+          </g>
+        </g>
+        <!-- Route A reports (purple) -->
+        <g transform="translate(136, 108)">
+          <line x1="0" y1="0" x2="612" y2="0" stroke="var(--line)"/>
+          <g fill="var(--accent)">
+            <circle cx="140" cy="0" r="3"/>
+            <circle cx="260" cy="0" r="3"/>
+            <circle cx="420" cy="0" r="3"/>
+            <circle cx="560" cy="0" r="3"/>
+          </g>
+        </g>
+        <!-- Route A park/underpass -->
+        <g transform="translate(136, 122)">
+          <!-- park segments -->
+          <rect x="60" y="-6" width="60" height="10" fill="var(--park)"/>
+          <rect x="240" y="-6" width="40" height="10" fill="var(--park)"/>
+          <rect x="380" y="-6" width="30" height="10" fill="var(--park)"/>
+          <!-- underpass arcs -->
+          <path d="M100 4 Q 110 -4 120 4" fill="none" stroke="var(--ink-2)" stroke-width="1.5"/>
+          <path d="M300 4 Q 310 -4 320 4" fill="none" stroke="var(--ink-2)" stroke-width="1.5"/>
+          <path d="M440 4 Q 450 -4 460 4" fill="none" stroke="var(--ink-2)" stroke-width="1.5"/>
+        </g>
+
+        <!-- ROUTE B row (SELECTED) -->
+        <rect x="12" y="146" width="796" height="70" fill="var(--geo)" opacity=".06"/>
+        <g transform="translate(14, 160)">
+          <text y="12" font-size="11" font-weight="700" fill="var(--geo)">Route B</text>
+          <text y="24" font-size="10" fill="var(--ink-2)">54 min</text>
+          <text y="36" font-size="10" fill="var(--ink-2)">(85% lit)</text>
+          <g font-size="10" fill="var(--ink-2)">
+            <text x="88" y="10">Lighting</text>
+            <text x="88" y="24">Nearby places</text>
+            <text x="88" y="38">Reports</text>
+            <text x="88" y="52">Park / underpass</text>
+          </g>
+        </g>
+        <!-- Route B lighting track -->
+        <g transform="translate(136, 162)">
+          <rect y="0" width="612" height="10" fill="var(--lit)"/>
+          <rect x="440" y="0" width="40" height="10" fill="var(--unlit)"/>
+          <rect x="552" y="0" width="60" height="10" fill="url(#unknown2)"/>
+        </g>
+        <!-- Route B nearby -->
+        <g transform="translate(136, 186)">
+          <line x1="0" y1="0" x2="612" y2="0" stroke="var(--line)"/>
+          <g fill="var(--heart)">
+            <g transform="translate(60,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(140,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(290,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(440,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(540,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+          </g>
+        </g>
+        <!-- Route B reports -->
+        <g transform="translate(136, 200)">
+          <line x1="0" y1="0" x2="612" y2="0" stroke="var(--line)"/>
+          <g fill="var(--accent)">
+            <circle cx="100" cy="0" r="3"/>
+            <circle cx="200" cy="0" r="3"/>
+            <circle cx="310" cy="0" r="3"/>
+            <circle cx="460" cy="0" r="3"/>
+            <circle cx="580" cy="0" r="3"/>
+          </g>
+        </g>
+        <!-- Route B park/underpass -->
+        <g transform="translate(136, 214)">
+          <rect x="40" y="-6" width="40" height="10" fill="var(--park)"/>
+          <rect x="220" y="-6" width="30" height="10" fill="var(--park)"/>
+          <rect x="400" y="-6" width="50" height="10" fill="var(--park)"/>
+          <path d="M280 4 Q 290 -4 300 4" fill="none" stroke="var(--ink-2)" stroke-width="1.5"/>
+          <path d="M500 4 Q 510 -4 520 4" fill="none" stroke="var(--ink-2)" stroke-width="1.5"/>
+        </g>
+
+        <!-- BRUSH SELECTION on Route B (40-55%) -->
+        <rect x="380" y="152" width="92" height="62" fill="var(--geo)" opacity=".18" stroke="var(--geo)" stroke-width="1.5" stroke-dasharray="3 2"/>
+
+        <!-- ROUTE C row -->
+        <g transform="translate(14, 236)">
+          <text y="12" font-size="11" font-weight="700" fill="var(--ink)">Route C</text>
+          <text y="24" font-size="10" fill="var(--ink-2)">58 min</text>
+          <text y="36" font-size="10" fill="var(--ink-2)">(80% lit)</text>
+          <g font-size="10" fill="var(--ink-2)">
+            <text x="88" y="10">Lighting</text>
+            <text x="88" y="24">Nearby places</text>
+            <text x="88" y="38">Reports</text>
+            <text x="88" y="52">Park / underpass</text>
+          </g>
+        </g>
+        <g transform="translate(136, 238)">
+          <rect y="0" width="612" height="10" fill="var(--lit)"/>
+          <rect x="320" y="0" width="80" height="10" fill="var(--unlit)"/>
+          <rect x="552" y="0" width="60" height="10" fill="url(#unknown2)"/>
+        </g>
+        <g transform="translate(136, 262)">
+          <line x1="0" y1="0" x2="612" y2="0" stroke="var(--line)"/>
+          <g fill="var(--heart)">
+            <g transform="translate(80,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(260,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(380,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+            <g transform="translate(540,0) scale(0.5)"><path d="M0 0 c -3 -3 -8 -3 -8 2 c 0 4 8 10 8 10 c 0 0 8 -6 8 -10 c 0 -5 -5 -5 -8 -2 z"/></g>
+          </g>
+        </g>
+        <g transform="translate(136, 276)">
+          <line x1="0" y1="0" x2="612" y2="0" stroke="var(--line)"/>
+          <g fill="var(--accent)">
+            <circle cx="120" cy="0" r="3"/>
+            <circle cx="240" cy="0" r="3"/>
+            <circle cx="380" cy="0" r="3"/>
+            <circle cx="500" cy="0" r="3"/>
+          </g>
+        </g>
+        <g transform="translate(136, 290)">
+          <rect x="60" y="-6" width="50" height="10" fill="var(--park)"/>
+          <rect x="300" y="-6" width="80" height="10" fill="var(--park)"/>
+          <path d="M200 4 Q 210 -4 220 4" fill="none" stroke="var(--ink-2)" stroke-width="1.5"/>
+          <path d="M450 4 Q 460 -4 470 4" fill="none" stroke="var(--ink-2)" stroke-width="1.5"/>
+        </g>
+
+        <!-- x-axis label -->
+        <text x="440" y="312" text-anchor="middle" font-size="10" fill="var(--ink-2)">Progress along each route (%)</text>
+      </g>
+
+      <!-- RIGHT PANEL: Selected interval + trade-off slider -->
+      <g transform="translate(860, 414)">
+        <rect width="316" height="196" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="20" font-size="11" font-weight="700" fill="var(--ink)">Selected interval · <tspan fill="var(--geo)">Route B</tspan></text>
+        <text x="14" y="34" font-size="10" fill="var(--ink-2)">40–55% of route</text>
+
+        <!-- data table -->
+        <g font-size="10" fill="var(--ink-2)" transform="translate(14, 56)">
+          <text y="0">Lighting:</text>
+          <text x="110" y="0" fill="var(--ink)">partly unknown</text>
+
+          <text y="18">Place opening hours:</text>
+          <text x="110" y="18" fill="var(--ink)">unknown</text>
+
+          <text y="36">Mapped features:</text>
+          <text x="110" y="36" fill="var(--ink)">OpenStreetMap</text>
+
+          <text y="54">Reports:</text>
+          <text x="110" y="54" fill="var(--ink)">example community records</text>
+        </g>
+
+        <!-- Qualitative experience -->
+        <g transform="translate(14, 128)">
+          <text y="0" font-size="11" font-weight="700" fill="var(--ink)">Qualitative experience</text>
+          <text y="16" font-size="10" fill="var(--ink-2)">Example narrative:</text>
+          <text y="32" font-size="10" fill="var(--ink)" font-style="italic">"This stretch felt isolated after dark."</text>
+          <rect y="42" width="200" height="18" rx="2" fill="var(--accent-soft)"/>
+          <text x="100" y="54" text-anchor="middle" font-size="9" font-weight="700" fill="var(--accent)">EXAMPLE — NOT A REAL REPORT</text>
+        </g>
+      </g>
+
+      <!-- RIGHT PANEL BOTTOM: trade-off slider -->
+      <g transform="translate(860, 622)">
+        <rect width="316" height="114" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="20" font-size="11" font-weight="700" fill="var(--ink)">Explore trade-offs <tspan font-size="10" font-weight="400" fill="var(--ink-3)">(optional)</tspan></text>
+
+        <g transform="translate(14, 44)">
+          <text font-size="10" fill="var(--ink-2)">Maximum extra time:</text>
+          <text x="286" y="0" text-anchor="end" font-size="10" font-weight="600" fill="var(--ink)">10 min</text>
+          <!-- slider -->
+          <rect y="14" width="286" height="4" rx="2" fill="var(--line)"/>
+          <rect y="14" width="120" height="4" rx="2" fill="var(--accent)"/>
+          <circle cx="120" cy="16" r="7" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"/>
+        </g>
+
+        <text x="14" y="98" font-size="9" fill="var(--ink-3)" font-style="italic">Filters route options; does not re-score.</text>
+      </g>
+
+      <!-- bottom caveat -->
+      <text x="24" y="754" font-size="10" fill="var(--ink-3)" font-style="italic">Route progress aligns relative position; distances differ. Community reports are context, not inputs to a route score.</text>
+    </svg>
+  </div>
+
+  <div class="notes-grid">
+    <div class="notes-col">
+      <h3>What's here</h3>
+      <ul>
+        <li><b>Small map (left)</b> — three route geometries as line styles the user can tell apart without colour alone (solid / dashed / dotted)</li>
+        <li><b>Five dot plots (right)</b> — one per factor: Time, Mapped lit %, Unknown lighting %, Nearby places, Parkland metres. Each row is a route; each dot is where that route sits on that axis</li>
+        <li><b>Timeline tracks (bottom)</b> — one row per route showing lighting coverage, hearts, reports, park/underpass arcs along the progress axis. Brush an interval → map highlights the matching segments</li>
+        <li><b>Selected interval panel (right)</b> — what's known about the brushed stretch of Route B, with an <em>Example narrative</em> clearly labelled "EXAMPLE — NOT A REAL REPORT"</li>
+        <li><b>Trade-off slider</b> — "Maximum extra time: 10 min" filters routes shown; the note says "does not re-score"</li>
+      </ul>
+    </div>
+    <div class="notes-col">
+      <h3>Why no overall score</h3>
+      <ul>
+        <li><b>Scores hide trade-offs.</b> Route B is best on lighting but worst on parkland. A single number collapses that</li>
+        <li><b>Dot plots make differences visible.</b> Franconeri L2 — when you want to compare three things on five axes, five dot plots side by side is the shape</li>
+        <li><b>Lived experience ≠ risk model.</b> The qualitative narrative is shown next to the quantitative tracks, labelled as such, and never aggregated</li>
+        <li><b>The thesis defence</b> — Evanthia's concern was Maddie performing certainty it doesn't have. "No overall safety score" in the header turns that into a feature</li>
+      </ul>
+      <div class="ref-pills">
+        <span class="pill hot">Franconeri L2 · dot plots</span>
+        <span class="pill">Munzner Ch. 6 · facet by factor</span>
+        <span class="pill">Munzner Ch. 10 · trellis</span>
+        <span class="pill">NbS paper · trade-off slider</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ================================================================ -->
+<!-- BOARD 3 — EXPLORE A SINGLE AREA                                   -->
+<!-- ================================================================ -->
+<section class="board">
+  <span class="b-num">Board 03</span>
+  <h2>Explore a single area — the neighbourhood deep-dive</h2>
+  <p class="lede">When the user clicks a neighbourhood on Board 01, this view opens. Same chart-chooser logic: distribution → histogram, time series → line, categorical → bar, part-to-whole → stacked bar. Still no score. Still a dataset, not a verdict.</p>
+
+  <div class="frame">
+    <svg class="wire" viewBox="0 0 1200 620" xmlns="http://www.w3.org/2000/svg" font-family="var(--sans)">
+      <defs>
+        <pattern id="unknown3" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="var(--panel-2)"/>
+          <line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-2)" stroke-width="1.5"/>
+        </pattern>
+      </defs>
+      <rect width="1200" height="620" fill="var(--panel-2)"/>
+
+      <!-- top bar -->
+      <text x="24" y="40" font-size="22" font-weight="700" fill="var(--ink)">Maddie — Binnenstad in detail</text>
+      <text x="24" y="60" font-size="11" font-family="var(--mono)" fill="var(--ink-3)" letter-spacing="1">CONCEPT MOCKUP · 12-month window · Synthetic example data</text>
+      <text x="1176" y="40" text-anchor="end" font-size="12" fill="var(--ink-2)">← Back to Utrecht overview</text>
+
+      <!-- KPI STRIP: these are COUNTS, not scores -->
+      <g transform="translate(24, 88)">
+        <rect width="1152" height="78" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="11" font-weight="600" fill="var(--ink-3)" letter-spacing="1">OBSERVED COUNTS · BINNENSTAD · 12 months</text>
+
+        <g transform="translate(14, 36)">
+          <text y="20" font-size="26" font-weight="700" fill="var(--accent)">124</text>
+          <text x="60" y="18" font-size="11" fill="var(--ink-2)">Harassment</text>
+          <text x="60" y="30" font-size="10" fill="var(--ink-3)">reports</text>
+        </g>
+        <g transform="translate(174, 36)">
+          <text y="20" font-size="26" font-weight="700" fill="var(--accent)">86</text>
+          <text x="50" y="18" font-size="11" fill="var(--ink-2)">Catcalling</text>
+          <text x="50" y="30" font-size="10" fill="var(--ink-3)">reports</text>
+        </g>
+        <g transform="translate(316, 36)">
+          <text y="20" font-size="26" font-weight="700" fill="var(--accent)">37</text>
+          <text x="40" y="18" font-size="11" fill="var(--ink-2)">Assault</text>
+          <text x="40" y="30" font-size="10" fill="var(--ink-3)">reports</text>
+        </g>
+        <g transform="translate(438, 36)">
+          <text y="20" font-size="26" font-weight="700" fill="var(--accent)">52</text>
+          <text x="40" y="18" font-size="11" fill="var(--ink-2)">Other</text>
+          <text x="40" y="30" font-size="10" fill="var(--ink-3)">reports</text>
+        </g>
+        <line x1="548" y1="30" x2="548" y2="70" stroke="var(--line)"/>
+        <g transform="translate(566, 36)">
+          <text y="20" font-size="26" font-weight="700" fill="var(--lit)">62%</text>
+          <text x="78" y="18" font-size="11" fill="var(--ink-2)">Streets mapped lit</text>
+          <text x="78" y="30" font-size="10" fill="var(--ink-3)">by length</text>
+        </g>
+        <g transform="translate(770, 36)">
+          <text y="20" font-size="26" font-weight="700" fill="var(--unlit)">28%</text>
+          <text x="78" y="18" font-size="11" fill="var(--ink-2)">Streets mapped unlit</text>
+          <text x="78" y="30" font-size="10" fill="var(--ink-3)">by length</text>
+        </g>
+        <g transform="translate(988, 36)">
+          <text y="20" font-size="26" font-weight="700" fill="var(--ink-3)">10%</text>
+          <text x="78" y="18" font-size="11" fill="var(--ink-2)">Lighting unknown</text>
+          <text x="78" y="30" font-size="10" fill="var(--ink-3)">missing data</text>
+        </g>
+      </g>
+
+      <!-- MONTHLY TIMELINE (line chart) -->
+      <g transform="translate(24, 182)">
+        <rect width="580" height="220" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Reports over 12 months — by type</text>
+
+        <!-- legend -->
+        <g transform="translate(14, 36)" font-size="10">
+          <line x1="0" y1="4" x2="12" y2="4" stroke="var(--accent)" stroke-width="2"/>
+          <text x="16" y="7" fill="var(--ink-2)">Harassment</text>
+          <line x1="94" y1="4" x2="106" y2="4" stroke="#a78bfa" stroke-width="2"/>
+          <text x="110" y="7" fill="var(--ink-2)">Catcalling</text>
+          <line x1="178" y1="4" x2="190" y2="4" stroke="#c4b5fd" stroke-width="2"/>
+          <text x="194" y="7" fill="var(--ink-2)">Assault</text>
+          <line x1="248" y1="4" x2="260" y2="4" stroke="var(--ink-3)" stroke-width="2"/>
+          <text x="264" y="7" fill="var(--ink-2)">Other</text>
+        </g>
+
+        <!-- lines -->
+        <g transform="translate(40, 64)">
+          <!-- axis -->
+          <line x1="0" y1="120" x2="520" y2="120" stroke="var(--line-2)"/>
+          <line x1="0" y1="0" x2="0" y2="120" stroke="var(--line-2)"/>
+
+          <!-- gridlines y -->
+          <g stroke="var(--line)" stroke-dasharray="2 3">
+            <line x1="0" y1="30" x2="520" y2="30"/>
+            <line x1="0" y1="60" x2="520" y2="60"/>
+            <line x1="0" y1="90" x2="520" y2="90"/>
+          </g>
+
+          <!-- harassment line (strongest) -->
+          <path d="M0 80 L47 72 L94 68 L141 60 L188 52 L235 44 L282 38 L329 30 L376 28 L423 32 L470 40 L517 48"
+                fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <g fill="var(--accent)">
+            <circle cx="0" cy="80" r="3"/><circle cx="47" cy="72" r="3"/>
+            <circle cx="94" cy="68" r="3"/><circle cx="141" cy="60" r="3"/>
+            <circle cx="188" cy="52" r="3"/><circle cx="235" cy="44" r="3"/>
+            <circle cx="282" cy="38" r="3"/><circle cx="329" cy="30" r="3"/>
+            <circle cx="376" cy="28" r="3"/><circle cx="423" cy="32" r="3"/>
+            <circle cx="470" cy="40" r="3"/><circle cx="517" cy="48" r="3"/>
+          </g>
+
+          <!-- catcalling -->
+          <path d="M0 95 L47 88 L94 86 L141 80 L188 76 L235 70 L282 66 L329 60 L376 58 L423 62 L470 70 L517 76"
+                fill="none" stroke="#a78bfa" stroke-width="2"/>
+
+          <!-- assault -->
+          <path d="M0 110 L47 108 L94 105 L141 100 L188 96 L235 92 L282 88 L329 85 L376 86 L423 90 L470 94 L517 100"
+                fill="none" stroke="#c4b5fd" stroke-width="2"/>
+
+          <!-- other -->
+          <path d="M0 105 L47 100 L94 96 L141 92 L188 88 L235 82 L282 78 L329 72 L376 74 L423 78 L470 84 L517 90"
+                fill="none" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="3 2"/>
+
+          <!-- highlight summer peak -->
+          <rect x="329" y="0" width="94" height="120" fill="var(--accent)" opacity=".05"/>
+          <text x="376" y="10" text-anchor="middle" font-size="9" fill="var(--accent)" font-weight="600">Summer peak</text>
+
+          <!-- x labels -->
+          <g font-size="9" fill="var(--ink-3)">
+            <text x="0" y="135">Jan</text>
+            <text x="94" y="135">Mar</text>
+            <text x="188" y="135">May</text>
+            <text x="282" y="135">Jul</text>
+            <text x="376" y="135">Sep</text>
+            <text x="470" y="135">Nov</text>
+          </g>
+          <!-- y labels -->
+          <g font-size="9" fill="var(--ink-3)" text-anchor="end">
+            <text x="-6" y="4">40</text>
+            <text x="-6" y="34">30</text>
+            <text x="-6" y="64">20</text>
+            <text x="-6" y="94">10</text>
+            <text x="-6" y="124">0</text>
+          </g>
+        </g>
+        <text x="300" y="206" text-anchor="middle" font-size="10" fill="var(--ink-2)">Month</text>
+      </g>
+
+      <!-- HOUR x WEEKDAY HEATMAP -->
+      <g transform="translate(620, 182)">
+        <rect width="556" height="220" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Reports by hour × weekday</text>
+        <text x="14" y="36" font-size="10" fill="var(--ink-3)">Each cell = count. Darker = more reports.</text>
+
+        <!-- grid -->
+        <g transform="translate(60, 50)">
+          <!-- define 24 columns x 7 rows, varying opacity -->
+          <!-- helper: a simplified visual -->
+          <defs>
+            <linearGradient id="hmgrad" x1="0" x2="1">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity=".08"/>
+              <stop offset="30%" stop-color="var(--accent)" stop-opacity=".18"/>
+              <stop offset="55%" stop-color="var(--accent)" stop-opacity=".35"/>
+              <stop offset="75%" stop-color="var(--accent)" stop-opacity=".7"/>
+              <stop offset="90%" stop-color="var(--accent)" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity=".3"/>
+            </linearGradient>
+          </defs>
+          <!-- 7 rows -->
+          <g>
+            <rect y="0" width="432" height="18" fill="url(#hmgrad)" opacity=".7"/>
+            <rect y="20" width="432" height="18" fill="url(#hmgrad)" opacity=".75"/>
+            <rect y="40" width="432" height="18" fill="url(#hmgrad)" opacity=".8"/>
+            <rect y="60" width="432" height="18" fill="url(#hmgrad)" opacity=".85"/>
+            <rect y="80" width="432" height="18" fill="url(#hmgrad)" opacity="1"/>
+            <rect y="100" width="432" height="18" fill="url(#hmgrad)" opacity="1.05"/>
+            <rect y="120" width="432" height="18" fill="url(#hmgrad)" opacity="1"/>
+          </g>
+          <!-- row labels -->
+          <g font-size="9" fill="var(--ink-2)" text-anchor="end">
+            <text x="-6" y="13">Mon</text>
+            <text x="-6" y="33">Tue</text>
+            <text x="-6" y="53">Wed</text>
+            <text x="-6" y="73">Thu</text>
+            <text x="-6" y="93" font-weight="700" fill="var(--ink)">Fri</text>
+            <text x="-6" y="113" font-weight="700" fill="var(--ink)">Sat</text>
+            <text x="-6" y="133">Sun</text>
+          </g>
+          <!-- column axis -->
+          <g font-size="9" fill="var(--ink-3)" text-anchor="middle">
+            <text x="0" y="152">0h</text>
+            <text x="108" y="152">6</text>
+            <text x="216" y="152">12</text>
+            <text x="324" y="152">18</text>
+            <text x="432" y="152">23</text>
+          </g>
+          <!-- gridlines -->
+          <g stroke="var(--panel)" stroke-width=".5">
+            <line x1="108" y1="0" x2="108" y2="138"/>
+            <line x1="216" y1="0" x2="216" y2="138"/>
+            <line x1="324" y1="0" x2="324" y2="138"/>
+          </g>
+          <!-- highlight current hour (21) -->
+          <rect x="378" y="0" width="18" height="138" fill="none" stroke="var(--geo)" stroke-width="1.5" stroke-dasharray="2 2"/>
+          <text x="387" y="-4" text-anchor="middle" font-size="8" font-weight="700" fill="var(--geo)">now · 21h</text>
+        </g>
+
+        <!-- color scale -->
+        <g transform="translate(60, 198)">
+          <defs>
+            <linearGradient id="scaleg" x1="0" x2="1">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity=".05"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="1"/>
+            </linearGradient>
+          </defs>
+          <rect width="200" height="8" fill="url(#scaleg)"/>
+          <g font-size="9" fill="var(--ink-3)">
+            <text x="0" y="22">0</text>
+            <text x="100" y="22" text-anchor="middle">20</text>
+            <text x="200" y="22" text-anchor="end">40</text>
+          </g>
+          <text x="300" y="7" font-size="9" fill="var(--ink-2)">Report count per cell</text>
+        </g>
+      </g>
+
+      <!-- BOTTOM LEFT: SOURCE / RESOLUTION TRANSPARENCY -->
+      <g transform="translate(24, 418)">
+        <rect width="580" height="190" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">Data sources & resolution</text>
+        <text x="14" y="38" font-size="10" fill="var(--ink-3)">Every chart's provenance, declared on the page.</text>
+
+        <g transform="translate(14, 56)" font-size="11" fill="var(--ink-2)">
+          <!-- row 1 -->
+          <circle cx="6" cy="6" r="4" fill="var(--accent)"/>
+          <text x="18" y="10" font-weight="600" fill="var(--ink)">Community reports</text>
+          <text x="186" y="10">Street points · user-submitted</text>
+          <text x="420" y="10" fill="var(--ink-3)">Last update 09 Oct 2026</text>
+
+          <!-- row 2 -->
+          <g transform="translate(0, 28)">
+            <rect width="12" height="8" fill="var(--lit)"/>
+            <text x="18" y="8" font-weight="600" fill="var(--ink)">Street lighting</text>
+            <text x="186" y="8">OpenStreetMap · tagged edges</text>
+            <text x="420" y="8" fill="var(--ink-3)">62% coverage</text>
+          </g>
+
+          <!-- row 3 -->
+          <g transform="translate(0, 56)">
+            <rect width="12" height="8" fill="url(#unknown3)"/>
+            <text x="18" y="8" font-weight="600" fill="var(--ink)">Unknown lighting</text>
+            <text x="186" y="8">Edges without a lighting tag</text>
+            <text x="420" y="8" fill="var(--ink-3)">10% of streets</text>
+          </g>
+
+          <!-- row 4 -->
+          <g transform="translate(0, 84)">
+            <path d="M0 4 l4 -4 l4 4 l-4 4 z" fill="var(--heart)"/>
+            <text x="18" y="8" font-weight="600" fill="var(--ink)">Nearby places</text>
+            <text x="186" y="8">Opening hours · OpenStreetMap POI</text>
+            <text x="420" y="8" fill="var(--ink-3)">31 within area</text>
+          </g>
+
+          <!-- row 5 -->
+          <g transform="translate(0, 112)">
+            <rect width="12" height="8" fill="none" stroke="var(--ink-3)" stroke-dasharray="2 2"/>
+            <text x="18" y="8" font-weight="600" fill="var(--ink)">Official crime</text>
+            <text x="186" y="8">Neighbourhood aggregates · (off)</text>
+            <text x="420" y="8" fill="var(--ink-3)">Not currently displayed</text>
+          </g>
+        </g>
+      </g>
+
+      <!-- BOTTOM RIGHT: Comparison with other neighbourhoods (bar chart) -->
+      <g transform="translate(620, 418)">
+        <rect width="556" height="190" rx="6" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="14" y="22" font-size="12" font-weight="600" fill="var(--ink)">How Binnenstad compares with other Utrecht neighbourhoods</text>
+        <text x="14" y="36" font-size="10" fill="var(--ink-3)">Reports per km of road network · higher = more reports relative to area size</text>
+
+        <g transform="translate(130, 60)" font-size="11" fill="var(--ink)">
+          <!-- Binnenstad (selected) -->
+          <text x="-10" y="12" text-anchor="end" font-weight="700" fill="var(--accent)">Binnenstad</text>
+          <rect y="4" width="320" height="14" fill="var(--accent)"/>
+          <text x="328" y="14" font-size="11" font-weight="700" fill="var(--accent)">24.6</text>
+
+          <g transform="translate(0, 26)">
+            <text x="-10" y="12" text-anchor="end" fill="var(--ink)">Oost</text>
+            <rect y="4" width="190" height="14" fill="var(--compare)"/>
+            <text x="198" y="14" font-size="11" fill="var(--ink-2)">14.2</text>
+          </g>
+
+          <g transform="translate(0, 52)">
+            <text x="-10" y="12" text-anchor="end" fill="var(--ink)">West</text>
+            <rect y="4" width="152" height="14" fill="var(--compare)"/>
+            <text x="160" y="14" font-size="11" fill="var(--ink-2)">11.4</text>
+          </g>
+
+          <g transform="translate(0, 78)">
+            <text x="-10" y="12" text-anchor="end" fill="var(--ink)">Lombok</text>
+            <rect y="4" width="128" height="14" fill="var(--compare)"/>
+            <text x="136" y="14" font-size="11" fill="var(--ink-2)">9.6</text>
+          </g>
+
+          <g transform="translate(0, 104)">
+            <text x="-10" y="12" text-anchor="end" fill="var(--ink)">Oog in Al</text>
+            <rect y="4" width="98" height="14" fill="var(--compare)"/>
+            <text x="106" y="14" font-size="11" fill="var(--ink-2)">7.3</text>
+          </g>
+
+          <!-- axis -->
+          <line x1="0" y1="128" x2="400" y2="128" stroke="var(--line-2)"/>
+          <g font-size="9" fill="var(--ink-3)">
+            <text x="0" y="142">0</text>
+            <text x="100" y="142">10</text>
+            <text x="200" y="142">20</text>
+            <text x="300" y="142">30</text>
+            <text x="400" y="142" text-anchor="end">40</text>
+          </g>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="notes-grid">
+    <div class="notes-col">
+      <h3>Chart choices by data type</h3>
+      <ul>
+        <li><b>KPI strip (top)</b> — counts, not scores. Big numbers to anchor the view; the colours tag the data source, not a verdict</li>
+        <li><b>Line chart (left middle)</b> — Franconeri L2: time series over 12 months → line, one line per category</li>
+        <li><b>Heatmap (right middle)</b> — Franconeri L2: two categorical axes (hour × weekday) with a count → heatmap. The current hour is outlined</li>
+        <li><b>Provenance table (bottom left)</b> — the raw truth about where each chart's data came from, by row</li>
+        <li><b>Bar chart (bottom right)</b> — neighbourhoods compared on reports-per-km-of-road, so a bigger area isn't automatically "worse"</li>
+      </ul>
+    </div>
+    <div class="notes-col">
+      <h3>What stays off this screen</h3>
+      <ul>
+        <li>No colour-coded "safety" overlay on any count</li>
+        <li>No "Favourable / Mixed / Look closer" labels — a count is a count</li>
+        <li>No forecast or prediction — the time series ends at today</li>
+        <li>No star rating, no recommendation sentence</li>
+        <li>The provenance table makes clear which data is observed, which is modelled, which is missing</li>
+      </ul>
+      <div class="ref-pills">
+        <span class="pill hot">Franconeri L2 · time series + heatmap</span>
+        <span class="pill">Munzner Ch. 10 · attribute-driven layout</span>
+        <span class="pill">Munzner Ch. 13 · reduce aggregate</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ================================================================ -->
+<!-- FRANCONERI CHART-CHOOSER MAPPING                                  -->
+<!-- ================================================================ -->
+<section class="board">
+  <span class="b-num">Chart-chooser reference</span>
+  <h2>Every Maddie chart, mapped back to Franconeri L2</h2>
+  <p class="lede">The L2 lecture argues: pick the chart from the data type, not from the dashboard aesthetic. Here is every chart in this redesign and the data-type reason it is that chart.</p>
+
+  <div class="frame" style="padding: 20px;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+      <thead>
+        <tr style="border-bottom: 2px solid var(--line-2); text-align: left;">
+          <th style="padding: 10px 8px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; font-size: 11px; letter-spacing: .06em;">Chart in Maddie</th>
+          <th style="padding: 10px 8px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; font-size: 11px; letter-spacing: .06em;">Data type</th>
+          <th style="padding: 10px 8px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; font-size: 11px; letter-spacing: .06em;">Franconeri L2 choice</th>
+          <th style="padding: 10px 8px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; font-size: 11px; letter-spacing: .06em;">Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Community reports by type</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Categorical × quantitative</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Bar chart</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Length encodes count; direct comparison of 4 categories</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">When reports occurred</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Continuous (hour of day)</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Histogram</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Shows distribution shape and where the peak is</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Lighting by neighbourhood</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Part-to-whole × category</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Stacked bar</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Shows composition of each category's 100%</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Distance from report to route</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Continuous (metres)</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Histogram</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Tail tells user how far the "nearby" context reaches</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Route comparison (5 factors)</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Multi-attribute items</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Dot plot small multiples</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Same vertical position per route; eye crosses the row</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Where differences occur</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Position along path × factors</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Multi-track timeline</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Brushable; aligns the three routes on a common x-axis</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Reports over 12 months</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Time series × category</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Multi-series line chart</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Trends over time; one line per report type</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Reports by hour × weekday</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">2D categorical × count</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Heatmap</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Reveals periodic patterns (Fri/Sat evening)</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 8px; color: var(--ink); font-weight: 500;">Neighbourhood comparison</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Categorical × quantitative</td>
+          <td style="padding: 10px 8px; color: var(--accent); font-weight: 600;">Horizontal bar chart</td>
+          <td style="padding: 10px 8px; color: var(--ink-2);">Ranks areas; selected one highlighted in purple</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+<footer class="closing">
+  <h3>What changed from the earlier mockups to these</h3>
+  <p><b>Dropped</b> — the single safety score (72 Favourable) · "star Recommended Route" · colour-coded safety heatmap over neighbourhoods · "Look closer / Mixed / Favourable" verdicts in the UI chrome · the stacked contribution bar that assembled a score · the day/night gradient framing as a safety predictor.</p>
+  <p><b>Kept</b> — brush-and-link coordinated views · priority sliders (now reframed as filters, not weights that produce a score) · map legend persistence · explicit shape differentiation (hearts for places, dots for reports) · lighting glow on well-lit road segments.</p>
+  <p><b>Added</b> — dot plot small multiples for route comparison · multi-track timeline aligned on a 0–100% progress axis · stacked bar with "Unknown" as a visible category · scientific caveats on the page itself · "EXAMPLE — NOT A REAL REPORT" badges on illustrative narratives · data-provenance table.</p>
+  <p style="margin-top: 16px; font-size: 12px; color: var(--ink-3)">The thesis argument changes with these mockups: Maddie is no longer a smart app that tells you where it is safe. It is a visualization system that shows the user what is known and unknown about the places they move through, in the chart type each piece of knowledge asks for. That is a defensible research contribution. A black-box safety score is not.</p>
+</footer>
+
+</main>
+
+<script>
+  document.querySelectorAll('.theme-switch button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.documentElement.setAttribute('data-theme', b.dataset.theme);
+      document.querySelectorAll('.theme-switch button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>
