@@ -151,7 +151,7 @@ const NOTES: Record<string, string[]> = {
 const NO_NOTE_SHARE = 0.28;
 
 /** A note for this category, or none — which is a complete report too. */
-function noteFor(category: string, roll: number, skipRoll: number): string | undefined {
+export function noteFor(category: string, roll: number, skipRoll: number): string | undefined {
   const pool = NOTES[category];
   if (!pool || pool.length === 0) return undefined;
   if (skipRoll < NO_NOTE_SHARE) return undefined;
@@ -164,7 +164,7 @@ function noteFor(category: string, roll: number, skipRoll: number): string | und
  * `Math.random()` would give a different fictional city on every reseed, which
  * makes "did the seed change or did I?" unanswerable when something looks odd.
  */
-function rng(seed: number): () => number {
+export function rng(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state = (state + 0x6d2b79f5) >>> 0;

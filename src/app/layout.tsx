@@ -1,18 +1,19 @@
 import type { Metadata, Viewport } from "next";
+import "@fontsource-variable/inter";
 import "./globals.css";
 
+import EvidenceProvider from "@/components/EvidenceProvider";
+
 export const metadata: Metadata = {
-  title: "Maddie — routes, lighting and what the map knows",
+  title: "Maddie — Explore urban mobility evidence",
   description:
-    "Set a start and a destination on an OpenStreetMap map, compare the ways round, " +
-    "and see what OpenStreetMap records about the lighting and the places along each one.",
+    "An evidence dashboard: community reports, mapped lighting and nearby places, " +
+    "and the ways round from A to B compared factor by factor. No overall safety score.",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // The map is full-height; a zooming viewport fights Leaflet's own gestures.
-  maximumScale: 1,
 };
 
 /**
@@ -26,10 +27,10 @@ export const viewport: Viewport = {
 const THEME_SCRIPT = `
 try {
   var saved = localStorage.getItem("maddie.theme.v1");
-  var dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  var dark = saved === "dark";
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 } catch (e) {
-  document.documentElement.dataset.theme = "dark";
+  document.documentElement.dataset.theme = "light";
 }`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -38,7 +39,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <EvidenceProvider>{children}</EvidenceProvider>
+      </body>
     </html>
   );
 }
