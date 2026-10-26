@@ -39,7 +39,7 @@ import {
 import { boundsAround, distanceM } from "@/lib/geo";
 import { googleMapsLink } from "@/lib/handoff";
 import { EMPTY_LAYERS } from "@/lib/layers";
-import { fetchRoutes, type Profile, type Route } from "@/lib/osrm";
+import { fetchRoutes, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import type { SampleRead } from "@/lib/overpass";
 import { pick, ROUTE_DASH, ROUTE_INK } from "@/lib/palette";
 import { recordedLeg, SCENARIO_DESTINATIONS, SCENARIO_PROFILES, SCENARIO_START } from "@/lib/scenario";
@@ -63,6 +63,9 @@ type Source = "osm+reports" | "osm";
 
 const same = (a: TripEnd, b: TripEnd) => distanceM(a.point, b.point) < 30;
 
+/** A point set on the map has no name until somebody searches; say where it is. */
+const pinLabel = (point: LatLng) => `Pin ${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
+
 export default function CompareBoard() {
   const { city } = useEvidence();
   return <CompareFor key={city.id} city={city} />;
@@ -80,6 +83,16 @@ function CompareFor({ city }: { city: City }) {
   const [brush, setBrush] = useState<[number, number] | null>([0.4, 0.55]);
   const [extra, setExtra] = useState(10);
   const [tilesOk, setTilesOk] = useState(true);
+  const [placing, setPlacing] = useState<"A" | "B">("A");
+
+  /** A tap or a drag on the map: that end moves, and the next tap sets the other. */
+  function place(letter: "A" | "B", point: LatLng) {
+    const end = { label: pinLabel(point), point };
+    if (letter === "A") setFrom(end);
+    else setTo(end);
+    setSelected(0);
+    setPlacing(letter === "A" ? "B" : "A");
+  }
 
   // The date is read in the browser: the page is prerendered, and a date
   // computed during that render is the build machine's.
@@ -266,7 +279,17 @@ function CompareFor({ city }: { city: City }) {
               places={nearPlaces}
               reports={nearReports}
               onTiles={setTilesOk}
+              placing={placing}
+              onPlace={place}
             />
+            <div className="map-place" role="group" aria-label="Tap the map to set">
+              <span>Tap map to set</span>
+              {(["A", "B"] as const).map((letter) => (
+                <button key={letter} type="button" aria-pressed={placing === letter} onClick={() => setPlacing(letter)}>
+                  {letter}
+                </button>
+              ))}
+            </div>
             <span className="north" aria-hidden>N<br />▲</span>
             <div className="map-key boxed">
               <span><span className="heart">♥</span> Nearby places</span>

@@ -31,7 +31,13 @@ export type Coverage = readonly (readonly [number, number])[];
  * a millisecond, and that is the whole cost.
  */
 export interface LocalUpstream {
-  base: string;
+  /**
+   * Tried in order; the first to answer 200 wins. Loopback first (aschkan holds
+   * the copy), then aschkan's relay over the tunnel — which is how PARSA gets
+   * one at all: parsa cannot reach the public Overpass, so without the second
+   * entry every Dutch query that landed on parsa failed with a 502.
+   */
+  bases: string[];
   covers: Coverage;
   timeoutMs: number;
 }
@@ -114,6 +120,9 @@ export function queryWithin(body: string, region: Coverage): boolean {
  * for a minute (`PC_RETRY_MS`), so a switched-off PC costs one short timeout a
  * minute, not one per tile.
  */
+/** aschkan's own Overpass, as parsa reaches it over the tunnel. */
+export const OVERPASS_RELAY = "http://10.8.0.2:12346";
+
 export const PC_RELAY = "http://10.8.0.2";
 export const PC_PORTS = { tile: 18180, nominatim: 18188, foot: 18101, bike: 18102, driving: 18103 } as const;
 /** The tileserver-gl style the PC renders. */
@@ -243,7 +252,9 @@ export const SERVICES: Record<string, Service> = {
     // aschkan's own Overpass — the Netherlands, imported from Geofabrik and
     // updated daily (`/srv/overpass`). Loopback only.
     local: {
-      base: "http://127.0.0.1:12345/api/interpreter",
+      // aschkan's forwarder 10.8.0.2:12346 → its own 127.0.0.1:12345, private
+      // sources only (the proxy's LAN forwarders, data/forwards.json there).
+      bases: ["http://127.0.0.1:12345/api/interpreter", `${OVERPASS_RELAY}/api/interpreter`],
       covers: NETHERLANDS,
       timeoutMs: 60_000,
     },

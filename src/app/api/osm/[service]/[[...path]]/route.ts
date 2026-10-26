@@ -104,24 +104,27 @@ async function forward(request: Request, service: Service, name: string, parts: 
    * Overpass asked about anywhere else answers 200 with nothing in it, which
    * is the false "unmapped" the Swiss mirror used to hand out. A refusal, a
    * timeout or an error from it falls through to the public path untouched,
-   * so a box without one (parsa) pays a refused connection and nothing else.
+   * so a box without one (parsa) pays a refused connection and then asks
+   * aschkan's copy over the tunnel.
    */
   if (service.local && body && queryWithin(body.toString("utf8"), service.local.covers)) {
-    try {
-      const response = await fetch(service.local.base, {
-        method: "POST",
-        headers: { "Content-Type": contentType ?? "application/x-www-form-urlencoded" },
-        body: new Uint8Array(body),
-        signal: AbortSignal.timeout(service.local.timeoutMs),
-      });
-      if (response.ok) {
-        const payload = Buffer.from(await response.arrayBuffer());
-        const kept = { "content-type": response.headers.get("content-type") ?? "application/json" };
-        keep(200, kept, payload);
-        return reply(200, kept, payload, service, "local", 1, proxies.capacity());
+    for (const base of service.local.bases) {
+      try {
+        const response = await fetch(base, {
+          method: "POST",
+          headers: { "Content-Type": contentType ?? "application/x-www-form-urlencoded" },
+          body: new Uint8Array(body),
+          signal: AbortSignal.timeout(service.local.timeoutMs),
+        });
+        if (response.ok) {
+          const payload = Buffer.from(await response.arrayBuffer());
+          const kept = { "content-type": response.headers.get("content-type") ?? "application/json" };
+          keep(200, kept, payload);
+          return reply(200, kept, payload, service, "local", 1, proxies.capacity());
+        }
+      } catch {
+        // Not running there, or busy: the next copy, then the public path.
       }
-    } catch {
-      // Not running here, or busy: the public path below answers instead.
     }
   }
 

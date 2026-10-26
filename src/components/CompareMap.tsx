@@ -5,10 +5,16 @@
  * colour (A solid, B dashed, C dotted), A and B as labelled black dots, and
  * the evidence near them — lit streets, nearby places, reports. The brushed
  * interval of the selected route is laid over it in the selection blue.
+ *
+ * A and B are set ON the map as well as by search: a tap puts down whichever
+ * end `placing` names, and both dots can be dragged. Search alone made the trip
+ * a choice from a fixed list whenever Nominatim was unreachable, which from
+ * these servers is often. Route lines do not bubble their clicks, so choosing a
+ * route never moves an end.
  */
 
 import { Fragment, useEffect } from "react";
-import { CircleMarker, MapContainer, Marker, Polyline, Tooltip, useMap } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, Polyline, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -34,6 +40,14 @@ interface Props {
   places: Spot[];
   reports: Report[];
   onTiles: (ok: boolean) => void;
+  /** Which end a tap on the map puts down. */
+  placing: "A" | "B";
+  onPlace: (letter: "A" | "B", point: LatLng) => void;
+}
+
+function Taps({ placing, onPlace }: { placing: "A" | "B"; onPlace: Props["onPlace"] }) {
+  useMapEvents({ click: (event) => onPlace(placing, { lat: event.latlng.lat, lng: event.latlng.lng }) });
+  return null;
 }
 
 function Fit({ routes, from, to }: { routes: Route[]; from: TripEnd; to: TripEnd }) {
@@ -70,6 +84,7 @@ export default function CompareMap(props: Props) {
       <Basemap tone={tone} onFail={() => props.onTiles(false)} onOk={() => props.onTiles(true)} />
       <Resizer />
       <Fit routes={routes} from={props.from} to={props.to} />
+      <Taps placing={props.placing} onPlace={props.onPlace} />
 
       {props.litWays.map((way) => (
         <Polyline
@@ -103,6 +118,7 @@ export default function CompareMap(props: Props) {
               opacity: on ? 1 : 0.85,
               dashArray: ROUTE_DASH[i],
               lineCap: ROUTE_DASH[i] ? "butt" : "round",
+              bubblingMouseEvents: false,
             }}
             eventHandlers={{ click: () => props.onSelect(i) }}
           />
@@ -143,7 +159,13 @@ export default function CompareMap(props: Props) {
           <Marker
             position={[end.point.lat, end.point.lng]}
             icon={textIcon(`<span><b>${letter}</b>${escape(end.label)}</span>`, `end-label end-${letter.toLowerCase()}`)}
-            interactive={false}
+            draggable
+            eventHandlers={{
+              dragend: (event) => {
+                const at = (event.target as L.Marker).getLatLng();
+                props.onPlace(letter as "A" | "B", { lat: at.lat, lng: at.lng });
+              },
+            }}
           />
         </Fragment>
       ))}
