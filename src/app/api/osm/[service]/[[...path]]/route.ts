@@ -35,7 +35,7 @@ import { NextResponse } from "next/server";
 
 import { requestThrough } from "@/lib/proxy-chain";
 import { cacheKey, osmCache } from "@/lib/osm-cache";
-import { SERVICES, nothingWorked, shouldRotate, upstreamUrl, type Service } from "@/lib/osm-forward";
+import { SERVICES, nothingWorked, queryWithin, shouldRotate, upstreamUrl, type Service } from "@/lib/osm-forward";
 import { allowDirectFallback, pool, USER_AGENT, type HopState } from "@/lib/proxy-pool";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +90,35 @@ async function forward(request: Request, service: Service, name: string, parts: 
       at: Date.now(),
     });
   };
+
+  /*
+   * Our own copy first, for a query it covers.
+   *
+   * No rate limit, no proxy, about a second — and only for a query whose every
+   * coordinate is inside the region it holds (`queryWithin`): a regional
+   * Overpass asked about anywhere else answers 200 with nothing in it, which
+   * is the false "unmapped" the Swiss mirror used to hand out. A refusal, a
+   * timeout or an error from it falls through to the public path untouched,
+   * so a box without one (parsa) pays a refused connection and nothing else.
+   */
+  if (service.local && body && queryWithin(body.toString("utf8"), service.local.covers)) {
+    try {
+      const response = await fetch(service.local.base, {
+        method: "POST",
+        headers: { "Content-Type": contentType ?? "application/x-www-form-urlencoded" },
+        body: new Uint8Array(body),
+        signal: AbortSignal.timeout(service.local.timeoutMs),
+      });
+      if (response.ok) {
+        const payload = Buffer.from(await response.arrayBuffer());
+        const kept = { "content-type": response.headers.get("content-type") ?? "application/json" };
+        keep(200, kept, payload);
+        return reply(200, kept, payload, service, "local", 1, proxies.capacity());
+      }
+    } catch {
+      // Not running here, or busy: the public path below answers instead.
+    }
+  }
 
   const send = async (state: HopState | null, attempt: number) => {
     const target = upstreamUrl(service, parts, url.search, attempt);

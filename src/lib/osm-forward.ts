@@ -7,6 +7,95 @@
  * day. A target that can be named by the request is not a forwarder.
  */
 
+/**
+ * A region as a polygon of `[lat, lng]` corners — never a rectangle.
+ *
+ * The first version was a box from 50.7°N to 53.7°N, 3.2°E to 7.3°E, which
+ * looks like "the Netherlands" and contains Brussels, Antwerp and most of
+ * Flanders. A test asking about Brussels caught it.
+ */
+export type Coverage = readonly (readonly [number, number])[];
+
+/**
+ * Our OWN Overpass, on loopback, holding one region.
+ *
+ * It is asked FIRST, before the cache misses go anywhere public: no rate
+ * limit, no proxy, a second rather than twenty-five. But it holds ONE REGION,
+ * and a regional Overpass asked about somewhere else answers 200 with an empty
+ * list — the exact failure `overpass.osm.ch` caused in the public rotation. So
+ * it is only ever asked a query whose every coordinate is inside `covers`
+ * (`queryWithin`), and anything it cannot answer falls through to the public
+ * path unchanged.
+ *
+ * On a machine with no local Overpass the base refuses the connection in about
+ * a millisecond, and that is the whole cost.
+ */
+export interface LocalUpstream {
+  base: string;
+  covers: Coverage;
+  timeoutMs: number;
+}
+
+/**
+ * The Netherlands, drawn deliberately INSIDE its border.
+ *
+ * The two ways of being wrong cost different things. A Dutch point left
+ * outside this line is asked of the public servers, exactly as before — a
+ * slower answer, never a wrong one. A Belgian or German point drawn inside it
+ * would be asked of our copy, which does not hold it, and the empty reply
+ * would read as "nobody has mapped this". So the line keeps clear of every
+ * land border: south Limburg, Zeeuws-Vlaanderen, Baarle-Nassau's enclaves and
+ * the strip along the German border go to the public servers. Utrecht, the
+ * study's whole area, is far inside it.
+ */
+export const NETHERLANDS: Coverage = [
+  [52.95, 4.65], [53.15, 4.85], [53.40, 6.20], [53.32, 6.90], [53.15, 7.05],
+  [52.65, 6.95], [52.22, 6.92], [51.95, 6.62], [51.85, 5.95], [51.55, 5.95],
+  [51.45, 5.85], [51.50, 4.95], [51.50, 4.40], [51.55, 3.80], [51.55, 3.45],
+  [51.95, 4.05], [52.45, 4.55],
+];
+
+/** Ray casting: is the point inside the polygon? */
+function inside(lat: number, lng: number, polygon: Coverage): boolean {
+  let hit = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [latI, lngI] = polygon[i] as readonly [number, number];
+    const [latJ, lngJ] = polygon[j] as readonly [number, number];
+    if ((lngI > lng) !== (lngJ > lng) && lat < ((latJ - latI) * (lng - lngI)) / (lngJ - lngI) + latI) hit = !hit;
+  }
+  return hit;
+}
+
+/**
+ * Whether every coordinate an Overpass query names lies inside `region`.
+ *
+ * The queries this app sends name places in two ways — a bounding box
+ * `(south,west,north,east)` for the layers, and `around:R,lat,lon,lat,lon…`
+ * along a route — and both are latitude, longitude pairs once the decimals are
+ * read in order. Radii, timeouts and output caps are whole numbers, so they are
+ * not mistaken for coordinates. No coordinate at all, or an odd count, is NOT
+ * within anything: the answer must be yes only when it is certainly yes.
+ *
+ * Checking a bounding box's two corners is enough here because the region is
+ * drawn well inside the border: a box whose corners are both inside it is
+ * inside the country.
+ */
+export function queryWithin(body: string, region: Coverage): boolean {
+  let text = body;
+  try {
+    const form = new URLSearchParams(body);
+    text = form.get("data") ?? body;
+  } catch {
+    // Not a form; read it as written.
+  }
+  const numbers = [...text.matchAll(/-?\d{1,3}\.\d+/g)].map((match) => Number(match[0]));
+  if (numbers.length < 2 || numbers.length % 2 !== 0) return false;
+  for (let i = 0; i < numbers.length; i += 2) {
+    if (!inside(numbers[i] as number, numbers[i + 1] as number, region)) return false;
+  }
+  return true;
+}
+
 export interface Service {
   /**
    * Where it goes. Nothing in the request may change this.
@@ -31,6 +120,8 @@ export interface Service {
   ttlMs: number;
   /** Rewrite the tail of the path onto the upstream. */
   suffix?: (parts: string[]) => string;
+  /** Our own copy, asked first for queries it covers. See `LocalUpstream`. */
+  local?: LocalUpstream;
 }
 
 export const SERVICES: Record<string, Service> = {
@@ -59,6 +150,13 @@ export const SERVICES: Record<string, Service> = {
     ttlMs: 600_000,
     // The client posts to the base itself, so anything after it is ignored.
     suffix: () => "",
+    // aschkan's own Overpass — the Netherlands, imported from Geofabrik and
+    // updated daily (`/srv/overpass`). Loopback only.
+    local: {
+      base: "http://127.0.0.1:12345/api/interpreter",
+      covers: NETHERLANDS,
+      timeoutMs: 60_000,
+    },
   },
   osrm: {
     bases: ["https://router.project-osrm.org"],
