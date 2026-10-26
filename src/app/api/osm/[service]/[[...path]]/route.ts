@@ -35,7 +35,12 @@ import { NextResponse } from "next/server";
 
 import { requestThrough } from "@/lib/proxy-chain";
 import { cacheKey, osmCache } from "@/lib/osm-cache";
-import { SERVICES, nothingWorked, queryWithin, shouldRotate, upstreamUrl, type Service } from "@/lib/osm-forward";
+import {
+  hasResults, nothingWorked, PC_RETRY_MS, pcTarget, queryWithin, SERVICES, shouldRotate, upstreamUrl, type Service,
+} from "@/lib/osm-forward";
+
+/** When the study PC last failed to answer; not asked again until this. */
+let pcDownUntil = 0;
 import { allowDirectFallback, pool, USER_AGENT, type HopState } from "@/lib/proxy-pool";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +122,30 @@ async function forward(request: Request, service: Service, name: string, parts: 
       }
     } catch {
       // Not running here, or busy: the public path below answers instead.
+    }
+  }
+
+  /*
+   * The study PC next: tiles, routing and search for the Netherlands, through
+   * aschkan's relay (`pcTarget` in osm-forward.ts). Only a GET it can answer
+   * in full; a failure marks the PC down for a minute so a switched-off PC
+   * costs one timeout a minute, not one per tile. A search it answers with
+   * nothing falls through — a one-country index has not looked anywhere else.
+   */
+  const pc = method === "GET" ? pcTarget(name, parts, url.search) : null;
+  if (pc && Date.now() >= pcDownUntil) {
+    try {
+      const response = await fetch(pc.url, { signal: AbortSignal.timeout(pc.timeoutMs) });
+      if (response.ok) {
+        const payload = Buffer.from(await response.arrayBuffer());
+        if (!pc.needsResults || hasResults(payload.toString("utf8"))) {
+          const kept = { "content-type": response.headers.get("content-type") ?? "application/octet-stream" };
+          keep(200, kept, payload);
+          return reply(200, kept, payload, service, "pc", 1, proxies.capacity());
+        }
+      }
+    } catch {
+      pcDownUntil = Date.now() + PC_RETRY_MS;
     }
   }
 

@@ -96,6 +96,96 @@ export function queryWithin(body: string, region: Coverage): boolean {
   return true;
 }
 
+/* ── the study PC: tiles, routing and search, self-hosted ─────────────── */
+
+/**
+ * Tiles, routing and search for the Netherlands, self-hosted on the study PC
+ * (Docker: tileserver-gl, three OSRM profiles, Nominatim — `scripts/osm-pc/`).
+ *
+ * The PC sits on aschkan's LAN, so BOTH servers reach it the same way: through
+ * aschkan's WireGuard address, where `scripts/osm-pc/relay.js` forwards each
+ * port to the PC. One address, the same constant on both boxes — parsa
+ * crosses the tunnel, aschkan talks to its own interface.
+ *
+ * Asked FIRST and only about what it holds — a tile wholly inside
+ * `NETHERLANDS`, a route whose every point is inside, a search that comes back
+ * with something — and when the PC is off, asleep or busy the request goes to
+ * the public servers exactly as before. A PC that failed is not asked again
+ * for a minute (`PC_RETRY_MS`), so a switched-off PC costs one short timeout a
+ * minute, not one per tile.
+ */
+export const PC_RELAY = "http://10.8.0.2";
+export const PC_PORTS = { tile: 18180, nominatim: 18188, foot: 18101, bike: 18102, driving: 18103 } as const;
+/** The tileserver-gl style the PC renders. */
+export const PC_TILE_STYLE = "maddie";
+/** Below this a tile spans much more than the country; the public tiles draw it. */
+export const PC_MIN_TILE_ZOOM = 7;
+export const PC_RETRY_MS = 60_000;
+
+export interface PcTarget {
+  url: string;
+  timeoutMs: number;
+  /** A search that comes back empty is not an answer from a one-country index. */
+  needsResults?: boolean;
+}
+
+/** The tile's corners, as [lat, lng]. Standard slippy-map maths. */
+export function tileCorners(z: number, x: number, y: number): [number, number][] {
+  const n = 2 ** z;
+  const lng = (tx: number) => (tx / n) * 360 - 180;
+  const lat = (ty: number) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * ty) / n))) * 180) / Math.PI;
+  return [[lat(y), lng(x)], [lat(y), lng(x + 1)], [lat(y + 1), lng(x)], [lat(y + 1), lng(x + 1)]];
+}
+
+/**
+ * Where on the PC this request can be answered, or null for "ask the public
+ * servers". Pure: the route decides whether the PC is up.
+ */
+export function pcTarget(name: string, parts: readonly string[], search: string): PcTarget | null {
+  if (name === "tile") {
+    const [zs, xs, file] = parts;
+    const ys = file?.replace(/\.png$/, "");
+    const [z, x, y] = [Number(zs), Number(xs), Number(ys)];
+    if (![z, x, y].every(Number.isInteger) || z < PC_MIN_TILE_ZOOM || z > 20 || parts.length !== 3) return null;
+    if (!tileCorners(z, x, y).every(([lat, lng]) => inside(lat, lng, NETHERLANDS))) return null;
+    return { url: `${PC_RELAY}:${PC_PORTS.tile}/styles/${PC_TILE_STYLE}/${z}/${x}/${y}.png`, timeoutMs: 8_000 };
+  }
+
+  if (name === "osrm") {
+    const [kind, version, profile, coords] = parts;
+    if (kind !== "route" || version !== "v1" || !coords || parts.length !== 4) return null;
+    const port = profile === "driving" ? PC_PORTS.driving : profile === "foot" ? PC_PORTS.foot : profile === "bike" ? PC_PORTS.bike : null;
+    if (!port) return null;
+    // OSRM is lon,lat; `inside` takes lat,lng.
+    const points = coords.split(";").map((pair) => pair.split(",").map(Number));
+    if (points.length < 2 || !points.every((p) => p.length === 2 && p.every(Number.isFinite) && inside(p[1]!, p[0]!, NETHERLANDS))) return null;
+    return { url: `${PC_RELAY}:${port}/route/v1/${profile}/${coords}${search}`, timeoutMs: 20_000 };
+  }
+
+  if (name === "nominatim") {
+    if (parts.length !== 1) return null;
+    if (parts[0] === "search") return { url: `${PC_RELAY}:${PC_PORTS.nominatim}/search${search}`, timeoutMs: 8_000, needsResults: true };
+    if (parts[0] === "reverse") {
+      const query = new URLSearchParams(search);
+      const lat = Number(query.get("lat"));
+      const lon = Number(query.get("lon"));
+      if (!query.has("lat") || !Number.isFinite(lat) || !Number.isFinite(lon) || !inside(lat, lon, NETHERLANDS)) return null;
+      return { url: `${PC_RELAY}:${PC_PORTS.nominatim}/reverse${search}`, timeoutMs: 8_000 };
+    }
+  }
+  return null;
+}
+
+/** Does a search reply hold at least one place? Anything unreadable is "no". */
+export function hasResults(payload: string): boolean {
+  try {
+    const value = JSON.parse(payload) as unknown;
+    return Array.isArray(value) ? value.length > 0 : !!value && typeof value === "object" && !("error" in value);
+  } catch {
+    return false;
+  }
+}
+
 export interface Service {
   /**
    * Where it goes. Nothing in the request may change this.
