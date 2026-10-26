@@ -7,8 +7,13 @@
  * One map and coordinated small views, linked both ways (Munzner ch. 12):
  *
  *   * tick or click a NEIGHBOURHOOD → it is the selection in every chart;
- *   * click a BAR (or a slice)      → that report type is focused everywhere;
- *   * BRUSH the hours               → every other view re-counts within them.
+ *   * click a BAR (or a slice)      → that reason is focused everywhere;
+ *   * click a TIME bar              → every other view re-counts within it.
+ *
+ * The data is Pointer's "Onveilige plekken" survey plus reports added since
+ * (`reports.ts`). A record is a place somebody marked and WHY — not an
+ * incident, and not timed: the survey asks whether a place feels unsafe after
+ * dark, by day or at any time, and that is what the time view shows.
  *
  * Nothing here is a score. Counts are counts; missing lighting is its own
  * hatched category; the reports are context, never inputs to a verdict.
@@ -19,25 +24,26 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { CalendarDays, Info, Plus, SlidersHorizontal, X } from "lucide-react";
 
-import BoardHeader from "@/components/BoardHeader";
+import BoardHeader, { Sources } from "@/components/BoardHeader";
 import { Donut, GroupedBars, Histogram, Key, Lines, StackedShare, Swatch } from "@/components/charts";
 import { useEvidence } from "@/components/EvidenceProvider";
 import { cityBox, PLACE_KINDS, useLiveLayers, usePoliceFigures, useRecording } from "@/components/useMapData";
 import type { City } from "@/lib/cities";
-import { districtOf, histogram, hourOf, monthKeys, REPORT_TYPES, reportType, type ReportType } from "@/lib/evidence";
+import { districtOf, histogram, monthKeys, REPORT_TYPES, reportType, WHEN_BINS, whenOf, type ReportType, type WhenBin } from "@/lib/evidence";
 import { distanceToPathM } from "@/lib/geo";
 import { EMPTY_LAYERS, type LayerData } from "@/lib/layers";
 import type { LatLng } from "@/lib/osrm";
-import { newReportId, type Report } from "@/lib/reports";
+import { ADJUSTMENTS } from "@/lib/pointer";
+import { exactDay, inDates, newReportId, WHEN_OPTIONS, type Report, type When } from "@/lib/reports";
 
 const ExploreMap = dynamic(() => import("@/components/ExploreMap"), {
   ssr: false,
   loading: () => <div className="map map-loading">Loading the map…</div>,
 });
 
-/** The purple ramp the type views use: one meaning (a report), four types. */
+/** The purple ramp the type views use: one meaning (a report), four reasons. */
 export const TYPE_INK: Record<ReportType, string> = {
-  harassment: "var(--type-1)", catcalling: "var(--type-2)", assault: "var(--type-3)", other: "var(--type-4)",
+  experienced: "var(--type-1)", witnessed: "var(--type-2)", environment: "var(--type-3)", other: "var(--type-4)",
 };
 
 const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -63,10 +69,10 @@ function ExploreFor({ city }: { city: City }) {
   const [showLighting, setShowLighting] = useState(false);
   const [showPlaces, setShowPlaces] = useState(true);
   const [focus, setFocus] = useState<ReportType | null>(null);
-  const [brush, setBrush] = useState<[number, number] | null>([18, 23]);
+  const [when, setWhen] = useState<WhenBin | null>(null);
   const [openReport, setOpenReport] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState<{ point: LatLng; type: ReportType; note: string } | null>(null);
+  const [draft, setDraft] = useState<{ point: LatLng; type: ReportType; when: When | ""; note: string } | null>(null);
   const [tilesOk, setTilesOk] = useState(true);
   const [infoOpen, setInfoOpen] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
@@ -86,8 +92,8 @@ function ExploreFor({ city }: { city: City }) {
   const police = usePoliceFigures(official, box);
 
   const extent = useMemo(() => {
-    const days = ev.reports.map((report) => day(report.at)).sort();
-    return { from: days[0] ?? "2025-01-01", to: days[days.length - 1] ?? "2025-12-31" };
+    const days = ev.reports.flatMap((report) => [day(report.at), ...(report.atUntil ? [day(report.atUntil)] : [])]).sort();
+    return { from: days[0] ?? "2024-03-21", to: days[days.length - 1] ?? new Date().toISOString().slice(0, 10) };
   }, [ev.reports]);
   const dates = range ?? extent;
 
@@ -102,17 +108,12 @@ function ExploreFor({ city }: { city: City }) {
   const shown = useMemo(() => {
     if (!community) return [];
     return ev.reports.filter((report) => {
-      const d = day(report.at);
-      return types.includes(reportType(report.category)) && d >= dates.from && d <= dates.to;
+      return types.includes(reportType(report.category)) && inDates(report, dates.from, dates.to);
     });
   }, [ev.reports, community, types, dates]);
 
   const inSelection = (report: Report) => districts.length === 0 || districts.includes(where.get(report.id) ?? "");
-  const inBrush = (report: Report) => {
-    if (!brush) return true;
-    const hour = hourOf(report);
-    return hour >= Math.min(...brush) && hour <= Math.max(...brush);
-  };
+  const inBrush = (report: Report) => when === null || whenOf(report) === when;
   const inFocus = (report: Report) => focus === null || reportType(report.category) === focus;
 
   const selectedNames = districts.map((id) => city.districts.find((d) => d.id === id)?.name).filter(Boolean).join(", ");
@@ -122,27 +123,45 @@ function ExploreFor({ city }: { city: City }) {
   const brushed = shown.filter(inBrush);
   const typeRows = REPORT_TYPES.filter((type) => types.includes(type.id)).map((type) => ({
     id: type.id,
-    label: type.label,
+    label: type.short,
     value: brushed.filter((report) => inSelection(report) && reportType(report.category) === type.id).length,
     context: brushed.filter((report) => reportType(report.category) === type.id).length,
   }));
 
-  const hourBins = histogram(shown.filter((r) => inSelection(r) && inFocus(r)).map(hourOf), 0, 24, 1);
+  const forWhen = shown.filter((r) => inFocus(r));
+  const whenRows = WHEN_BINS.map((bin) => ({
+    id: bin.id,
+    label: bin.label,
+    value: forWhen.filter((report) => inSelection(report) && whenOf(report) === bin.id).length,
+    context: forWhen.filter((report) => whenOf(report) === bin.id).length,
+  })).filter((row) => row.id !== "unknown" || row.context > 0);
+
+  const adaptSelected = brushed.filter((r) => inSelection(r) && inFocus(r));
+  const adaptRows = ADJUSTMENTS.map((a) => ({
+    id: a.id,
+    label: a.label,
+    value: adaptSelected.filter((r) => r.adjustments?.includes(a.id)).length,
+    context: brushed.filter((r) => inFocus(r) && r.adjustments?.includes(a.id)).length,
+  }))
+    .filter((row) => row.context > 0)
+    .sort((a, b) => b.value - a.value || b.context - a.context);
+  const answeredAdapt = adaptSelected.filter((r) => r.adjustments?.length).length;
+  const undated = brushed.filter((r) => inSelection(r) && !exactDay(r)).length;
 
   const route = ev.route?.path ?? city.exampleRoute;
-  const routeName = ev.route ? ev.route.label : `example route through ${city.name}`;
+  const routeName = ev.route ? ev.route.label : `default walk through ${city.name}`;
   const distances = brushed.filter((r) => inSelection(r) && inFocus(r)).map((r) => distanceToPathM(r.point, route));
   const distanceBins = histogram(distances, 0, DISTANCE_MAX, DISTANCE_BIN);
 
   const faded = useMemo(
     () => new Set(shown.filter((report) => !(inBrush(report) && inFocus(report))).map((report) => report.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- inBrush/inFocus read brush/focus
-    [shown, brush, focus],
+    [shown, when, focus],
   );
 
   const monthList = useMemo(() => monthKeys(dates.from, dates.to), [dates.from, dates.to]);
   const months = useMemo(() => {
-    const selected = brushed.filter(inSelection);
+    const selected = brushed.filter((report) => inSelection(report) && exactDay(report));
     const index = new Map(monthList.map((key, i) => [key, i]));
     return REPORT_TYPES.filter((type) => types.includes(type.id)).map((type) => {
       const values = new Array<number>(monthList.length).fill(0);
@@ -150,7 +169,7 @@ function ExploreFor({ city }: { city: City }) {
         const at = index.get(day(report.at).slice(0, 7));
         if (at !== undefined && reportType(report.category) === type.id) values[at]! += 1;
       }
-      return { id: type.id, label: type.label, values, colour: TYPE_INK[type.id], width: focus === type.id ? 3.2 : focus ? 1.2 : 2 };
+      return { id: type.id, label: type.short, values, colour: TYPE_INK[type.id], width: focus === type.id ? 3.2 : focus ? 1.2 : 2 };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- inSelection reads districts
   }, [brushed, districts, types, focus, monthList]);
@@ -162,13 +181,15 @@ function ExploreFor({ city }: { city: City }) {
 
   function saveDraft() {
     if (!draft) return;
-    const note = draft.note.trim().slice(0, 280);
+    const note = draft.note.trim().slice(0, 1000);
     ev.addReport({
       id: newReportId(Date.now(), Math.random()),
       category: draft.type,
       point: draft.point,
       at: new Date().toISOString(),
       source: "community",
+      ...(draft.type !== "other" ? { reasons: [draft.type] } : {}),
+      ...(draft.when ? { when: draft.when } : {}),
       ...(note ? { note } : {}),
     });
     setDraft(null);
@@ -181,7 +202,6 @@ function ExploreFor({ city }: { city: City }) {
     <main className="board explore">
       <BoardHeader
         title="Explore urban mobility evidence"
-        kind="Synthetic example data"
         note={<>Select a bar or map area → highlight related records in every view</>}
       />
 
@@ -190,7 +210,7 @@ function ExploreFor({ city }: { city: City }) {
         <aside className={`card filters${filtersOpen ? " open" : ""}`} aria-label="Filters">
           <button type="button" className="filters-toggle" onClick={() => setFiltersOpen(!filtersOpen)} aria-expanded={filtersOpen}>
             <SlidersHorizontal size={16} aria-hidden /> Filters
-            <span className="muted">{city.name} · {selectedNames || "all areas"} · {types.length} of {REPORT_TYPES.length} types</span>
+            <span className="muted">{city.name} · {selectedNames || "all areas"} · {types.length} of {REPORT_TYPES.length} reasons</span>
           </button>
           <section>
             <h2>Area</h2>
@@ -213,7 +233,7 @@ function ExploreFor({ city }: { city: City }) {
             <h2>Report source</h2>
             <label className="check">
               <input type="checkbox" checked={community} onChange={() => setCommunity(!community)} />
-              <span>Community reports<small>Street points (user-submitted)</small></span>
+              <span>Marked places<small>Pointer survey + community reports</small></span>
             </label>
             <label className="check">
               <input type="checkbox" checked={official} onChange={() => setOfficial(!official)} />
@@ -231,14 +251,10 @@ function ExploreFor({ city }: { city: City }) {
             )}
             {official && police.busy && <p className="note">Reading the CBS figures…</p>}
             {official && police.error && <p className="note warn">{police.error}</p>}
-            <label className="check">
-              <input type="checkbox" checked={ev.showExamples} onChange={() => ev.setShowExamples(!ev.showExamples)} />
-              <span>Example records<small>Synthetic — nothing here happened</small></span>
-            </label>
           </section>
 
           <section>
-            <h2>Report type</h2>
+            <h2>Reason given</h2>
             {REPORT_TYPES.map((type) => (
               <label key={type.id} className="check">
                 <input type="checkbox" checked={types.includes(type.id)} onChange={() => setTypes(toggle(types, type.id))} />
@@ -282,9 +298,9 @@ function ExploreFor({ city }: { city: City }) {
         {/* ── the map ─────────────────────────────────────────────────── */}
         <section className="card map-card">
           <div className="card-head">
-            <h2>{city.name} — community reports (street points)</h2>
+            <h2>{city.name} — marked places</h2>
             <Key items={[
-              { swatch: <Swatch colour="var(--report)" round />, label: "Community report" },
+              { swatch: <Swatch colour="var(--report)" round />, label: "Marked place" },
               { swatch: <span className="heart" aria-hidden>♥</span>, label: "Nearby place" },
               { swatch: <i className="sw sw-area" aria-hidden />, label: selectionLabel },
             ]} />
@@ -307,18 +323,23 @@ function ExploreFor({ city }: { city: City }) {
               openReport={openReport}
               onOpenReport={setOpenReport}
               adding={adding}
-              onAdd={(point) => setDraft({ point, type: "harassment", note: "" })}
+              onAdd={(point) => setDraft({ point, type: "environment", when: "", note: "" })}
               onTiles={setTilesOk}
             />
             {!tilesOk && <p className="map-banner">The basemap did not load — the records are still drawn where they are.</p>}
-            {adding && !draft && <p className="map-banner">Tap the map where it happened.</p>}
+            {ev.reportsLoading && <p className="map-banner">Loading the marked places…</p>}
+            {adding && !draft && <p className="map-banner">Tap the place on the map.</p>}
             {draft && (
               <form className="draft" onSubmit={(event) => { event.preventDefault(); saveDraft(); }}>
-                <b>New community report</b>
-                <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as ReportType })} aria-label="Type">
+                <b>Mark this place</b>
+                <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as ReportType })} aria-label="Why">
                   {REPORT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
                 </select>
-                <textarea value={draft.note} maxLength={280} placeholder="What happened here? (optional)" onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
+                <select value={draft.when} onChange={(e) => setDraft({ ...draft, when: e.target.value as When | "" })} aria-label="When">
+                  <option value="">When? (optional)</option>
+                  {WHEN_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
+                <textarea value={draft.note} maxLength={1000} placeholder="What is it like here? (optional)" onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
                 <p className="note">
                   {ev.backend === "mongo" ? "Shared with everyone using this site." : "Kept in this browser only — no database is configured."}
                 </p>
@@ -329,7 +350,7 @@ function ExploreFor({ city }: { city: City }) {
               </form>
             )}
             <div className="map-key">
-              <span><Swatch colour="var(--report)" round /> Community reports: street points (user-submitted)</span>
+              <span><Swatch colour="var(--report)" round /> Marked places: where respondents pointed (Pointer survey, community)</span>
               <span><i className="sw sw-dashed" aria-hidden /> Official crime: neighbourhood aggregates ({official ? "on" : "off"})</span>
             </div>
           </div>
@@ -338,30 +359,28 @@ function ExploreFor({ city }: { city: City }) {
         {/* ── by type ─────────────────────────────────────────────────── */}
         <section className="card types-card">
           <div className="card-head">
-            <h2>Community reports by type</h2>
+            <h2>Why the place was marked</h2>
           </div>
           <Key items={[
             { swatch: <Swatch colour="var(--report)" />, label: selectionLabel },
             { swatch: <Swatch colour="var(--context)" />, label: "All displayed records" },
           ]} />
-          <GroupedBars rows={typeRows} focus={focus} onPick={pickType} axisLabel="Number of reports" />
+          <GroupedBars rows={typeRows} focus={focus} onPick={pickType} axisLabel="Marked places" labelWidth={170} />
         </section>
 
         {/* ── when ────────────────────────────────────────────────────── */}
         <section className="card">
           <div className="card-head">
-            <h2>When reports occurred</h2>
-            {brush && <button type="button" className="link" onClick={() => setBrush(null)}>Clear</button>}
+            <h2>When respondents feel this way</h2>
+            {when && <button type="button" className="link" onClick={() => setWhen(null)}>Clear</button>}
           </div>
-          <Histogram
-            bins={hourBins}
-            binLabel={(i) => String(i).padStart(2, "0")}
-            tickEvery={[0, 6, 12, 18, 23]}
-            xLabel="Hour of day"
-            yLabel="Report count"
-            brush={brush}
-            onBrush={setBrush}
-            brushHint="Brush a time range"
+          <p className="card-sub">As the respondent answered it — the survey asks no hour. Click a bar to filter every view.</p>
+          <GroupedBars
+            rows={whenRows}
+            focus={when}
+            onPick={(id) => setWhen((current) => (current === id ? null : (id as WhenBin)))}
+            axisLabel="Marked places"
+            labelWidth={170}
           />
         </section>
 
@@ -387,14 +406,14 @@ function ExploreFor({ city }: { city: City }) {
             <h2>Distance from report to selected route</h2>
           </div>
           <p className="card-sub">
-            {ev.route ? <>Route: {routeName}</> : <>No route picked yet — measuring to an {routeName}. <Link href="/compare">Pick one →</Link></>}
+            {ev.route ? <>Route: {routeName}</> : <>No route picked yet — measuring to a {routeName}. <Link href="/compare">Pick one →</Link></>}
           </p>
           <Histogram
             bins={distanceBins}
             binLabel={(i) => String(i * DISTANCE_BIN)}
             tickEvery={[0, 5, 10, 15, 20, 24]}
             xLabel="Distance (m)"
-            yLabel="Reports"
+            yLabel="Marked places"
             height={190}
           />
         </section>
@@ -404,24 +423,40 @@ function ExploreFor({ city }: { city: City }) {
       <h2 className="section-title">More views of the same records</h2>
       <div className="more-grid">
         <section className="card">
-          <div className="card-head"><h2>Share of reports by type</h2></div>
-          <p className="card-sub">{selectionLabel}{brush ? `, ${String(Math.min(...brush)).padStart(2, "0")}–${String(Math.max(...brush)).padStart(2, "0")}h` : ""}. Click a slice to focus it everywhere.</p>
+          <div className="card-head"><h2>Share by reason</h2></div>
+          <p className="card-sub">{selectionLabel}{when ? `, ${WHEN_BINS.find((bin) => bin.id === when)?.label.toLowerCase()}` : ""}. Click a slice to focus it everywhere.</p>
           <Donut
             parts={typeRows.map((row) => ({ id: row.id, label: row.label, value: row.value, colour: TYPE_INK[row.id as ReportType] }))}
             focus={focus}
             onPick={pickType}
-            centre="reports"
+            centre="places"
           />
         </section>
         <section className="card span-2">
-          <div className="card-head"><h2>Reports over time, by type</h2></div>
-          <p className="card-sub">{selectionLabel}. Counts per month of the records shown — not a trend in risk.</p>
+          <div className="card-head"><h2>When places were marked, by reason</h2></div>
+          <p className="card-sub">
+            {selectionLabel}. The month the survey was filled in — not when anything happened, and not a trend in risk.
+            {undated > 0 && <> {undated.toLocaleString("en-GB")} place{undated === 1 ? " was" : "s were"} marked during a window (no day given) and {undated === 1 ? "is" : "are"} not drawn here.</>}
+          </p>
           <Key items={months.map((series) => ({ swatch: <Swatch colour={series.colour} />, label: series.label }))} />
-          <Lines labels={monthList.map((key) => `${MONTHS[Number(key.slice(5, 7)) - 1]}${monthList.length > 12 ? ` ${key.slice(2, 4)}` : ""}`)} series={months} xLabel="Month" yLabel="Reports" />
+          <Lines labels={monthList.map((key) => `${MONTHS[Number(key.slice(5, 7)) - 1]}${monthList.length > 12 ? ` ${key.slice(2, 4)}` : ""}`)} series={months} xLabel="Month" yLabel="Marked places" />
+        </section>
+        <section className="card span-3">
+          <div className="card-head"><h2>How people adapt</h2></div>
+          <p className="card-sub">
+            {selectionLabel}. &ldquo;Do you change your behaviour because of this place?&rdquo; — several answers allowed;
+            {" "}{answeredAdapt.toLocaleString("en-GB")} of these places have an answer.
+          </p>
+          <Key items={[
+            { swatch: <Swatch colour="var(--report)" />, label: selectionLabel },
+            { swatch: <Swatch colour="var(--context)" />, label: "All displayed records" },
+          ]} />
+          <GroupedBars rows={adaptRows} focus={null} onPick={() => undefined} axisLabel="Marked places" labelWidth={250} />
         </section>
       </div>
 
-      <p className="caveat">Observed reports describe this dataset, not incident risk. Missing lighting stays unknown.</p>
+      <p className="caveat">Marked places describe what respondents told a survey, not incident risk. Missing lighting stays unknown.</p>
+      <Sources />
     </main>
   );
 }

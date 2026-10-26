@@ -30,21 +30,27 @@ short list of things that will bite you while editing.
 - `src/lib/scenario.ts` + `scripts/scenario.ts` + `src/lib/scenario-recording.json`
   — the controlled Utrecht scenario for the interviews. **Read its header.**
 - `src/lib/compare.ts` — which route is preferred, and when to say none is.
-- `src/lib/reports.ts` — the crime layer. Entered by people, never scored.
+- `src/lib/reports.ts` — the reports layer: Pointer's survey, the team's and
+  the community's marked places. Real only; never scored.
+- `src/lib/pointer.ts` — the Pointer "Onveilige plekken" export → reports.
+  Pure, tested. **Read its header: what a row is NOT.** `POINTER_CREDIT` must
+  be shown wherever the data is.
+- `src/lib/importer.ts` — batched upserts into Mongo (import, seed restore).
+- `src/lib/auth.ts` — the team's `/admin` login: `ADMIN_PASSWORD` +
+  `SESSION_SECRET`, one signed HttpOnly cookie. **Server only.**
 - `src/lib/nl-crime.ts` — the POLICE figures, from CBS. Per neighbourhood per
   month, drawn as its own layer, **never scored**. Pure parts tested against
   real recorded replies in `test/fixtures/`.
 - `src/lib/nl-areas.ts` — PDOK: which CBS neighbourhood a point is in. The join
   that lets the figures be placed at all. Pure parts tested.
-- `src/lib/interviews.ts` — the requirements interviews, shaped like the
-  protocol's own sections. Pure, tested. **Never scored, never on the map.**
-- `src/lib/seed-interviews.ts` — the synthetic cohort. **Read its header before
-  touching it.** 24 invented participants who deliberately disagree.
-- `src/lib/seed-data.ts` — the example data. **Read its header before touching it.**
+- `src/lib/interviews.ts` — the real interview transcripts (Whisper segments),
+  searchable, never coded. Pure, tested. **Team-only, never on the map.**
 - `src/lib/db.ts` — MongoDB, when `MONGO_URI` is set. **Server only.**
 - `scripts/seed.ts` — `npm run seed`, which the proxy's reseed button runs.
-  **Destructive by default. Read the seed section below.**
-- `src/lib/seed-flags.ts` — the flag contract, pure and tested.
+  **Rebuilds from the real data, with a backup first. Read the seed section.**
+- `scripts/import-pointer.ts`, `scripts/import-interviews.ts` — the one-time
+  loads into Mongo. `scripts/district-figures.ts` — measures each district's
+  lighting / road km / places from OSM into `src/lib/district-figures.ts`.
 - `src/lib/ai.ts` — the one model: Liara, hardcoded, key and all. **Server only.**
 - `src/lib/proxy-chain.ts` — two HTTP proxies in a row. **Server only.**
 - `src/lib/proxy-pool.ts` — which of them work, and which to use next.
@@ -54,15 +60,16 @@ short list of things that will bite you while editing.
 - `scripts/proxies.ts` — `npm run proxies`, the first thing to run on the box.
 - `src/app/api/assess/route.ts` — the model endpoint.
 - `src/app/api/reports/route.ts` — the crime layer's storage.
-- `src/app/api/interviews/route.ts` — the interviews, READ-ONLY. No POST, ever.
+- `src/app/api/interviews/route.ts` — the interviews, read-only, **401 without
+  the admin session**.
+- `src/app/api/admin/*` — session, reports, import, interviews. Every method
+  checks the session. `src/components/AdminView.tsx` is `/admin`.
 - `src/app/api/osm/[service]/[[...path]]/route.ts` — OSM through this server.
 - `src/lib/evidence.ts` — the dashboard's arithmetic: report types, point in
   district, projecting onto a route, lighting runs, the brushed interval.
   **Decomposes; never aggregates.** Pure, tested.
 - `src/lib/cities.ts` — the cities and districts the boards show. Outlines are
-  hand-traced; lighting/road figures are EXAMPLE values. **Read its header.**
-- `src/lib/example-reports.ts` — the boards' synthetic reports, generated in
-  the browser, never stored, labelled on every board.
+  hand-traced; lighting/road/places figures are MEASURED (`district-figures.ts`).
 - `src/components/EvidenceProvider.tsx` — city, theme, reports, chosen route,
   shared by every board (wrapped in `layout.tsx`).
 - `src/components/ExploreBoard.tsx` (`/`), `CompareBoard.tsx` (`/compare`),
@@ -448,10 +455,16 @@ asks for, the reader decides. The rules that will be undone by accident:
 - **Brush and link.** Neighbourhood, bar/slice focus and the hour brush filter
   every other view on Explore; the brushed interval on Compare highlights the
   map. A view that ignores the selection is a bug.
-- **The subtitle says "Synthetic example data" whenever any example is shown**
-  (`usingExamples`). Example reports carry `source: "example"` and an invented
-  narrative shows "EXAMPLE — NOT A REAL REPORT" — on these boards that
-  labelling is part of the design, independent of `MARK_EXAMPLE_DATA`.
+- **There is no example data, anywhere.** The browser-side generator, the
+  seeded reports and the synthetic cohort are deleted. `parseReports` and
+  `parseInterviews` DROP a record marked `source: "example"` — never show it,
+  never promote it. Do not bring a demo generator back to fill an empty chart;
+  an empty chart with its reason is the honest state.
+- **Every board ends with `<Sources />`** — Pointer's credit is a condition of
+  using the data, not decoration.
+- **The survey has no hour.** "When" is Pointer's after dark / by day / any
+  time, a bar you click to filter (it replaced the hour brush). `at` is when the
+  survey was filled in — never chart it as when something happened.
 - **The trade-off slider FILTERS, never re-scores** (`withinBudget`).
 - **Compare reads the Utrecht RECORDING** for scenario trips (no network) and
   OSRM + Overpass live otherwise. "Nearby places" are `PLACE_KINDS` in
@@ -608,13 +621,47 @@ recorded trips. Read the header of `src/lib/scenario.ts`. The rules:
   its cache on every retry.
 - **Re-record between rounds of interviews, never between sessions.**
 
+## Our own Overpass — the Netherlands, on aschkan, asked first
+
+The public Overpass rate-limits per IP, and every workaround (more proxies, more
+exits) is an argument with the people running it. So aschkan holds its own:
+`/srv/overpass`, the Geofabrik Netherlands extract, updated daily from
+Geofabrik's diffs, served on `127.0.0.1:12345` by `scripts/overpass/http.js`.
+`scripts/overpass/install.sh` sets up the four systemd units
+(`maddie-overpass-{dispatcher,http,fetch,apply}`).
+
+- **It is asked FIRST, and ONLY about what it holds.** `SERVICES.overpass.local`
+  in `osm-forward.ts`, gated by `queryWithin()`: every coordinate in the query
+  must be inside `NETHERLANDS`. A regional Overpass asked about anywhere else
+  answers 200 with an EMPTY list — the false "unmapped" the Swiss mirror handed
+  out. Anything it cannot or does not answer falls through to the public path.
+- **`NETHERLANDS` is a polygon drawn INSIDE the border, never a box.** The first
+  version was a rectangle and held Brussels, Antwerp and most of Flanders. Inside
+  the border on purpose: a Dutch point left out is asked of the public servers
+  (slower, never wrong); a Belgian point let in would be answered "nothing here".
+  `test/overpass-mirrors.test.ts` asks about six border cities.
+- **On parsa there is no local Overpass**, so the loopback base refuses in about a
+  millisecond and parsa behaves exactly as before.
+- **The storage is a 40 GB ext4 IMAGE on the NTFS data drive** ("New Volume",
+  `/mnt/data/linux/maddie-overpass.ext4`, loop-mounted at `/srv/overpass`, both
+  `nofail` in fstab). aschkan's root is 48 GB and was 96% full; resizing it would
+  mean moving the running root partition. The image is the reversible answer.
+- **An import must be memory-FENCED.** The first run, at `nice 19` and idle I/O,
+  still grew to 4.8 GB of RAM, pushed MongoDB and sixteen apps into swap, and
+  took Maddie's own response from 4 ms to 17 s. Priority does not cover memory.
+  Re-import inside `systemd-run -p MemoryHigh=2500M -p MemoryMax=3500M` with
+  `update_database --flush-size=2` (`/srv/overpass/import.sh`) — slower, and
+  nothing else notices.
+- **Formatting the image needs `-E nodiscard`.** A plain `mkfs.ext4` discards
+  every block, which on an NTFS-backed loop file rewrites all 40 GB and put the
+  box at load 34 for four minutes.
+
 ## Two crime layers, and neither of them is scored
 
-There is no open point-level dataset for harassment, catcalling, sexual assault
-or rape. Official figures are per neighbourhood per month — the same objection
-as below — and the categories that matter most are the least reported. So the
-reports layer holds **reports people entered**, starting empty, and it never
-reaches `score.ts`.
+There is no open point-level dataset of incidents. The reports layer holds the
+nearest real thing — **Pointer's survey of places people marked, with why** —
+plus what the team and the community add, and it never reaches `score.ts`.
+Official figures are per neighbourhood per month, the objection below.
 
 The police figures are now on the map too, as a SEPARATE layer
 (`nl-crime.ts` + `nl-areas.ts`, blue-grey badges, off by default). That does not
@@ -669,135 +716,23 @@ points at the police layer so the reader is not left thinking no official
 figures exist. Merging the two would break that sentence, and there is no
 version of the merge that does not.
 
-### Example data — the marking is currently SWITCHED OFF
-
-`npm run seed` invents points so the layer can be exercised before the
-interviews exist, and every one still carries `source: "example"` **in the
-database**.
-
-**The on-screen marking is off, deliberately, and `src/lib/demo-mode.ts` is the
-one switch.** `MARK_EXAMPLE_DATA = false` gates all four markings — the hollow
-dashed ring, `EXAMPLE DATA — NOT A REAL REPORT` in the popup, the banner in
-`FilterPanel`, and the banner and per-card `SYNTHETIC` tag in `ResearchPanel`.
-The reason is that the app is being evaluated as it will look, and a screen
-covered in placeholder warnings is a screen that will never ship: every report
-was visibly a stub and every interview card opened with a notice, which says
-nothing about whether the popup, the wrapping or the category filter work.
-
-Read `demo-mode.ts` before changing this. What that switch does and does not do:
-
-- **It changes presentation only.** `source` is still written on every record,
-  and it is the only thing that can find these rows again — `--no-demo` and the
-  panel's clear button both select on it, and `--keep` spares real material by
-  it. Deleting the field to make the data "more real" strands the placeholder
-  rows in the database, indistinguishable from fieldwork.
-- **The seed still says what it wrote**, in its summary block on stdout. With
-  the on-screen marking off that log is the ONLY place that says so, which is
-  why it stays and why it names the switch.
-- **The cost is real and is the whole point.** With it off there is nothing on
-  screen that tells a seeded report from one a person filed. Clear the data
-  (`npm run seed -- --no-demo`) or turn the marking back on before anybody
-  outside the team sees the app, and never quote a count or a sentence from it.
-- **The seeded notes are written in a real register now**, one pool per
-  category, and about a quarter of reports carry no note at all — because a
-  report with no note is the commonest kind in the wild and the popup has to
-  render that state. `test/seed.test.ts` pins that notes never cross categories
-  and that the no-note case occurs.
-
-The rule this replaces still applies the moment the switch goes back on: a
-fabricated point sits on a real street, and those markings are the only thing
-between it and being read as a record of a real event.
-
-`parseReports` defaults an unmarked report to `community`, not `example`. That
-is the right way round: the failure that matters is an invented point being
-promoted to a real one, not the reverse.
-
-The seed writes visibly placeholder notes. Invented first-person testimony is
-exactly what the real interviews will supply, and a convincing fake of it in the
-same collection is how a fake ends up quoted as a finding.
-
 ## The interviews are the study's own data, and they live apart
 
-**`README.md` § "The interviews — the Research tab" is the spec.** The app is a
-prototype for a study whose instrument is `Interview_Protocol_Revised_3`, and
-`src/lib/interviews.ts` is shaped section for section like it (§2 mobility, §3
-decision, §4 cues + printed list + time of day, §5 current tools, §6 needs, §7
-concerns, §8 presentation, §9 closing, §10 demographics). A store shaped like
-the instrument is one real transcripts can be typed into without a migration.
+**`README.md` § "The interviews — `/research`, team only" is the spec.** Four
+real interviews (Whisper transcripts with timings) replaced the synthetic
+cohort. The rules:
 
-The rules that will be undone by accident:
-
-- **`interviews` is a DIFFERENT COLLECTION from `reports`, and merging them is
-  the one change to refuse.** The crime layer holds what somebody typed about a
-  place; this holds what a participant said in a 30–45 minute sitting under a
-  signed consent form. Different consent, different retention — and the seed
-  writes SYNTHETIC interviews, so the separation is the whole thing that stops
-  an invented quote sitting in the same collection as a real one. Do not
-  "simplify" it into one collection with a `kind` field.
-- **There is no `POST /api/interviews` and there must not be one.** An interview
-  is made in a room and transcribed afterwards. A public endpoint accepting one
-  lets anybody write a participant into the study's own data — the same failure
-  `POST /api/reports` guards against by forcing `source: "community"`, one step
-  worse. Interviews arrive via `npm run seed` or an import run by hand.
-- **`parseInterviews` defaults an unmarked record to `example`** — the OPPOSITE
-  way round from `parseReports`, on purpose. There the failure that matters is
-  an invented point promoted to a real report; here it is an invented QUOTE
-  promoted to real fieldwork. Both defaults fail towards "this might not be
-  real", which is why they point in opposite directions.
-- **The seed invents no testimony, and a test enforces it.** §3 asks how a
-  DECISION was made, so every recalled situation is a decision and never an
-  incident. `test/interviews.test.ts` greps the cohort for incident phrasings
-  ("followed me", "grabbed", "assaulted me"…) and fails if one appears. It is a
-  coarse net that cannot prove absence — its job is to fail loudly the day
-  somebody writes fluent fake testimony into the table, which is the realistic
-  way this gets lost.
-- **The cohort DISAGREES, and that is data rather than flavour.** Twenty-four
-  people who all want a map with scores would let the prototype be validated
-  against its own assumptions. Tests pin that somebody prefers official data
-  only, somebody prefers lived only, somebody refuses to contribute, somebody
-  wants no personalisation, §3's fallback is used at least once, §4's prompt
-  list is both needed and not needed, and at least one place is rated LESS
-  SAFE. Do not "tidy" the cohort into agreement.
-- **`prefersNeutral` exists because §6's note demands it.** The protocol
-  explicitly reframes the personalisation question to avoid an "obviously
-  personalised" answer, so a cohort where everybody wants personalisation means
-  the reframing failed. A test pins that some participants want none.
-- **A skipped §10 identity item is an ANSWER, not missing data.** The protocol
-  says it may be skipped. The field is left off entirely rather than set to
-  `""`, so it round-trips through JSON as skipped, and the panel prints
-  *skipped* rather than a blank.
-- **"No difference" is an answer on the printed list.** A place that changes
-  nothing is a finding about that place; folding it into "no response" would
-  make every list look unanimous. `answered` is carried separately from the
-  three counts so a place nobody was asked about can never read as a place
-  nobody chose — the denominator is part of the finding.
-- **The printed list JOINS to `SAFE_SPOTS` ids**, and that join is what lets an
-  interview say anything about the map. `test/interviews.test.ts` pins that
-  every non-null `spot` still exists in `layers.ts`; a typo silently stops the
-  aggregate lining up with the checkboxes.
-- **The cue tallies are UNCODED and the panel says so.** Grouping "no lighting
-  in the park" with "unlit stretches" is qualitative coding — a research step
-  with a method behind it — and doing it with string matching would manufacture
-  findings. The list is long and repetitive because that is what raw cues look
-  like. Do not add fuzzy grouping to make it tidier.
-- **The markings exist and are currently OFF.** A banner while any synthetic
-  interviews are loaded, `SYNTHETIC — NOBODY SAID THIS` as the first line of
-  every card, and a count — all gated on `MARK_EXAMPLE_DATA` in
-  `src/lib/demo-mode.ts`, which is `false` so the panel can be evaluated as it
-  will look. `source: "example"` is still stored on every record. See
-  § "Example data — the marking is currently SWITCHED OFF" for what that costs
-  and when to turn it back on.
-- **No geometry on an interview, and no 2dsphere index.** A participant is not
-  a point on a map, and adding a coordinate is the first step towards drawing
-  one there.
-- **No database means no interviews, said as a sentence.** There is no
-  `localStorage` fallback — a browser could never have produced a transcript —
-  and an empty list would read as a study that found nothing.
-
-What the synthetic data is NOT: it is shaped to exercise every branch of the
-panel, calibrated against nothing, and **no number or sentence in it may be
-quoted**. The seed's summary block says so in the log tail, the panel says so
-in the banner, and `seed-interviews.ts` says so in a box at the top.
+- **Team-only.** `/api/interviews` is 401 without the `/admin` session, writes
+  are `/api/admin/interviews`. The public site never shows a transcript.
+- **Never committed.** This repository is public; `test/interviews.test.ts`
+  fails if a CSV or a transcript-shaped JSON appears under src/scripts/test/docs.
+  `participant` (the name the team filed it under) is team-only too.
+- **`interviews` is a DIFFERENT COLLECTION from `reports`.** A participant is
+  not a place: no coordinate, no 2dsphere, never written into `reports`.
+- **Searchable, not coded.** `search()` is a plain substring search. Grouping
+  into themes is qualitative coding with a method behind it; string matching
+  here would manufacture findings. Do not add fuzzy grouping or tallies.
+- **No database means no interviews, said as a sentence** — no browser fallback.
 
 ## The box this runs on — the platform reverse proxy
 
@@ -834,9 +769,8 @@ box. This app's entry declares:
 - `"appPort": 8087` — the loopback port. It is forced into the environment at
   launch, so the app must read it rather than hardcode one.
 - `"domain": "maddie.arsaces.ir"` — what the proxy routes to this app.
-- `"secrets": []` — declared NONE, and the empty array is the declaration.
-  Never-declared (`secrets` absent) means "nobody has looked yet" and reads
-  differently in the panel. Do not "tidy" the empty array away.
+- `"secrets": ["ADMIN_PASSWORD", "SESSION_SECRET"]` — the `/admin` login.
+  🔑 Fix secrets generates them, fills in and never rotates.
 - No `"operator"` key — this app does not serve `/api/operator/*`, so the panel
   REFUSES to write it an `OPERATOR_KEY` rather than leaving a key nothing reads.
 
@@ -951,29 +885,18 @@ certificates"**. Read those before changing anything here that touches either.
 
 [proxy]: https://github.com/aschkan/platform-reverse-proxy#how-secrets-work
 
-- **This app's secrets are **none**.** They are declared in the `secrets` array
-  on this platform's entry in the proxy's `platforms.json`, NOT guessed by the
-  proxy. That list used to be hardcoded there — `JWT_SECRET`, `JWT_ADMIN_SECRET`,
-  `ENCRYPTION_KEY` for every platform — which generated variables most apps here
-  never read while reporting success. **Adding a secret to this app means adding
-  it to that declaration too**, or 🔑 Fix secrets will not know about it.
-- **It does not serve the operator API**, so it takes no `OPERATOR_KEY`. The
-  panel refuses to write one rather than leaving a key nothing reads — which
-  previously looked like the problem was solved.
-- **Fill in, never rotate.** A secret already set is kept. Regenerating a signing
-  key signs every user out; regenerating an encryption key makes stored data
-  permanently unreadable.
+- **This app's secrets are `ADMIN_PASSWORD` and `SESSION_SECRET`**, declared
+  in the `secrets` array on this platform's entry in the proxy's
+  `platforms.json`. **Adding a secret to this app means adding it there too**, or
+  🔑 Fix secrets will not know about it. Both are read PER CALL in `auth.ts` —
+  pm2 replays a saved environment, and a module-scope capture is how a panel
+  answers to a password that exists nowhere but an old dump.
+- **There is no default password.** Unset → /admin says it is not configured.
+  A default in a public repository is a password everybody has.
+- **It does not serve the operator API**, so it takes no `OPERATOR_KEY`.
+- **Fill in, never rotate.** Rotating `SESSION_SECRET` signs the team out.
 - **Secrets live in this app's own `.env`, in this checkout**, and that is the
-  only env file involved. The proxy writes into it and spawns the app with it.
-  It used to write to an "orchestrator override" at `env/<name>.env` and merge
-  that on top instead, so every shared secret had two homes and a value set in
-  one and not the other meant the app and the proxy disagreed — an
-  `OPERATOR_KEY` that disagrees answers 401 on every call, which then gets
-  blamed on the key. One file, no merge, nothing to keep in step.
-- **`"secrets": []` is Maddie's declaration, and it is an answer.** No signing
-  key, no session, no login, nothing encrypted at rest. `MONGO_URI` is
-  configuration, not a generated secret. Declaring none is deliberately
-  different from having no declaration at all — do not delete the empty array.
+  only env file involved.
 
 - **TLS is not this app's job.** It listens on plain HTTP on loopback; the proxy
   terminates TLS in front of it. The certificate for `maddie.arsaces.ir` and `*.maddie.arsaces.ir` is
@@ -985,51 +908,27 @@ certificates"**. Read those before changing anything here that touches either.
 
 ## Seeding — a contract this repo does not get to reinvent
 
-`npm run seed` is what the reverse proxy's **💣 Reseed DB** button runs, and the
-rules it follows are written down once for every platform on that box, in the
-[reverse proxy's README][seed-contract] under *The seed contract*. **Read that
-before changing `scripts/seed.ts`.**
+`npm run seed` is what the proxy's **💣 Reseed DB** runs (`-- --force`). The
+contract is in the [reverse proxy's README][seed-contract]; **read it before
+changing `scripts/seed.ts`.**
 
 [seed-contract]: https://github.com/aschkan/platform-reverse-proxy#the-seed-contract--what-a-platforms-npm-run-seed-must-do
 
-- **It wipes by default, and here that means real material.** `dropDatabase()`,
-  not a `deleteMany({ source: "example" })` — the collection holds reports
-  people typed about being followed, harassed or assaulted, and there is no
-  other copy. That is the cost of the standard default, and it is why `--keep`
-  exists and is named in the header, the README and the summary.
-- **`--force` beats every keep/skip flag and every `SEED_*` env var.** The
-  button's whole point is that an operator wanting a known-good database
-  presses one thing. `resolveSeedFlags` is pure and `test/seed-flags.test.ts`
-  pins the rule — which matters more here than anywhere: proving it the other
-  way means running a destructive script against a live collection.
-- **The example reports AND the interviews are built BEFORE anything is
-  deleted.** A bad `--count` or a throwing generator after the wipe leaves an
-  empty collection and takes the real material with it. A seed that declines to
-  run costs nothing.
-- **It writes TWO collections and `--keep` spares both.** `--keep` deletes only
-  `source: "example"` from `reports` and only `source: "example"` from
-  `interviews`, so a real transcript survives it exactly as a community report
-  does. The default wipe still drops the whole database — and when it is about
-  to drop interviews marked `fieldwork`, the seed says so on its own line,
-  loudly, because a dropped transcript is not recoverable and the person
-  reading that log tail pressed a button seconds ago.
-- **`--count` sizes the example REPORTS, not the cohort.** A cohort is a fixed
-  set of written participants rather than a number to dial, so
-  `DEFAULT_INTERVIEW_TOTAL` is however many are in the table.
-- **The indexes go with the drop, so they are rebuilt.** `reportsCollection()`
-  owns them (unique `id`, 2dsphere on `loc`, `source`, `atMs`); asking for the
-  collection again is what puts them back. A 2dsphere that quietly did not come
-  back is a geo query that returns nothing on a map that looks fine.
-- **No `MONGO_URI` is not a failure.** This deployment keeps reports in the
-  browser; the seed says so and exits 0. Do not make it an error.
-- **`--clear` still works** as an alias for `--no-demo`. It is in the README and
-  in every shipped version of the script's header.
-- **There is no Redis and there will not be one.** Nothing in the seed, the
-  build or the boot may depend on a cache server — that is the rule across every
-  platform on the box.
-- **The summary block at the end is plain `console.log`**, like every other
-  platform's. Maddie has no accounts, so what goes there instead of logins is
-  what the map will now show and how much of it is invented.
+- **It invents nothing.** The database holds real research data with no other
+  copy, so the seed rebuilds FROM it: preflight reads every collection (dropping
+  `example` rows) → writes `.data/seed-backup/<time>.json` → `dropDatabase()` →
+  indexes → restore in batches of 500 → prints counts, the Pointer credit and
+  the /admin login.
+- **The backup is what makes the drop safe.** If the run dies after the drop,
+  the next run finds an empty database and restores the newest NON-EMPTY backup.
+  An empty snapshot is never written — it would rotate a good one out.
+- **Batches, with a pause.** One `insertMany` of 18k documents floods the
+  replica set's tunnel; the primary steps down mid-write. `importer.ts`.
+- **First load is an import, not a seed**: `scripts/import-pointer.ts` /
+  `import-interviews.ts` or Import in /admin. An empty database with no backup
+  gets nothing invented — the log says to import.
+- **No `MONGO_URI` is not a failure**; it says so and exits 0.
+- **There is no Redis and there will not be one.**
 
 ## Navigation is handed to Google Maps, and the ROUTE goes with it
 
@@ -1145,19 +1044,17 @@ same traps, same severity weights — wired to a layer instead of to the score.
 - **The React Compiler lint rejects reading a ref during render, and
   reassigning a variable inside a `.map` in JSX.** `Donut` computes each
   slice's start from the parts before it rather than accumulating an angle.
-- **A bare `npm run seed` now wipes the whole database**, community reports
-  included. It used to keep them and replace only the example ones; that is
-  `--keep` now. The change was to make one button mean one thing on every
-  platform — see the seeding section above.
+- **The seed drops the database — after writing a backup and while holding
+  everything in memory.** Never remove the backup step to make it faster.
 - **A stored point is GeoJSON: `[lng, lat]`, longitude first.** The same trap as
   OSRM, and `2dsphere` indexes the wrong order perfectly happily — you get
   results, for somewhere in the Gulf of Guinea. `toDoc`/`fromDoc` own it.
 - **A `MONGO_URI` with no path makes the driver pick `test`.** `databaseName()`
   falls back to `maddie` instead: a silent write to the wrong database looks
   exactly like a working one.
-- **`POST /api/reports` forces `source: "community"`.** It is a public endpoint;
-  nothing outside `npm run seed` may write a point marked as example data, and
-  nothing may launder an example point into a real one.
+- **`POST /api/reports` forces `source: "community"`, inserts only, and strips
+  every dataset field.** It is public; nothing over it can claim to be Pointer's
+  or the team's, or overwrite an existing id. **DELETE needs the admin session.**
 - **A configured-but-unreachable database is a 503, not an empty list.** An
   empty crime layer is the one thing on this page that reads as reassurance.
 - **`agent: false` does NOT mean "no agent".** It builds a fresh default one,
@@ -1281,24 +1178,18 @@ same traps, same severity weights — wired to a layer instead of to the score.
   only one of them is about the place. Same rule, one layer up: outside the
   Netherlands the panel says the table does not cover here rather than drawing
   an empty layer, because a blank crime layer reads as reassurance.
-- **An unmarked interview reads as an EXAMPLE, an unmarked report reads as
-  COMMUNITY.** The two defaults point in opposite directions and both are
-  right: the bad outcome for a report is an invented point promoted to real,
-  and for an interview it is an invented quote promoted to real fieldwork.
-  `test/interviews.test.ts`
+- **`example` is dropped on read, for reports AND interviews.** There is no
+  demo data; an old row marked example must vanish, never be promoted.
+  `test/reports.test.ts`, `test/interviews.test.ts`
 - **A participant is not a point.** No coordinate on an interview, no 2dsphere
-  index on the collection, and no writing one into `reports` "so the map can
-  show it". The collections are separate because the seed invents one of them.
+  index on the collection, and no writing one into `reports`.
   `test/interviews.test.ts`
-- **A skipped optional demographic must render as "skipped".** The protocol
-  allows §10's identity item to be skipped, so the field is absent rather than
-  `""` and a skip is never shown as missing data. `test/interviews.test.ts`
-- **A verdict outside safer/no-difference/less-safe is not an answer**, and a
-  place outside the protocol's printed list is a verdict no column can show.
-  Both are dropped rather than kept. `test/interviews.test.ts`
-- **RQ5 must never appear on an interview.** The protocol is explicit that RQ5
-  is covered by the later think-aloud evaluation, not by this instrument, so
-  the parser filters it out. `test/interviews.test.ts`
+- **v1 and v2 of the Pointer survey spell options differently**
+  (`vrienden/familie` vs `vrienden of familie`, `75plus` vs `76 jaar of ouder`).
+  Match on the normalised prefix in `pointer.ts`, or half the answers silently
+  fall out of the "how people adapt" chart. `test/pointer.test.ts`
+- **A Pointer row with no coordinate is SKIPPED and said, never 0,0.**
+  `test/pointer.test.ts`
 - **Only WORLD Overpass instances go in the mirror rotation.** `overpass.osm.ch`
   (Switzerland only) was in `SERVICES.overpass.bases` and answered every Dutch
   query it was handed with a 200 and an EMPTY element list — the route read as

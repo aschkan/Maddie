@@ -1,0 +1,128 @@
+/**
+ * `node scripts/district-figures.ts [--overpass=<interpreter url>]`
+ *
+ * Measure, for every district in `cities.ts`, what OpenStreetMap actually
+ * holds — and write it to `src/lib/district-figures.ts`, replacing the example
+ * figures the boards used to show:
+ *
+ *   * street LIGHTING by length: `lit=*` on every walkable `highway` way,
+ *     split into lit / unlit / unknown. Untagged is UNKNOWN, never unlit.
+ *   * ROAD NETWORK length in km, for "marked places per km".
+ *   * PLACES: how many of the boards' "nearby places" (`PLACE_KINDS`) are
+ *     inside the outline.
+ *
+ * A segment counts towards a district when its midpoint is inside the
+ * outline, so a street along a border is split where it crosses, not counted
+ * twice. Default Overpass is aschkan's own (`127.0.0.1:12345`, reach it with
+ * `ssh -L 12345:127.0.0.1:12345 aschkan`): the public ones rate-limit a run
+ * like this. Re-run when the outlines change, or once a season.
+ */
+
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { CITIES } from "../src/lib/cities.ts";
+import { pointInPolygon } from "../src/lib/evidence.ts";
+import { distanceM } from "../src/lib/geo.ts";
+import { PLACE_KINDS, SAFE_SPOTS } from "../src/lib/layers.ts";
+import type { LatLng } from "../src/lib/osrm.ts";
+
+const WALKABLE = "^(trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|pedestrian|service|footway|cycleway|path|steps|track|road)$";
+const LIT = new Set(["yes", "24/7", "automatic", "limited", "interval", "sunset-sunrise", "dusk-dawn"]);
+const UNLIT = new Set(["no", "disused"]);
+
+const arg = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+const OVERPASS = arg("overpass") ?? "http://127.0.0.1:12345/api/interpreter";
+
+interface Element {
+  type: string;
+  id: number;
+  tags?: Record<string, string>;
+  geometry?: { lat: number; lon: number }[];
+  lat?: number;
+  lon?: number;
+  center?: { lat: number; lon: number };
+}
+
+async function overpass(query: string): Promise<Element[]> {
+  const response = await fetch(OVERPASS, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `data=${encodeURIComponent(query)}`,
+  });
+  if (!response.ok) throw new Error(`Overpass answered ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  const body = (await response.json()) as { elements?: Element[] };
+  return body.elements ?? [];
+}
+
+const poly = (ring: readonly LatLng[]) => ring.map((p) => `${p.lat.toFixed(5)} ${p.lng.toFixed(5)}`).join(" ");
+
+async function measure(outline: readonly LatLng[]) {
+  const ways = await overpass(`[out:json][timeout:180];way["highway"~"${WALKABLE}"](poly:"${poly(outline)}");out tags geom;`);
+  let lit = 0;
+  let unlit = 0;
+  let unknown = 0;
+  for (const way of ways) {
+    const tag = (way.tags?.lit ?? "").toLowerCase();
+    const geometry = way.geometry ?? [];
+    for (let i = 1; i < geometry.length; i++) {
+      const a = { lat: geometry[i - 1]!.lat, lng: geometry[i - 1]!.lon };
+      const b = { lat: geometry[i]!.lat, lng: geometry[i]!.lon };
+      if (!pointInPolygon({ lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 }, outline)) continue;
+      const m = distanceM(a, b);
+      if (LIT.has(tag)) lit += m;
+      else if (UNLIT.has(tag)) unlit += m;
+      else unknown += m;
+    }
+  }
+
+  const kinds = SAFE_SPOTS.filter((kind) => PLACE_KINDS.includes(kind.id));
+  const clauses = kinds.flatMap((kind) => [`node${kind.match}(poly:"${poly(outline)}");`, `way${kind.match}(poly:"${poly(outline)}");`]);
+  const spots = await overpass(`[out:json][timeout:120];(${clauses.join("")});out tags center;`);
+  const places = spots.filter((spot) => {
+    const at = spot.center ?? (spot.lat !== undefined ? { lat: spot.lat, lon: spot.lon! } : null);
+    return at && pointInPolygon({ lat: at.lat, lng: at.lon }, outline);
+  }).length;
+
+  const total = lit + unlit + unknown;
+  const pct = (part: number) => (total > 0 ? Math.round((part / total) * 100) : 0);
+  return {
+    lighting: { lit: pct(lit), unlit: pct(unlit), unknown: total > 0 ? 100 - pct(lit) - pct(unlit) : 100 },
+    roadKm: Math.round(total / 100) / 10,
+    places,
+  };
+}
+
+async function main() {
+  const out: Record<string, Record<string, Awaited<ReturnType<typeof measure>>>> = {};
+  for (const city of CITIES) {
+    out[city.id] = {};
+    for (const district of city.districts) {
+      const figures = await measure(district.outline);
+      out[city.id]![district.id] = figures;
+      console.log(`${city.name} / ${district.name}: lit ${figures.lighting.lit}% · unlit ${figures.lighting.unlit}% · unknown ${figures.lighting.unknown}% · ${figures.roadKm} km · ${figures.places} places`);
+    }
+  }
+  const file = join(process.cwd(), "src", "lib", "district-figures.ts");
+  writeFileSync(file, `/**
+ * GENERATED by \`node scripts/district-figures.ts\` on ${new Date().toISOString().slice(0, 10)} —
+ * do not edit by hand; re-run the script. What OpenStreetMap holds inside each
+ * district outline in \`cities.ts\`: lighting by street length (untagged =
+ * unknown), road network km, and the boards' nearby places.
+ */
+
+export const FIGURES_MEASURED = ${JSON.stringify(new Date().toISOString().slice(0, 10))};
+
+export const DISTRICT_FIGURES: Record<string, Record<string, {
+  lighting: { lit: number; unlit: number; unknown: number };
+  roadKm: number;
+  places: number;
+}>> = ${JSON.stringify(out, null, 2)};
+`);
+  console.log(`wrote ${file}`);
+}
+
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});

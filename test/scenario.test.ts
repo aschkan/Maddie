@@ -3,10 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { aroundHour, placesAlong, reportsAlong } from "../src/lib/alongside.ts";
-import { reportAge } from "../src/lib/reports.ts";
 import {
-  legKey, parseRecording, recordedLeg, scenarioReports,
-  SCENARIO_DESTINATIONS, SCENARIO_NOW, SCENARIO_PROFILES, SCENARIO_START,
+  legKey, parseRecording, recordedLeg,
+  SCENARIO_DESTINATIONS, SCENARIO_PROFILES, SCENARIO_START,
 } from "../src/lib/scenario.ts";
 import type { Report } from "../src/lib/reports.ts";
 
@@ -15,27 +14,6 @@ import type { Report } from "../src/lib/reports.ts";
  * that the parts which decide what they see are fixed, and that the committed
  * recording is complete enough to run a session from.
  */
-
-test("the scenario's reports are the same on every call", () => {
-  assert.deepEqual(scenarioReports(), scenarioReports());
-});
-
-test("the scenario's reports are invented, in Utrecht, and say so in the data", () => {
-  const reports = scenarioReports();
-  assert.ok(reports.length >= 50, `${reports.length} reports is too few to compare routes on`);
-  for (const report of reports) {
-    // `source` is what keeps them findable as invented, whatever the screen shows.
-    assert.equal(report.source, "example");
-    assert.match(report.id, /^scenario-/);
-    assert.ok(report.point.lat > 52.06 && report.point.lat < 52.13, `${report.id} is not in Utrecht`);
-    assert.ok(report.point.lng > 5.07 && report.point.lng < 5.2, `${report.id} is not in Utrecht`);
-  }
-});
-
-test("the scenario's reports span every age the legend shows", () => {
-  const ages = new Set(scenarioReports().map((report) => reportAge(report.at, SCENARIO_NOW)));
-  assert.deepEqual([...ages].sort(), ["older", "recent", "year"]);
-});
 
 test("the recording parser keeps good legs and refuses junk", () => {
   assert.equal(parseRecording(null), null);
@@ -86,7 +64,7 @@ test("the committed recording can run a session: every destination, every mode, 
 const LINE = [{ lat: 52.09, lng: 5.11 }, { lat: 52.09, lng: 5.13 }];
 
 function report(id: string, lat: number, lng: number, at = "2026-09-01T22:00:00"): Report {
-  return { id, category: "harassment", point: { lat, lng }, at, source: "community" };
+  return { id, category: "experienced", point: { lat, lng }, at, source: "community" };
 }
 
 test("a report a street away is along the route; one three streets away is not", () => {

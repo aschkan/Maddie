@@ -23,7 +23,8 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { Bike, CalendarDays, Car, ChevronDown, Clock, Database, Footprints, ExternalLink } from "lucide-react";
 
-import BoardHeader from "@/components/BoardHeader";
+import { SOURCE_LABEL } from "@/lib/reports";
+import BoardHeader, { Sources } from "@/components/BoardHeader";
 import { DotColumn, Key, Radar, Swatch } from "@/components/charts";
 import { useEvidence } from "@/components/EvidenceProvider";
 import PlaceField from "@/components/PlaceField";
@@ -199,7 +200,6 @@ function CompareFor({ city }: { city: City }) {
     <main className="board compare">
       <BoardHeader
         title="Compare route evidence"
-        kind="Synthetic example reports"
         note={<>Compare individual factors; there is no <b>overall safety score</b>.</>}
       />
 
@@ -367,12 +367,11 @@ function CompareFor({ city }: { city: City }) {
                   <h3>Qualitative experience</h3>
                   {summary.narrative ? (
                     <>
-                      <p className="narrative-label">{summary.narrative.source === "example" ? "Example narrative:" : "Community narrative:"}</p>
+                      <p className="narrative-label">{SOURCE_LABEL[summary.narrative.source]}{summary.narrative.place ? `, ${summary.narrative.place}` : ""}:</p>
                       <q className="narrative">{summary.narrative.note}</q>
-                      {summary.narrative.source === "example" && <span className="example-tag">EXAMPLE — NOT A REAL REPORT</span>}
                     </>
                   ) : (
-                    <p className="note">Nobody wrote anything down about this stretch.</p>
+                    <p className="note">No respondent shared a story about this stretch.</p>
                   )}
                 </div>
               </>
@@ -449,7 +448,8 @@ function CompareFor({ city }: { city: City }) {
       </div>
       </>}
 
-      <p className="caveat">Route progress aligns relative position; distances differ. Community reports are context, not inputs to a route score.</p>
+      <p className="caveat">Route progress aligns relative position; distances differ. Marked places are context, not inputs to a route score.</p>
+      <Sources />
     </main>
   );
 }

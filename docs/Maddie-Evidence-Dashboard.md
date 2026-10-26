@@ -36,7 +36,7 @@ The pictures this is built to are in `docs/reference/`:
 3. **Brush and link, don't just filter.** Selecting a neighbourhood, clicking a bar or a slice, or brushing the hours updates every other view. (Munzner ch. 12.)
 4. **Show the unknown.** Lighting nobody has tagged is a visible **hatched** category — never hidden, never imputed, never folded into lit or unlit. *"Missing lighting stays unknown."*
 5. **Reports are context, not inputs.** Community reports are drawn beside the routes and counted beside them. Nothing that computes anything about a route weights them.
-6. **The caveats live on the page.** "CONCEPT MOCKUP · Synthetic example data" sits in the subtitle whenever anything invented is on screen. "Observed reports describe this dataset, not incident risk." An invented narrative carries **EXAMPLE — NOT A REAL REPORT**. The area board has a provenance table.
+6. **The caveats live on the page.** Every board ends with the data's source — Pointer's credit line is a condition of using its survey — and says what a marked place is not (an incident, or a measure of risk). There is no invented data; the area board has a provenance table.
 7. **Mobile first.** Every rule is written for a 360px phone. The dashboard grid in the reference pictures is what `min-width: 1180px` adds.
 
 ## 2. Colour: one colour, one meaning

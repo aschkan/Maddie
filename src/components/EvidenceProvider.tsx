@@ -8,22 +8,16 @@
  * an area keeps the same city and the same route — the route you picked on
  * Compare is the one Explore's "distance from report to route" measures.
  *
- * The REPORTS are two things kept visibly apart:
- *
- *   * what is stored (`useReports` — the database, or this browser), filed by
- *     people, `source: "community"`;
- *   * the EXAMPLE reports (`example-reports.ts`), generated here, never stored,
- *     `source: "example"`. On by default so the boards have something to show
- *     before fieldwork exists, and the board's subtitle says "Synthetic example
- *     data" the whole time they are.
+ * The REPORTS are the real ones for the chosen city (`useReports`): Pointer's
+ * survey, the study team's additions and community reports, asked of the
+ * database by a circle round the city centre. There is no example data —
+ * the generator that used to fill the boards in the browser is gone.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { useReports, type Backend } from "@/components/useReports";
+import { useReports, type Backend, type Dataset } from "@/components/useReports";
 import { CITIES, cityById, DEFAULT_CITY, type City } from "@/lib/cities";
-import { exampleReports } from "@/lib/example-reports";
-import { distanceM } from "@/lib/geo";
 import type { LatLng } from "@/lib/osrm";
 import type { Tone } from "@/lib/palette";
 import type { Report } from "@/lib/reports";
@@ -31,7 +25,7 @@ import type { Report } from "@/lib/reports";
 const CITY_KEY = "maddie.city.v1";
 const THEME_KEY = "maddie.theme.v1";
 
-/** A stored report belongs to a city if it is within this of the centre. */
+/** A report belongs to a city if it is within this of the centre. */
 const CITY_RADIUS_M = 9_000;
 
 export interface ChosenRoute {
@@ -46,16 +40,14 @@ interface Evidence {
   setCity: (id: string) => void;
   tone: Tone;
   toggleTheme: () => void;
-  /** Stored + (if on) example reports for this city. */
+  /** Every report within `CITY_RADIUS_M` of this city's centre. */
   reports: Report[];
-  storedCount: number;
+  /** Where they came from — printed under the boards (Pointer must be credited). */
+  datasets: Dataset[];
   backend: Backend;
   reportError: string | null;
+  reportsLoading: boolean;
   addReport: (report: Report) => void;
-  showExamples: boolean;
-  setShowExamples: (on: boolean) => void;
-  /** True whenever anything on screen is invented. Drives the subtitle. */
-  usingExamples: boolean;
   route: ChosenRoute | null;
   setRoute: (route: ChosenRoute | null) => void;
 }
@@ -71,9 +63,9 @@ export function useEvidence(): Evidence {
 export default function EvidenceProvider({ children }: { children: ReactNode }) {
   const [cityId, setCityId] = useState(DEFAULT_CITY);
   const [tone, setTone] = useState<Tone>("day");
-  const [showExamples, setShowExamples] = useState(true);
   const [route, setRoute] = useState<ChosenRoute | null>(null);
-  const store = useReports();
+  const city = cityById(cityId);
+  const store = useReports(city.centre, CITY_RADIUS_M);
 
   // Read on mount, in the IIFE every setState in this app lives in: the page
   // is prerendered, and localStorage does not exist during that render.
@@ -112,34 +104,21 @@ export default function EvidenceProvider({ children }: { children: ReactNode }) 
     });
   }, []);
 
-  const city = cityById(cityId);
-  const examples = useMemo(() => exampleReports(city), [city]);
-  const stored = useMemo(
-    () => store.reports.filter((report) => distanceM(report.point, city.centre) <= CITY_RADIUS_M),
-    [store.reports, city],
-  );
-  const reports = useMemo(
-    () => (showExamples ? [...stored, ...examples] : stored),
-    [showExamples, stored, examples],
-  );
-
   const value = useMemo<Evidence>(() => ({
     city,
     cities: CITIES,
     setCity,
     tone,
     toggleTheme,
-    reports,
-    storedCount: stored.length,
+    reports: store.reports,
+    datasets: store.datasets,
     backend: store.backend,
     reportError: store.error,
+    reportsLoading: store.loading,
     addReport: store.add,
-    showExamples,
-    setShowExamples,
-    usingExamples: showExamples || stored.some((report) => report.source === "example"),
     route: route && route.cityId === city.id ? route : null,
     setRoute,
-  }), [city, setCity, tone, toggleTheme, reports, stored, store.backend, store.error, store.add, showExamples, route]);
+  }), [city, setCity, tone, toggleTheme, store.reports, store.datasets, store.backend, store.error, store.loading, store.add, route]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

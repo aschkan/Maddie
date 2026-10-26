@@ -17,52 +17,32 @@ import { distanceM, distanceToPathM, pathLengthM } from "./geo.ts";
 import { alwaysOpen, type Spot } from "./layers.ts";
 import type { LatLng, Route } from "./osrm.ts";
 import type { SampleRead } from "./overpass.ts";
-import type { Report } from "./reports.ts";
+import type { Report, ReportType, When } from "./reports.ts";
 import type { City, District } from "./cities.ts";
 
 /* ── report types ─────────────────────────────────────────────────────── */
 
-export type ReportType = "harassment" | "catcalling" | "assault" | "other";
-
-/** The four the dashboard filters and charts by, in the order it lists them. */
-export const REPORT_TYPES: { id: ReportType; label: string }[] = [
-  { id: "harassment", label: "Harassment" },
-  { id: "catcalling", label: "Catcalling" },
-  { id: "assault", label: "Assault" },
-  { id: "other", label: "Other" },
-];
+export { REPORT_TYPES, type ReportType } from "./reports.ts";
 
 /**
- * A stored category → one of the four.
- *
- * The store keeps the finer categories the brief asked for (`reports.ts`), so
- * nothing already filed changes meaning. The dashboard groups physical and
- * sexual violence under "Assault" because four bars can be compared at a glance
- * and seven, most of them near zero, cannot.
+ * A stored category → the dashboard's type. The store already holds Pointer's
+ * reasons (`reports.ts` maps the first board's categories on the way in), so
+ * this is the identity with a guard.
  */
 export function reportType(category: string): ReportType {
-  switch (category) {
-    case "harassment": return "harassment";
-    case "catcalling": return "catcalling";
-    case "assault":
-    case "sexual_abuse":
-    case "rape":
-    case "murder":
-      return "assault";
-    default: return "other";
-  }
+  return category === "experienced" || category === "witnessed" || category === "environment" ? category : "other";
 }
 
-/** The hour of day a report was made, in the viewer's own clock. */
-export function hourOf(report: Pick<Report, "at">): number {
-  return new Date(report.at).getHours();
-}
-
-export function timeOfDay(hour: number): "Night" | "Morning" | "Afternoon" | "Evening" {
-  if (hour < 6) return "Night";
-  if (hour < 12) return "Morning";
-  if (hour < 18) return "Afternoon";
-  return "Evening";
+/** When a report says the place feels unsafe, with "not given" as its own bin. */
+export type WhenBin = When | "unknown";
+export const WHEN_BINS: { id: WhenBin; label: string }[] = [
+  { id: "dark", label: "Mostly after dark" },
+  { id: "any", label: "Time makes no difference" },
+  { id: "day", label: "Mostly by day" },
+  { id: "unknown", label: "Not given" },
+];
+export function whenOf(report: Pick<Report, "when">): WhenBin {
+  return report.when ?? "unknown";
 }
 
 /* ── geometry ─────────────────────────────────────────────────────────── */
@@ -325,12 +305,10 @@ export function summariseInterval(evidence: RouteEvidence, from: number, to: num
     openingHours = `${places.filter((place) => alwaysOpen(place.openingHours)).length} open 24/7`;
   } else if (places.some((place) => place.openingHours)) openingHours = "as tagged — not checked against the hour";
 
-  const examples = reports.filter((report) => report.source === "example").length;
-  let reportLine = "none recorded here";
+  let reportLine = "none marked here";
   if (reports.length > 0) {
-    const kind = examples === reports.length ? "example community records"
-      : examples === 0 ? "community records" : "community and example records";
-    reportLine = `${reports.length} · ${kind}`;
+    const stories = reports.filter((report) => report.note).length;
+    reportLine = `${reports.length} marked place${reports.length === 1 ? "" : "s"}${stories ? ` · ${stories} with a story` : ""}`;
   }
 
   return {

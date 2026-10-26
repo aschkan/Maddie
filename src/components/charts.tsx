@@ -100,15 +100,17 @@ export interface GroupedRow {
  * count against the whole city's, per category. Clicking a row picks it.
  */
 export function GroupedBars({
-  rows, focus, onPick, axisLabel,
+  rows, focus, onPick, axisLabel, labelWidth = 92,
 }: {
   rows: GroupedRow[];
   focus: string | null;
   onPick: (id: string) => void;
   axisLabel: string;
+  /** Room for the row labels; long labels need more than the default. */
+  labelWidth?: number;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
-  const labelW = 92;
+  const labelW = Math.min(labelWidth, Math.max(92, width * 0.45));
   const right = 18;
   const rowH = 54;
   const top = 6;
@@ -660,16 +662,20 @@ export function RankBars({
 /* ── heatmap: two categories × count ──────────────────────────────────── */
 
 export function Heatmap({
-  rows, cols, values, mark,
+  rows, cols, values, mark, xLabel, labelWidth = 36, labelEvery = 1,
 }: {
   rows: string[];
   cols: string[];
   values: number[][];
-  /** [row, col] to outline — "now". */
+  /** [row, col] to outline. */
   mark?: [number, number] | null;
+  xLabel: string;
+  labelWidth?: number;
+  /** Label every n-th column (the last always). */
+  labelEvery?: number;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
-  const labelW = 36;
+  const labelW = labelWidth;
   const top = 4;
   const cell = Math.max(6, (width - labelW - 6) / cols.length);
   const rowH = 20;
@@ -701,10 +707,10 @@ export function Heatmap({
         {mark && (
           <rect x={labelW + mark[1] * cell - 1} y={top + mark[0] * rowH - 1} width={cell + 1} height={rowH} className="now-outline" />
         )}
-        {cols.map((col, c) => (c % 6 === 0 || c === cols.length - 1 ? (
+        {cols.map((col, c) => (c % labelEvery === 0 || c === cols.length - 1 ? (
           <text key={col} x={labelW + c * cell + cell / 2} y={top + rows.length * rowH + 14} textAnchor="middle" className="tick">{col}</text>
         ) : null))}
-        <text x={labelW + (cols.length * cell) / 2} y={height - 4} textAnchor="middle" className="axis-title">Hour of day · darker = more reports (max {max})</text>
+        <text x={labelW + (cols.length * cell) / 2} y={height - 4} textAnchor="middle" className="axis-title">{xLabel} · darker = more (max {max})</text>
       </svg>
     </div>
   );

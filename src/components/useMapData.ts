@@ -14,13 +14,7 @@ import { fetchAreas, fetchBoundaries } from "@/lib/nl-areas";
 import { fetchNeighbourhoodCrime, type PlacedCrimeSummary } from "@/lib/nl-crime";
 import { parseRecording, type ScenarioRecording } from "@/lib/scenario";
 
-/** The kinds of place the boards count as "nearby places". */
-/**
- * Not bars and restaurants: a city centre has hundreds, and a heart every few
- * metres says nothing about one route against another. These are the places a
- * person would walk TOWARDS — staffed, lit, usually open late.
- */
-export const PLACE_KINDS = ["police", "hospital", "transit", "supermarket", "pharmacy", "taxi", "fuel", "library", "gym24"];
+export { PLACE_KINDS } from "@/lib/layers";
 
 /** The box around every district of a city, padded a little. */
 export function cityBox(city: City): BBox {

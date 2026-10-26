@@ -10,7 +10,6 @@
  * server-rendered.
  */
 
-import { useMemo } from "react";
 import {
   CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, Tooltip, useMapEvents,
 } from "react-leaflet";
@@ -18,12 +17,12 @@ import "leaflet/dist/leaflet.css";
 
 import { Basemap, heartIcon, Resizer, ScaleBar, textIcon } from "@/components/mapBits";
 import type { City } from "@/lib/cities";
-import { hourOf, REPORT_TYPES, reportType, timeOfDay } from "@/lib/evidence";
 import type { LayerData } from "@/lib/layers";
 import type { PlacedCrimeSummary } from "@/lib/nl-crime";
 import type { LatLng } from "@/lib/osrm";
 import { LIGHT, pick, PLACE, POLICE, REPORT, SELECTION, type Tone } from "@/lib/palette";
 import type { Report } from "@/lib/reports";
+import ReportCard from "@/components/ReportCard";
 
 interface Props {
   city: City;
@@ -53,8 +52,6 @@ function Clicks({ adding, onAdd }: { adding: boolean; onAdd: (point: LatLng) => 
   return null;
 }
 
-const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
-const TIME = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 
 export default function ExploreMap(props: Props) {
   const { city, tone, reports, faded, selectedDistricts, layers, police } = props;
@@ -64,7 +61,6 @@ export default function ExploreMap(props: Props) {
   const policeInk = pick(POLICE, tone);
   const heart = heartIcon(pick(PLACE, tone), 18);
 
-  const typeLabel = useMemo(() => new Map(REPORT_TYPES.map((type) => [type.id, type.label])), []);
 
   return (
     <MapContainer
@@ -156,12 +152,7 @@ export default function ExploreMap(props: Props) {
                 remove: () => { if (props.openReport === report.id) props.onOpenReport(null); },
               }}
             >
-                <b>{report.source === "example" ? "Example report" : "Community report"}</b>
-                <span>
-                  {timeOfDay(hourOf(report))} · {typeLabel.get(reportType(report.category))}
-                </span>
-                <span>{DATE.format(new Date(report.at))}, {TIME.format(new Date(report.at))}</span>
-              {report.note && <q>{report.note}</q>}
+              <ReportCard report={report} />
             </Popup>
           </CircleMarker>
         );

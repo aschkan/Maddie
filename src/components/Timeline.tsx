@@ -13,6 +13,7 @@
 import { useRef } from "react";
 
 import { useSvgId, useWidth, Hatch } from "@/components/charts";
+import { SOURCE_LABEL } from "@/lib/reports";
 import { routeLetter, type RouteEvidence } from "@/lib/evidence";
 
 const TRACKS = ["Lighting", "Nearby places", "Reports", "Park / underpass"] as const;
@@ -148,7 +149,7 @@ export default function Timeline({ evidence, inks, hidden, selected, onSelect, b
                   <line x1={x(0)} x2={x(1)} y1={yTrack(2) + trackH / 2} y2={yTrack(2) + trackH / 2} className="track" />
                   {ev.reports.map((mark, m) => (
                     <circle key={m} cx={x(mark.at)} cy={yTrack(2) + trackH / 2} r={4} style={{ fill: "var(--report)" }}>
-                      <title>{mark.item.source === "example" ? "Example report" : "Community report"}</title>
+                      <title>{SOURCE_LABEL[mark.item.source]}{mark.item.place ? ` · ${mark.item.place}` : ""}</title>
                     </circle>
                   ))}
                   {/* park and underpass */}

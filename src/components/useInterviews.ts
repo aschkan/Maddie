@@ -1,18 +1,15 @@
 "use client";
 
 /**
- * The requirements interviews, from the page's point of view.
+ * The interviews, from the page's point of view. Team-only: `/api/interviews`
+ * answers 401 without the `/admin` session, and that is reported as
+ * `signedIn: false`, never as an empty study.
  *
- * Read-only, and much simpler than `useReports` for one reason: there is no
- * browser fallback. A report is something a visitor can type, so `localStorage`
- * is a real second home for it; an interview is a transcript of a sitting that
- * happened in a room with a consent form signed first, so a browser has no
- * business holding one and could never have produced one. No database means no
- * interviews, and the panel says exactly that rather than rendering an empty
- * list — an empty cohort reads as a study that found nothing.
+ * No browser fallback: a browser could never have produced a transcript, and
+ * an empty list would read as a study that found nothing.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { parseInterviews, type Interview } from "@/lib/interviews";
 
@@ -24,6 +21,8 @@ export interface InterviewStore {
   backend: InterviewBackend;
   error: string | null;
   loading: boolean;
+  signedIn: boolean;
+  reload: () => void;
 }
 
 export function useInterviews(): InterviewStore {
@@ -31,27 +30,28 @@ export function useInterviews(): InterviewStore {
   const [backend, setBackend] = useState<InterviewBackend>("unknown");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [signedIn, setSignedIn] = useState(false);
+  const [round, setRound] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-
-    // In the IIFE like every other setState in this app: the React Compiler
-    // lint rejects one reached synchronously from an effect body.
     void (async () => {
       try {
         const response = await fetch("/api/interviews", { signal: controller.signal });
         if (controller.signal.aborted) return;
-
+        if (response.status === 401) {
+          setSignedIn(false);
+          setInterviews([]);
+          setError(null);
+          return;
+        }
+        setSignedIn(true);
         if (response.status === 503) {
-          // Configured but unreachable. Said as an error, never as an empty
-          // cohort — the same rule the reports route keeps, and it matters
-          // more here because zero participants looks like a finding.
           setBackend("mongo");
           setError("The interview database is configured but could not be reached.");
           return;
         }
         if (!response.ok) throw new Error(String(response.status));
-
         const body = (await response.json()) as { backend?: string; interviews?: unknown };
         if (controller.signal.aborted) return;
         setBackend(body.backend === "mongo" ? "mongo" : "none");
@@ -65,9 +65,9 @@ export function useInterviews(): InterviewStore {
         if (!controller.signal.aborted) setLoading(false);
       }
     })();
-
     return () => controller.abort();
-  }, []);
+  }, [round]);
 
-  return { interviews, backend, error, loading };
+  const reload = useCallback(() => setRound((n) => n + 1), []);
+  return { interviews, backend, error, loading, signedIn, reload };
 }

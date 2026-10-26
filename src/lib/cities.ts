@@ -1,35 +1,29 @@
 /**
  * The areas the evidence dashboard can show — a city, and the districts in it.
  *
- * READ THIS BEFORE TRUSTING A NUMBER IN HERE.
+ * Per district the boards need three things no live source hands back in one
+ * piece:
  *
- * The dashboard (`docs/Maddie-Evidence-Dashboard.md`) needs three things per
- * district that no live source hands back in one piece:
- *
- *   * an OUTLINE, to draw the selected area and to put each report in a
- *     district (point-in-polygon, `evidence.ts`);
+ *   * an OUTLINE, to draw the selected area and to put each marked place in a
+ *     district (point-in-polygon, `evidence.ts`). Hand-traced approximations
+ *     of the municipal districts (stadsdelen / wijken), good to a street or
+ *     two — enough to draw and to bin, not a cadastral boundary;
  *   * the LIGHTING composition of its street network — lit / unlit / unknown
- *     by length — for the stacked bar;
- *   * the length of its ROAD NETWORK, so the area view can show reports per km
- *     rather than raw counts, and a big district is not "worse" for being big.
+ *     by length;
+ *   * the length of its ROAD NETWORK, so the area view can show marked places
+ *     per km rather than raw counts.
  *
- * The outlines are hand-traced approximations of the municipal districts
- * (stadsdelen / wijken), good to a street or two — enough to draw and to bin
- * a report, not a cadastral boundary. The lighting and road figures are
- * EXAMPLE values, shaped like what OpenStreetMap holds for these cities and
- * calibrated against nothing. That is why every number from here carries
- * `source: "example"`, why the provenance table says so, and why the board's
- * subtitle reads "Synthetic example data" whenever any of it is on screen.
- *
- * Replacing them with real figures is a data job, not a code change: compute
- * the lit/unlit/unknown length per district from Overpass (`lit=*` on
- * `way[highway]`, clipped to the outline) and set `source: "osm"`. Nothing
- * downstream branches on the numbers — only on `source`, for the wording.
+ * The last two (and the count of nearby places) are MEASURED from
+ * OpenStreetMap by `scripts/district-figures.ts` into `district-figures.ts`.
+ * There used to be invented example values here; they are gone. A district the
+ * script has not measured yet reads as 100% unknown with `figures: "missing"`,
+ * and the boards say so — never a made-up number.
  */
 
+import { DISTRICT_FIGURES } from "./district-figures.ts";
 import type { LatLng } from "./osrm.ts";
 
-export type FigureSource = "example" | "osm";
+export type FigureSource = "osm" | "missing";
 
 export interface LightingShare {
   /** Percent of street length, each 0–100. They need not sum to exactly 100. */
@@ -63,7 +57,7 @@ export interface City {
   centre: LatLng;
   zoom: number;
   districts: District[];
-  /** Where the lighting / road figures above came from. */
+  /** Whether the lighting / road figures were measured (see the header). */
   figures: FigureSource;
   /**
    * The trip the Compare board opens on, so it is never an empty page.
@@ -75,21 +69,37 @@ export interface City {
   scenario: boolean;
   /**
    * A walk through the middle of the city, for the "distance from report to
-   * route" histogram before anybody has planned one. Labelled as the example
-   * route wherever it is used.
+   * route" histogram before anybody has planned one. Labelled as the default
+   * walk wherever it is used.
    */
   exampleRoute: LatLng[];
 }
 
 const p = (lat: number, lng: number): LatLng => ({ lat, lng });
 
-export const CITIES: City[] = [
+type DistrictShape = Omit<District, "lighting" | "roadKm" | "places">;
+type CityShape = Omit<City, "districts" | "figures"> & { districts: DistrictShape[] };
+
+/** The measured figures joined onto the outlines; unmeasured → all unknown. */
+function measured(city: CityShape): City {
+  const figures = DISTRICT_FIGURES[city.id] ?? {};
+  const all = city.districts.every((d) => figures[d.id]);
+  return {
+    ...city,
+    figures: all ? "osm" : "missing",
+    districts: city.districts.map((d) => ({
+      ...d,
+      ...(figures[d.id] ?? { lighting: { lit: 0, unlit: 0, unknown: 100 }, roadKm: 0, places: 0 }),
+    })),
+  };
+}
+
+const SHAPES: CityShape[] = [
   {
     id: "amsterdam",
     name: "Amsterdam",
     centre: p(52.3668, 4.9005),
     zoom: 13,
-    figures: "example",
     scenario: false,
     trip: {
       from: { label: "Amsterdam Centraal", point: p(52.37875, 4.90005) },
@@ -109,7 +119,6 @@ export const CITIES: City[] = [
           p(52.3650, 4.9200), p(52.3700, 4.9250), p(52.3745, 4.9210), p(52.3790, 4.9080),
           p(52.3800, 4.8990), p(52.3840, 4.8930),
         ],
-        lighting: { lit: 62, unlit: 28, unknown: 10 }, roadKm: 12.1, places: 31,
       },
       {
         id: "west", name: "West", label: p(52.3790, 4.8620),
@@ -118,7 +127,6 @@ export const CITIES: City[] = [
           p(52.3740, 4.8800), p(52.3665, 4.8820), p(52.3630, 4.8620), p(52.3700, 4.8450),
           p(52.3820, 4.8420),
         ],
-        lighting: { lit: 48, unlit: 42, unknown: 10 }, roadKm: 9.6, places: 18,
       },
       {
         id: "oost", name: "Oost", label: p(52.3630, 4.9400),
@@ -127,7 +135,6 @@ export const CITIES: City[] = [
           p(52.3560, 4.9150), p(52.3480, 4.9300), p(52.3500, 4.9550), p(52.3620, 4.9650),
           p(52.3720, 4.9500), p(52.3760, 4.9350),
         ],
-        lighting: { lit: 55, unlit: 33, unknown: 12 }, roadKm: 8.9, places: 14,
       },
       {
         id: "zuid", name: "Zuid", label: p(52.3490, 4.8800),
@@ -136,7 +143,6 @@ export const CITIES: City[] = [
           p(52.3480, 4.9150), p(52.3380, 4.9050), p(52.3360, 4.8750), p(52.3420, 4.8550),
           p(52.3560, 4.8580), p(52.3630, 4.8620), p(52.3665, 4.8820),
         ],
-        lighting: { lit: 70, unlit: 20, unknown: 10 }, roadKm: 7.4, places: 12,
       },
     ],
   },
@@ -145,7 +151,6 @@ export const CITIES: City[] = [
     name: "Utrecht",
     centre: p(52.0920, 5.1250),
     zoom: 13,
-    figures: "example",
     scenario: true,
     trip: {
       from: { label: "Utrecht Centraal", point: p(52.08938, 5.1096) },
@@ -164,7 +169,6 @@ export const CITIES: City[] = [
           p(52.0860, 5.1260), p(52.0850, 5.1170), p(52.0865, 5.1050), p(52.0905, 5.1040),
           p(52.0950, 5.1075),
         ],
-        lighting: { lit: 62, unlit: 28, unknown: 10 }, roadKm: 5.0, places: 31,
       },
       {
         id: "west", name: "West", label: p(52.0905, 5.0890),
@@ -172,7 +176,6 @@ export const CITIES: City[] = [
           p(52.0950, 5.1075), p(52.0905, 5.1040), p(52.0865, 5.1050), p(52.0820, 5.1000),
           p(52.0790, 5.0850), p(52.0880, 5.0750), p(52.0980, 5.0800), p(52.1010, 5.0950),
         ],
-        lighting: { lit: 48, unlit: 42, unknown: 10 }, roadKm: 7.9, places: 16,
       },
       {
         id: "oost", name: "Oost", label: p(52.0860, 5.1540),
@@ -181,7 +184,6 @@ export const CITIES: City[] = [
           p(52.0760, 5.1600), p(52.0800, 5.1850), p(52.0900, 5.1850), p(52.0960, 5.1550),
           p(52.0975, 5.1380),
         ],
-        lighting: { lit: 55, unlit: 33, unknown: 12 }, roadKm: 7.0, places: 19,
       },
       {
         id: "noordoost", name: "Noordoost", label: p(52.1010, 5.1350),
@@ -189,11 +191,12 @@ export const CITIES: City[] = [
           p(52.0985, 5.1135), p(52.0980, 5.1230), p(52.0955, 5.1300), p(52.0975, 5.1380),
           p(52.0960, 5.1550), p(52.1060, 5.1500), p(52.1080, 5.1300), p(52.1040, 5.1150),
         ],
-        lighting: { lit: 70, unlit: 20, unknown: 10 }, roadKm: 6.4, places: 11,
       },
     ],
   },
 ];
+
+export const CITIES: City[] = SHAPES.map(measured);
 
 export const DEFAULT_CITY = "amsterdam";
 

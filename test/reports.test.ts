@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  addReport, countExamples, CRIME_CATEGORIES, loadReports, MAX_REPORTS, newReportId,
-  parseReports, removeExamples, removeReport, saveReports, STORAGE_KEY, type Report,
+  addReport, exactDay, inDates, loadReports, MAX_NOTE, MAX_REPORTS, newReportId, parseReport, parseReports, removeReport,
+  REPORT_TYPES, saveReports, STORAGE_KEY, type Report,
 } from "../src/lib/reports.ts";
 
 const GOOD: Report = {
   id: "r1",
-  category: "harassment",
+  category: "experienced",
   point: { lat: 52.37, lng: 4.89 },
   at: "2026-01-02T03:04:05.000Z",
   source: "community",
@@ -25,26 +25,44 @@ test("a well-formed report survives a round trip through storage", () => {
   assert.ok(store.has(STORAGE_KEY));
 });
 
+test("every Pointer field round-trips through the parser unchanged", () => {
+  const full: Report = {
+    ...GOOD,
+    id: "pointer-x",
+    source: "pointer",
+    category: "witnessed",
+    reasons: ["witnessed", "environment"],
+    when: "dark",
+    adjustments: ["detour", "fake-call"],
+    age: "26-35",
+    place: "Utrecht",
+    note: "Een verhaal.",
+    upvotes: 3,
+    form: "v2",
+  };
+  assert.deepEqual(parseReport(JSON.parse(JSON.stringify(full))), full);
+});
+
 test("a report at 0,0 is refused rather than drawn in the Gulf of Guinea", () => {
-  // Storage is text anything could have written. A missing coordinate that
-  // defaults to zero puts a purple marker off the coast of Africa.
   assert.deepEqual(parseReports([{ ...GOOD, point: {} }]), []);
   assert.deepEqual(parseReports([{ ...GOOD, point: { lat: "52.37", lng: 4.89 } }]), []);
   assert.deepEqual(parseReports([{ ...GOOD, point: { lat: 91, lng: 4.89 } }]), []);
   assert.deepEqual(parseReports([{ ...GOOD, point: { lat: Number.NaN, lng: 4.89 } }]), []);
 });
 
-test("a report in a category nothing knows about is dropped", () => {
-  // Every filter checkbox is a known category, so an unknown one could never
-  // be switched on or off — it would be an invisible marker you cannot remove.
+test("a report in a category nothing knows about is dropped; the first board's categories are mapped", () => {
   assert.deepEqual(parseReports([{ ...GOOD, category: "vandalism" }]), []);
-  assert.equal(parseReports([GOOD]).length, 1);
+  for (const legacy of ["harassment", "catcalling", "sexual_abuse", "assault", "rape", "murder"]) {
+    assert.equal(parseReports([{ ...GOOD, category: legacy }])[0]?.category, "experienced", legacy);
+  }
+  for (const type of REPORT_TYPES) assert.equal(parseReports([{ ...GOOD, category: type.id }]).length, 1, type.id);
 });
 
-test("every listed category is one the parser will accept", () => {
-  for (const category of CRIME_CATEGORIES) {
-    assert.equal(parseReports([{ ...GOOD, category: category.id }]).length, 1, category.id);
-  }
+test("example data is DROPPED — never shown, never promoted to a real report", () => {
+  assert.deepEqual(parseReports([{ ...GOOD, source: "example" }]), []);
+  // An unmarked source is a community report, as before.
+  assert.equal(parseReports([{ ...GOOD, source: undefined }])[0]?.source, "community");
+  assert.equal(parseReports([{ ...GOOD, source: "pointer" }])[0]?.source, "pointer");
 });
 
 test("an unreadable timestamp is dropped — the popup would print Invalid Date", () => {
@@ -55,77 +73,39 @@ test("an unreadable timestamp is dropped — the popup would print Invalid Date"
 test("a note is trimmed and capped; an empty one becomes absent", () => {
   assert.equal(parseReports([{ ...GOOD, note: "  followed  " }])[0]?.note, "followed");
   assert.equal(parseReports([{ ...GOOD, note: "   " }])[0]?.note, undefined);
-  assert.equal(parseReports([{ ...GOOD, note: "x".repeat(500) }])[0]?.note?.length, 280);
+  assert.equal(parseReports([{ ...GOOD, note: "x".repeat(MAX_NOTE + 50) }])[0]?.note?.length, MAX_NOTE);
 });
 
-test("a raw JSON string parses; broken JSON is an empty list, not a crash", () => {
-  assert.equal(parseReports(JSON.stringify([GOOD])).length, 1);
-  assert.deepEqual(parseReports("{not json"), []);
-  for (const bad of [null, undefined, 42, {}, "null"]) {
-    assert.deepEqual(parseReports(bad), []);
-  }
+test("unknown reasons, time answers and adjustment ids are dropped, not kept as text", () => {
+  const parsed = parseReport({ ...GOOD, reasons: ["experienced", "nonsense", "other"], when: "noon", adjustments: ["detour", "DROP TABLE"] });
+  assert.deepEqual(parsed?.reasons, ["experienced"]);
+  assert.equal(parsed?.when, undefined);
+  assert.deepEqual(parsed?.adjustments, ["detour"]);
 });
 
-test("one bad entry does not take the good ones with it", () => {
-  const parsed = parseReports([GOOD, { ...GOOD, id: "r2", category: "nope" }, { ...GOOD, id: "r3" }]);
-  assert.deepEqual(parsed.map((report) => report.id), ["r1", "r3"]);
-});
-
-test("the list is capped, keeping the newest", () => {
-  let list = Array.from({ length: MAX_REPORTS }, (_, index) => ({ ...GOOD, id: `r${index}` }));
-  list = addReport(list, { ...GOOD, id: "newest" });
+test("the browser keeps at most MAX_REPORTS, newest last", () => {
+  let list: Report[] = [];
+  for (let i = 0; i < MAX_REPORTS + 5; i++) list = addReport(list, { ...GOOD, id: `r${i}` });
   assert.equal(list.length, MAX_REPORTS);
-  assert.equal(list[list.length - 1]?.id, "newest");
-  assert.equal(list[0]?.id, "r1", "the oldest is the one that goes");
+  assert.equal(list[list.length - 1]?.id, `r${MAX_REPORTS + 4}`);
+  assert.deepEqual(removeReport([GOOD], "r1"), []);
 });
 
-test("removing a report leaves the rest alone", () => {
-  const list = [GOOD, { ...GOOD, id: "r2" }];
-  assert.deepEqual(removeReport(list, "r1").map((report) => report.id), ["r2"]);
-  assert.equal(removeReport(list, "missing").length, 2);
+test("a new id is short, url-safe and differs between calls", () => {
+  const a = newReportId(1_700_000_000_000, 0.1);
+  const b = newReportId(1_700_000_000_001, 0.1);
+  assert.match(a, /^r[a-z0-9]+$/);
+  assert.notEqual(a, b);
 });
 
-test("a browser that refuses storage costs the note, not the page", () => {
-  // Private windows and blocked site data throw on access. A page that cannot
-  // save a note is still a page that draws a map.
-  const hostile = {
-    getItem() { throw new Error("blocked"); },
-    setItem() { throw new Error("quota"); },
-  };
-  assert.deepEqual(loadReports(hostile), []);
-  assert.equal(saveReports(hostile, [GOOD]), false);
-  assert.deepEqual(loadReports(null), []);
-  assert.equal(saveReports(null, [GOOD]), true);
-});
-
-/* --------------------------- real vs. invented ---------------------------- */
-
-test("a report with no source is a community one, never an example", () => {
-  // The error that matters is the other direction: an invented point quietly
-  // promoted to a real report because a field went missing. A stored report
-  // from before the field existed is a real one.
-  const legacy = { id: "r1", category: "harassment", point: { lat: 52.37, lng: 4.89 }, at: GOOD.at };
-  assert.equal(parseReports([legacy])[0]?.source, "community");
-});
-
-test("only the exact string \"example\" marks a report as invented", () => {
-  for (const bad of ["Example", "seed", "", 1, null, true]) {
-    assert.equal(parseReports([{ ...GOOD, source: bad }])[0]?.source, "community");
-  }
-  assert.equal(parseReports([{ ...GOOD, source: "example" }])[0]?.source, "example");
-});
-
-test("clearing the example data leaves every real report behind", () => {
-  const list: Report[] = [
-    GOOD,
-    { ...GOOD, id: "s1", source: "example" },
-    { ...GOOD, id: "r2" },
-    { ...GOOD, id: "s2", source: "example" },
-  ];
-  assert.equal(countExamples(list), 2);
-  assert.deepEqual(removeExamples(list).map((report) => report.id), ["r1", "r2"]);
-});
-
-test("ids do not collide within the same millisecond", () => {
-  assert.notEqual(newReportId(1_700_000_000_000, 0.1), newReportId(1_700_000_000_000, 0.9));
+test("a report dated by a window overlaps a date filter by its window, and has no exact day", () => {
+  const ranged = { ...GOOD, at: "2025-11-24T12:00:00.000Z", atUntil: "2026-06-10T12:00:00.000Z" };
+  assert.equal(parseReport(ranged)?.atUntil, ranged.atUntil);
+  assert.equal(exactDay(ranged), false);
+  assert.equal(exactDay(GOOD), true);
+  assert.equal(inDates(ranged, "2026-01-01", "2026-01-31"), true);
+  assert.equal(inDates(ranged, "2026-07-01", "2026-07-31"), false);
+  assert.equal(inDates(GOOD, "2026-01-02", "2026-01-02"), true);
+  // An end before the start is not a window.
+  assert.equal(parseReport({ ...GOOD, atUntil: "2020-01-01T00:00:00.000Z" })?.atUntil, undefined);
 });

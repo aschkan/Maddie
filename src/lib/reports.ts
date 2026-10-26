@@ -1,87 +1,122 @@
 /**
- * The Crime layer — and what is actually behind it.
+ * The reports layer — places somebody marked, and why. Never scored.
  *
- * There is no open dataset of where harassment, catcalling, assault or rape
- * happened. Police forces publish counts per neighbourhood per month, which
- * cannot say anything about one street versus the next one over, and the
- * categories that matter most here are the ones least likely to be reported at
- * all. Drawing purple dots from a national statistics table would look like
- * this layer answers the question. It does not.
+ * Everything here is REAL, from one of three sources, and they are never mixed
+ * up:
  *
- * So the layer holds what people using this app choose to record, and nothing
- * else. It never touches the score — `score.ts` is computed from OpenStreetMap
- * alone. An empty map here means nobody has written anything down, which is not
- * the same as nothing having happened, and the panel says so rather than
- * leaving the blank space to be read as reassurance.
+ *   * `pointer`   — Pointer (KRO-NCRV)'s "Onveilige plekken" survey, imported
+ *                   once into the database (`pointer.ts`). ~18k places across
+ *                   the Netherlands. Must be credited wherever it is shown.
+ *   * `admin`     — the study team entered it in `/admin` (fieldwork, a new
+ *                   source found later).
+ *   * `community` — somebody typed it into the public board.
  *
- * Two sources, and they are never mixed up:
+ * There is no example data any more. The seed used to invent reports and the
+ * boards used to generate more in the browser; both are gone. A record that
+ * still says `source: "example"` (an old database, an old browser) is DROPPED
+ * by `parseReports` rather than shown — and never promoted to a real one.
  *
- *   * `community` — somebody typed it into this app.
- *   * `example`   — `npm run seed` made it up, so the layer can be seen working
- *                   before the interviews exist. Every part of the UI that can
- *                   show a report has to mark these differently; see
- *                   `seed-data.ts` for why that is not optional.
+ * A report carries the Pointer survey's shape, because that is the dataset:
+ * WHY the place feels this way (`reasons`, the first of which is `category`),
+ * WHEN (`when` — after dark / by day / any time; there is no hour), how people
+ * ADAPT (`adjustments`), the respondent's AGE BAND, and an optional story. `at`
+ * is when it was reported, not when anything happened.
  *
- * Where they live depends on the deployment: with `MONGO_URI` set they are rows
- * in the `maddie` database, shared by everyone using that instance; without it
- * they stay in the browser that entered them. `/api/reports` reports which,
- * and the page says so.
+ * It never touches the score — `score.ts` is computed from OpenStreetMap alone.
  */
 
 import type { LatLng } from "./osrm.ts";
 
-export interface CrimeCategory {
-  id: string;
-  label: string;
-}
+/** Why the place is marked. Pointer's three reasons, plus `other` for a record without one. */
+export type ReportType = "experienced" | "witnessed" | "environment" | "other";
 
-/** The categories from the brief, in the order they were asked for. */
-export const CRIME_CATEGORIES: CrimeCategory[] = [
-  { id: "harassment", label: "Harassment" },
-  { id: "catcalling", label: "Catcalling" },
-  { id: "sexual_abuse", label: "Sexual abuse" },
-  { id: "assault", label: "Assault or robbery" },
-  { id: "rape", label: "Rape" },
-  { id: "murder", label: "Murder" },
-  { id: "other", label: "Other" },
+export const REPORT_TYPES: { id: ReportType; label: string; short: string }[] = [
+  { id: "experienced", label: "Something happened to me here", short: "Happened to me" },
+  { id: "witnessed", label: "Something happened to someone I know of", short: "Happened to others" },
+  { id: "environment", label: "The surroundings feel threatening", short: "Feels threatening" },
+  { id: "other", label: "Other / not given", short: "Other" },
 ];
 
-const CATEGORY_IDS = new Set(CRIME_CATEGORIES.map((c) => c.id));
+const TYPE_IDS = new Set<string>(REPORT_TYPES.map((t) => t.id));
 
-/** Who put this here. Never inferred — an unmarked report is a community one. */
-export type ReportSource = "community" | "example";
+/**
+ * The categories the first version of the board stored. A community report
+ * filed under one of them answered "What happened here?", so it reads as
+ * `experienced`; their `other` stays `other`.
+ */
+const LEGACY: Record<string, ReportType> = {
+  harassment: "experienced", catcalling: "experienced", sexual_abuse: "experienced",
+  assault: "experienced", rape: "experienced", murder: "experienced",
+};
+
+/** When a place feels unsafe, as the survey asks it. */
+export type When = "dark" | "day" | "any";
+
+export const WHEN_OPTIONS: { id: When; label: string }[] = [
+  { id: "dark", label: "Mostly after dark" },
+  { id: "day", label: "Mostly by day" },
+  { id: "any", label: "Time makes no difference" },
+];
+const WHEN_IDS = new Set<string>(WHEN_OPTIONS.map((w) => w.id));
+
+export type ReportSource = "pointer" | "admin" | "community";
+const SOURCES = new Set<string>(["pointer", "admin", "community"]);
+
+export const SOURCE_LABEL: Record<ReportSource, string> = {
+  pointer: "Pointer survey",
+  admin: "Study team",
+  community: "Community report",
+};
 
 export interface Report {
   id: string;
-  category: string;
+  /** The primary reason — `reasons[0]`, or `other`. What the boards group by. */
+  category: ReportType;
   point: LatLng;
-  /** ISO 8601, in whatever the reporting browser thought the time was. */
+  /** ISO 8601 — when it was REPORTED. Pointer gives a date only (stored at noon UTC). */
   at: string;
-  note?: string;
+  /**
+   * When the report date is only known as a WINDOW, its end; `at` is the start.
+   * Pointer's v2 rows say "24-11-2025 - 10-06-2026". Never chart such a report
+   * at `at` as if that were its day — `exactDay()` says whether it has one.
+   */
+  atUntil?: string;
   source: ReportSource;
-  /** Example reports say which district they were scattered in. */
-  area?: string;
+  /** Every reason given, most direct first. */
+  reasons?: ReportType[];
+  when?: When;
+  /** `ADJUSTMENTS` ids from `pointer.ts`. */
+  adjustments?: string[];
+  /** Respondent's age band, e.g. `26-35`. */
+  age?: string;
+  /** Town, as the survey placed it. */
+  place?: string;
+  /** The respondent's story, only where they consented to share it. */
+  note?: string;
+  /** Pointer: how many others also marked this place. */
+  upvotes?: number;
+  /** Pointer survey version. */
+  form?: "v1" | "v2";
 }
 
 export const STORAGE_KEY = "maddie.reports.v1";
 
-/**
- * A cap, so a stuck loop cannot fill the browser's quota.
- *
- * Oldest first out: the newest reports are the ones anyone is looking at.
- */
+/** A cap on what one browser keeps, so a stuck loop cannot fill the quota. */
 export const MAX_REPORTS = 500;
 
+/** The longest note kept. Pointer stories run to ~2.3k characters. */
+export const MAX_NOTE = 4_000;
+
+const str = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+
 /**
- * Whatever came out of storage → reports.
+ * Whatever came out of storage or a request → reports.
  *
- * Storage is text that anything could have written — an older version of this
- * app, another tab, a person with the console open. Every field is checked and
- * anything that does not survive is dropped rather than defaulted: a report at
- * 0,0 would draw a marker in the Gulf of Guinea, and a report with an unknown
- * category would be invisible to every filter while still being counted.
+ * Every field is checked and anything that does not survive is dropped rather
+ * than defaulted: a report at 0,0 would draw in the Gulf of Guinea. An unmarked
+ * source reads as `community` — but `example` is DROPPED, never promoted.
  */
-export function parseReports(raw: unknown): Report[] {
+export function parseReports(raw: unknown, cap = Infinity): Report[] {
   let value: unknown = raw;
   if (typeof raw === "string") {
     try {
@@ -94,42 +129,82 @@ export function parseReports(raw: unknown): Report[] {
 
   const reports: Report[] = [];
   for (const entry of value) {
-    if (!entry || typeof entry !== "object") continue;
-    const item = entry as Partial<Report> & { point?: Partial<LatLng> };
-
-    const lat = item.point?.lat;
-    const lng = item.point?.lng;
-    if (typeof lat !== "number" || typeof lng !== "number") continue;
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
-
-    if (typeof item.category !== "string" || !CATEGORY_IDS.has(item.category)) continue;
-    if (typeof item.id !== "string" || item.id.length === 0) continue;
-    if (typeof item.at !== "string" || Number.isNaN(Date.parse(item.at))) continue;
-
-    // Anything not explicitly marked as example data is treated as a real
-    // report. The error that matters here is the other one — an invented point
-    // quietly promoted to a community report because a field went missing.
-    const source: ReportSource = item.source === "example" ? "example" : "community";
-
-    // Left off entirely rather than set to undefined, so a report round-trips
-    // through JSON unchanged — `{note: undefined}` comes back without the key.
-    const note = typeof item.note === "string" ? item.note.trim().slice(0, 280) : "";
-    const area = typeof item.area === "string" ? item.area.trim().slice(0, 120) : "";
-    reports.push({
-      id: item.id,
-      category: item.category,
-      point: { lat, lng },
-      at: item.at,
-      source,
-      ...(note ? { note } : {}),
-      ...(area ? { area } : {}),
-    });
+    const report = parseReport(entry);
+    if (report) reports.push(report);
   }
-  return reports.slice(-MAX_REPORTS);
+  return Number.isFinite(cap) ? reports.slice(-cap) : reports;
 }
 
-/** Add one, keeping the list inside its cap. Returns a new list. */
+export function parseReport(entry: unknown): Report | null {
+  if (!entry || typeof entry !== "object") return null;
+  const item = entry as Record<string, unknown> & { point?: Partial<LatLng> };
+
+  const lat = item.point?.lat;
+  const lng = item.point?.lng;
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  if (typeof item.id !== "string" || item.id.length === 0 || item.id.length > 120) return null;
+  if (typeof item.at !== "string" || Number.isNaN(Date.parse(item.at))) return null;
+  if (item.source === "example") return null;
+
+  const rawCategory = typeof item.category === "string" ? item.category : "";
+  const category: ReportType | undefined = TYPE_IDS.has(rawCategory) ? (rawCategory as ReportType) : LEGACY[rawCategory];
+  if (!category) return null;
+
+  const source: ReportSource = typeof item.source === "string" && SOURCES.has(item.source)
+    ? (item.source as ReportSource)
+    : "community";
+
+  const reasons = Array.isArray(item.reasons)
+    ? [...new Set(item.reasons.filter((r): r is ReportType => typeof r === "string" && TYPE_IDS.has(r) && r !== "other"))]
+    : [];
+  const when = typeof item.when === "string" && WHEN_IDS.has(item.when) ? (item.when as When) : undefined;
+  const adjustments = Array.isArray(item.adjustments)
+    ? [...new Set(item.adjustments.filter((a): a is string => typeof a === "string" && /^[a-z-]{1,24}$/.test(a)))]
+    : [];
+  const age = str(item.age, 12);
+  const place = str(item.place, 120);
+  const note = str(item.note, MAX_NOTE);
+  const upvotes = typeof item.upvotes === "number" && Number.isInteger(item.upvotes) && item.upvotes > 0 ? item.upvotes : 0;
+  const form = item.form === "v1" || item.form === "v2" ? item.form : undefined;
+  const atUntil = typeof item.atUntil === "string" && !Number.isNaN(Date.parse(item.atUntil)) && item.atUntil > item.at
+    ? item.atUntil
+    : undefined;
+
+  // Optional fields are left off rather than set to undefined, so a report
+  // round-trips through JSON unchanged.
+  return {
+    id: item.id,
+    category,
+    point: { lat, lng },
+    at: item.at,
+    ...(atUntil ? { atUntil } : {}),
+    source,
+    ...(reasons.length ? { reasons } : {}),
+    ...(when ? { when } : {}),
+    ...(adjustments.length ? { adjustments } : {}),
+    ...(age ? { age } : {}),
+    ...(place ? { place } : {}),
+    ...(note ? { note } : {}),
+    ...(upvotes ? { upvotes } : {}),
+    ...(form ? { form } : {}),
+  };
+}
+
+/** Does this report have a known day (rather than a window)? */
+export function exactDay(report: Pick<Report, "atUntil">): boolean {
+  return !report.atUntil;
+}
+
+/** Does the report's date (or window) overlap `from`…`to` (YYYY-MM-DD, inclusive)? */
+export function inDates(report: Pick<Report, "at" | "atUntil">, from: string, to: string): boolean {
+  const start = report.at.slice(0, 10);
+  const end = (report.atUntil ?? report.at).slice(0, 10);
+  return end >= from && start <= to;
+}
+
+/** Add one, keeping the browser's list inside its cap. Returns a new list. */
 export function addReport(reports: readonly Report[], report: Report): Report[] {
   return [...reports, report].slice(-MAX_REPORTS);
 }
@@ -138,25 +213,13 @@ export function removeReport(reports: readonly Report[], id: string): Report[] {
   return reports.filter((report) => report.id !== id);
 }
 
-/** Drop every made-up point, keeping everything a person actually entered. */
-export function removeExamples(reports: readonly Report[]): Report[] {
-  return reports.filter((report) => report.source !== "example");
-}
-
-export function countExamples(reports: readonly Report[]): number {
-  return reports.reduce((count, report) => count + (report.source === "example" ? 1 : 0), 0);
-}
-
 /**
- * Storage, if this browser has any.
- *
- * Private windows, blocked site data and quota errors all throw here, and a
- * page that cannot save a note is still a page that draws a map — so every
- * access is wrapped and a failure costs the note, not the app.
+ * Storage, if this browser has any. Private windows, blocked site data and
+ * quota errors all throw here, and a failure costs the note, not the app.
  */
 export function loadReports(storage: Pick<Storage, "getItem"> | null | undefined): Report[] {
   try {
-    return parseReports(storage?.getItem(STORAGE_KEY) ?? null);
+    return parseReports(storage?.getItem(STORAGE_KEY) ?? null, MAX_REPORTS);
   } catch {
     return [];
   }
@@ -180,13 +243,8 @@ export function newReportId(now: number, random: number): string {
 }
 
 /**
- * How old a report is, as the three steps the legend shows.
- *
- * Recency is drawn as OPACITY: a report from last month is solid, one from
- * last year is faded, one from before that is faint. The supervisor's point —
- * "perhaps you don't care about something that happened 10 years ago" — is a
- * judgement for the person reading the map, so the map shows age rather than
- * hiding old reports.
+ * How old a report is, as the three steps the legend shows. Recency is drawn
+ * as OPACITY — a judgement for the reader, so old reports are shown, faded.
  */
 export function reportAge(at: string, now: number): "recent" | "year" | "older" {
   const days = (now - Date.parse(at)) / 86_400_000;

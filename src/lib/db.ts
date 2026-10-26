@@ -19,7 +19,7 @@
 import { MongoClient, type Collection, type Db } from "mongodb";
 
 import type { Interview } from "./interviews.ts";
-import type { Report } from "./reports.ts";
+import { parseReport, type Report } from "./reports.ts";
 
 /** The report as it is stored. `id` is ours; `_id` is Mongo's. */
 export interface ReportDoc extends Report {
@@ -32,26 +32,39 @@ export interface ReportDoc extends Report {
 export const REPORTS = "reports";
 
 /**
- * The interviews collection.
+ * The interviews collection — real transcripts, team-only.
  *
- * ⚠ A DIFFERENT COLLECTION FROM `REPORTS`, and that separation is the whole
- * safeguard rather than tidiness. The crime layer holds what somebody typed
- * about a place; this holds what a participant said across a 30–45 minute
- * sitting under a consent form. They have different consent behind them, they
- * are deleted on different schedules, and — the reason it matters most — the
- * seed writes synthetic interviews, so keeping them apart is what stops an
- * invented quote ever sitting in the same collection as real testimony. See
- * the header of `seed-interviews.ts`.
- *
- * Never merge these two, and never write an interview into `reports` "so the
- * map can show it". An interview is not a point on a map.
+ * ⚠ A DIFFERENT COLLECTION FROM `REPORTS`. A report is somebody marking a
+ * place; this is what a participant said across a sitting under a consent
+ * form. Different consent, different retention, different audience (only a
+ * signed-in member of the team reads these). Never merge the two, and never
+ * write an interview into `reports` "so the map can show it". An interview is
+ * not a point on a map.
  */
 export const INTERVIEWS = "interviews";
 
 /** The interview as it is stored. No geometry — an interview is not a place. */
 export interface InterviewDoc extends Interview {
-  /** Epoch ms of `conductedAt`, so the index sorts without parsing. */
+  /** Epoch ms of `conductedAt` (or `addedAt`), so the index sorts without parsing. */
   atMs: number;
+}
+
+/**
+ * Where each imported dataset came from: one document per source (`pointer`),
+ * with the export's date, its hash and how many rows it gave. The boards print
+ * it under the data, because a figure without its provenance is a figure
+ * nobody can check.
+ */
+export const DATASETS = "datasets";
+
+export interface DatasetDoc {
+  id: string;
+  name: string;
+  credit: string;
+  exportedAt?: string;
+  version?: string;
+  rows: number;
+  importedAt: string;
 }
 
 /**
@@ -125,6 +138,7 @@ export async function reportsCollection(): Promise<Collection<ReportDoc> | null>
     collection.createIndex({ loc: "2dsphere" }),
     collection.createIndex({ source: 1 }),
     collection.createIndex({ atMs: -1 }),
+    collection.createIndex({ place: 1 }),
   ]);
   return collection;
 }
@@ -154,7 +168,15 @@ export async function interviewsCollection(): Promise<Collection<InterviewDoc> |
 
 /** An interview → the document that stores it. */
 export function toInterviewDoc(interview: Interview): InterviewDoc {
-  return { ...interview, atMs: Date.parse(interview.conductedAt) };
+  return { ...interview, atMs: Date.parse(interview.conductedAt ?? interview.addedAt) || 0 };
+}
+
+export async function datasetsCollection(): Promise<Collection<DatasetDoc> | null> {
+  const database = await db();
+  if (!database) return null;
+  const collection = database.collection<DatasetDoc>(DATASETS);
+  await collection.createIndex({ id: 1 }, { unique: true });
+  return collection;
 }
 
 /** A stored document → the interview, with the storage-only field dropped. */
@@ -176,15 +198,15 @@ export function toDoc(report: Report): ReportDoc {
   };
 }
 
-/** A stored document → the report, with the storage-only fields dropped. */
-export function fromDoc(doc: ReportDoc): Report {
-  return {
-    id: doc.id,
-    category: doc.category,
-    point: doc.point,
-    at: doc.at,
-    source: doc.source,
-    ...(doc.note ? { note: doc.note } : {}),
-    ...(doc.area ? { area: doc.area } : {}),
-  };
+/**
+ * A stored document → the report, through the same parser as everything else,
+ * so a row from an older shape of this app is migrated (or dropped) on read
+ * rather than reaching a board half-formed.
+ */
+export function fromDoc(doc: ReportDoc): Report | null {
+  const out = { ...doc } as Partial<ReportDoc> & { _id?: unknown };
+  delete out._id;
+  delete out.atMs;
+  delete out.loc;
+  return parseReport(out);
 }

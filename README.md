@@ -1,23 +1,28 @@
 # Maddie
 
-An **evidence dashboard** for urban mobility: community reports, mapped
-lighting and nearby places, and the ways round from A to B compared factor by
-factor. **There is no overall safety score** — each factor is shown in the
-chart its data asks for, and the reader decides.
+An **evidence dashboard** for urban mobility: the places people marked in
+Pointer's national survey (and since, in this app), mapped lighting and nearby
+places, and the ways round from A to B compared factor by factor. **There is no
+overall safety score** — each factor is shown in the chart its data asks for,
+and the reader decides. **There is no invented data**: every record is real.
 
 ![Leaflet + OpenStreetMap](https://img.shields.io/badge/map-Leaflet%20%2B%20OpenStreetMap-0f8a7a)
 
-- **Explore** (`/`) — one map and coordinated views: reports by type (bars),
-  when they occurred (brushable histogram), lighting by neighbourhood (stacked,
-  with *unknown* hatched), distance from report to your route, share by type
-  (donut) and reports over time (lines). Select an area, a bar or an hour range
-  and every view follows.
+- **Explore** (`/`) — one map and coordinated views: why places were marked
+  (bars), when it feels that way — after dark, by day, any time (bars),
+  lighting by neighbourhood (stacked, with *unknown* hatched, measured from
+  OpenStreetMap), distance from a marked place to your route, share by reason
+  (donut), when places were marked (lines) and how people adapt (bars). Select
+  an area, a reason or a time and every view follows.
 - **Compare** (`/compare`) — three routes, five factors, no score: dot plots
   per factor, a radar, a table, and a timeline of where along each route the
   lighting, places, reports and parks differ. Brush a stretch to see it on the
   map. The trade-off slider filters routes, it never re-scores them.
-- **Area detail** (`/area?d=centrum`) — counts, months × type, hour × weekday,
-  provenance, and neighbourhoods per km of road.
+- **Area detail** (`/area?d=centrum`) — counts, months × reason, time of day,
+  age × reason, provenance, and neighbourhoods per km of road.
+- **Admin** (`/admin`) — the team signs in to add marked places, import a newer
+  Pointer export and add interviews. **Interviews** (`/research`) — the
+  transcripts, searchable, for the signed-in team only.
 - **Utrecht's study trips are recorded**, so Compare works with no network.
 - **Walk it in Google Maps** — the route travels as waypoints.
 - **No API keys.** Nothing to sign up for, nothing to bill.
@@ -453,6 +458,17 @@ proxy is the problem.** A Squid-style proxy allows `CONNECT` to port 443 and
 nothing else out of the box, and these hops are on 8080, 999, 3128. Both
 `npm run proxies` and `/api/osm/status` call that case out by name.
 
+### Our own Overpass, asked first
+
+aschkan runs its own Overpass holding the Netherlands (`/srv/overpass`, updated
+daily from Geofabrik), and the forwarder asks it before anything public — but
+only for a query whose every coordinate is inside the country
+(`queryWithin` in `osm-forward.ts`), because a regional copy asked about
+anywhere else answers with an empty list that would read as unmapped streets.
+No rate limit, no proxy, about a second. Set up with
+`sudo bash scripts/overpass/install.sh` after the import in
+`/srv/overpass/import.sh`; see CLAUDE.md for why the import is memory-fenced.
+
 ### When the entry proxy is the thing that is down
 
 Everything goes out through the entry proxy when one is set, so if that one
@@ -583,171 +599,73 @@ is left, and every request identifies itself with a real `User-Agent`.
 in one move, and is faster than any of this. Point the `overpass` entry in
 `src/lib/osm-forward.ts` at it and the chain has nothing left to do.
 
-## The interviews — `/research`
+## The data — Pointer's survey, and what the team adds
 
-The app is the prototype for a study, and the study's instrument is a
-semi-structured interview: *Requirements Interviews — Women's Safety-Related
-Urban Mobility Decisions*. The **Research** page (`/research`; it was a fifth tab on the map, and is not part of what a
-participant is shown) holds the interviews and what
-they add up to, and the store is shaped section for section like the protocol,
-so real transcripts can be typed into it later without a migration.
+> **Source — cite it wherever the data is shown:** *Onveilige Plekken kaart
+> 2026, Pointer (KRO-NCRV) i.s.m. het AD en de regionale titels.* Not for
+> commercial use. Every board prints it (`Sources` in `BoardHeader.tsx`).
 
-Two halves, in this order:
+The reports layer is **Pointer's "Onveilige plekken" survey**: since March 2024
+people have pinned places in the Netherlands where they feel unsafe, with why
+(something happened to me / to someone I know of / the surroundings feel
+threatening), when (after dark / by day / any time), how they adapt (detour, no
+longer go, fake a call…), their age band, and — only where they consented — a
+story. About 18,000 places. Read what a record is *not* in the header of
+`src/lib/pointer.ts`: not an incident, not timed (the date is when the survey was
+filled in), and located by the respondent.
 
-1. **What the cohort said, aggregated.** The §4 printed-list tally, the §6
-   split on official figures versus lived experience, §8's presentation
-   preferences, and the yes/no on contributing reports.
-2. **The participants**, one expandable card each, every answer labelled with
-   the protocol section it came from.
-
-Three things about it are load-bearing.
-
-**Interviews are their own collection, never `reports`.** `interviews` and
-`reports` are separate in Mongo and must stay separate. The crime layer holds
-what somebody typed about a place; this holds what a participant said across a
-30–45 minute sitting with a consent form signed first. Different consent,
-different retention — and, most importantly, the seed writes *synthetic*
-interviews, so keeping them apart is what stops an invented quote ever sitting
-in the same collection as a real one.
-
-**There is no `POST /api/interviews`, and there must not be one.** An interview
-is produced in a room and transcribed afterwards. A public endpoint that
-accepted one would let anybody write a "participant" into the study's own data
-— a worse version of the problem `POST /api/reports` already guards against by
-forcing `source: "community"`. Interviews get in through `npm run seed`
-(synthetic) or an import the researcher runs by hand. Not over HTTP.
-
-**No database means no interviews, and the panel says so.** Unlike reports,
-there is no `localStorage` fallback: a browser has no business holding a
-transcript and could never have produced one. An empty list would read as a
-study that found nothing, so the panel prints the reason instead.
-
-### The synthetic cohort
-
-`npm run seed` writes 24 invented participants. **Nobody said any of it and no
-participant exists.** It is there so this panel, the tallies and the place
-table can be seen working before the fieldwork is done, and it is meant to be
-deleted when it is — `npm run seed -- --no-demo`.
-
-**The on-screen marking is currently switched off**, and one constant does it:
-`MARK_EXAMPLE_DATA` in `src/lib/demo-mode.ts`. With it on, the panel carries a
-banner while any synthetic interviews are loaded and every card opens with
-`SYNTHETIC — NOBODY SAID THIS`; the map draws seeded reports as hollow dashed
-rings and says `EXAMPLE DATA` in their popups. It is off because the app is
-being evaluated as it will look, and a screen covered in placeholder warnings
-is a screen that will never ship.
-
-What that does and does not change:
-
-- **Presentation only.** `source: "example"` is still written on every record.
-  It is the only thing that can find these rows again: `--no-demo` and the
-  panel's clear button both select on it, and `--keep` spares real material by
-  it.
-- **The seed still says what it wrote**, in its summary block. With the
-  on-screen marking off that log is the only place that does.
-- **Nothing on screen distinguishes a seeded row from a real one.** That is the
-  point and also the risk. Clear the data or turn the marking back on before
-  anybody outside the team sees the app, and never quote a count or a sentence
-  from it.
-
-Two things it deliberately does **not** do:
-
-- **It invents no testimony about being attacked, followed or harassed.** §3
-  asks *how did you make that decision?* and what it is after is the reasoning —
-  the options, the cues, what changed afterwards. So every recalled situation is
-  a decision ("I didn't cycle back through the park, I took the tram"), never an
-  incident. Invented first-person testimony about an assault is exactly the
-  material the real interviews will supply, and a fluent fake of it is how a fake
-  ends up quoted in a findings chapter. `test/interviews.test.ts` greps the
-  cohort for it and fails if it appears.
-- **It does not make the participants agree.** Twenty-four people who all want a
-  map with scores on it would let the prototype be validated against its own
-  assumptions. So two would not use such a tool at all, three want no
-  personalisation and no personal data, several rate a nearby police station as
-  making things *worse*, the 24/7 gym is 23-to-1 useless, only four want scores
-  at all, and the room splits three ways on official versus lived. The awkward
-  answers are the useful ones.
-
-The numbers are shaped to exercise every branch of the panel — unanimous, split,
-mostly-no-difference, and a place several people actively dislike. **They are
-not findings, they are calibrated against nothing, and no number or sentence
-from them should be quoted.**
-
-One presentational decision worth defending: the cue tallies are shown **as the
-participants said them, uncoded**, and the panel says so. Grouping "no lighting
-in the park" with "unlit stretches" is qualitative coding — a research step with
-a method and an audit trail behind it — and doing it here with string matching
-would manufacture findings. So the list is long and repetitive, which is what
-raw cues look like.
-
-### Where the interviews meet the map
-
-§4 hands every participant the same printed list of places, which is what makes
-the tally comparable at all. Six of the seven map onto a `SAFE_SPOTS` id in
-`src/lib/layers.ts` — police station, taxi stand, open café, 24/7 gym, shopping
-centre, pharmacy, hospital — and that join is what lets an interview answer say
-something about the map: "23 of 24 called a 24/7 gym no difference" is a
-statement about the `gym24` layer. `test/interviews.test.ts` pins that every id
-in the protocol table still exists in `layers.ts`, because a typo there silently
-stops the aggregate lining up with the checkboxes.
-
-The row worth reading twice is **less safe**. A place several participants call
-less safe is one where drawing it as a "safe spot" is actively wrong for them,
-not merely unhelpful — and the panel highlights that column for exactly that
-reason.
-
-## Example data — `npm run seed`
+**The CSV is not used at runtime and is never committed** (this repository is
+public). It is read ONCE into MongoDB:
 
 ```bash
-npm run seed                # WIPE the database, then write the example reports
-npm run seed -- --force     # the panel's button: wipe and rewrite, no switch honoured
-npm run seed -- --keep      # keep every report a person typed; replace only the examples
-npm run seed -- --no-demo   # wipe and write nothing (`--clear` still works)
-npm run seed -- --count=400 --days=90 --seed=7
+set -a; . ./.env; set +a
+node scripts/import-pointer.ts ~/Pointer-onveilige-plekken-20260709.csv --exported=2026-07-09 --version=c3bda654
+node scripts/import-interviews.ts "~/Interview 1 Tania" "~/Interview 2 (matilde)" …
 ```
 
-**It is destructive by default, and on this app that has a specific cost.** The
-reports collection holds things people typed about being followed, harassed or
-assaulted, and there is no other copy of them. `--keep` is the switch that
-spares them — reach for it on anything that is not a fresh box.
+or, later, with **Import Pointer export** in `/admin`. Both upsert by Pointer's
+`locatie_id`, so a newer export updates and adds; a row missing from a newer
+file is left alone. Each record carries `source`: `pointer`, `admin` (entered in
+/admin) or `community` (the public board's "Mark this place"). The `datasets`
+collection keeps the export's date and hash, printed under the boards.
 
-That default is not a local choice. Every platform behind the reverse proxy
-answers the same `npm run seed -- --force` from the same 💣 Reseed DB button,
-and the contract they all keep is written down in that repo's README under
-[The seed contract](https://github.com/aschkan/platform-reverse-proxy#the-seed-contract--what-a-platforms-npm-run-seed-must-do).
-`--force` beats `--keep`, `--no-demo` and every `SEED_*` an env file might be
-carrying, because an operator who presses that button should not have to reason
-about a file they have never read — `src/lib/seed-flags.ts` is that rule as one
-pure function, and `test/seed-flags.test.ts` pins it without touching a database.
+The neighbourhood figures — lighting by street length, km of road, nearby
+places — are **measured from OpenStreetMap** by `node scripts/district-figures.ts`
+(aschkan's own Overpass) into `src/lib/district-figures.ts`. Re-run it when the
+outlines change.
 
-The wipe is `dropDatabase()`, with an inventory of what was there logged before
-it goes; the indexes `reportsCollection()` owns are rebuilt straight afterwards.
-The example reports are generated **before** anything is deleted, so a bad
-`--count` or a generator that throws costs nothing instead of leaving an empty
-collection.
+## The interviews — `/research`, team only
 
-There are no accounts here and so no logins to print, but the seed ends with the
-same plain-text summary block every other platform ends with: what the map will
-now show, how much of it is invented, and how to clear it.
+The study's requirements interviews, **as transcribed** (Whisper JSON, with the
+time of every line). Real participants under a consent form, so:
 
-**What it writes did not happen.** It exists so the crime filter can be
-demonstrated before the interviews behind that layer exist. Everything it makes
-carries `source: "example"`, and the app treats that as a different kind of
-object everywhere it can appear:
+- **Only a signed-in member of the team sees them.** `/api/interviews` answers
+  401 without the `/admin` session; writes go through `/api/admin/interviews`.
+- **Never in this repository**, and never on the map: an interview has no
+  coordinate and lives in its own collection, never `reports`.
+- **Searchable, not coded.** The reader finds every line containing a word,
+  across all transcripts. Grouping what was said into themes is qualitative
+  coding — a research step with a method — and is left to the researchers.
 
-- a hollow dashed ring instead of a solid dot,
-- `EXAMPLE DATA — NOT A REAL REPORT` as the first line of the popup,
-- a banner in the panel, with a clear button, while any are loaded.
+The earlier synthetic cohort of 24 invented participants is deleted.
 
-A fabricated point sits on a real street, and the only thing keeping it from
-being read as a record of a real event is that the screen says otherwise
-everywhere it appears. The notes are visibly placeholder text for the same
-reason: invented first-person testimony is exactly the material the real
-interviews will supply, and a convincing fake of it in the same collection is
-how a fake ends up quoted as a finding.
+## The seed — `npm run seed`
 
-The generator is deterministic — same options, same points — so a reseed does
-not silently invent a different fictional city.
+The platform proxy's 💣 **Reseed DB** runs `npm run seed -- --force`. It invents
+nothing. It rebuilds the database **from the real data it holds**:
+
+1. reads every report, interview and dataset row (anything marked
+   `source: "example"` from an older version is discarded);
+2. writes the whole snapshot to `.data/seed-backup/<time>.json` (five kept);
+3. `dropDatabase()`, recreates the collections and their indexes (the 2dsphere
+   on `loc`, unique ids);
+4. restores everything in batches of 500 (one big insert floods the replica
+   set's tunnel and the primary steps down);
+5. prints the counts, the Pointer credit, and the **/admin login**.
+
+If it dies between 3 and 4, the next run finds an empty database and restores
+from the newest backup. `npm run seed -- --dry-run` does 1–2 only. An empty
+database with no backup is not seeded with anything — the log says to import.
 
 ## Secrets
 
@@ -759,16 +677,14 @@ the app.
 
 | Variable | Shape | Why it matters |
 | --- | --- | --- |
-| — | — | This app needs no secrets. |
+| `ADMIN_PASSWORD` | random string | The `/admin` password (user `admin`). The seed prints it. |
+| `SESSION_SECRET` | random string | Signs the admin session cookie. Rotating it signs the team out. |
 
-Maddie has **no** signing key, no session, no login and nothing encrypted at rest.
-`MONGO_URI` is configuration, not a secret this button generates, and it is optional
-— without it reports live in each visitor's browser.
-
-Its entry in the proxy's `platforms.json` therefore declares `"secrets": []`. That
-is an answer, and it is deliberately different from having no `secrets` key at all:
-the first means "needs none", the second means "nobody has said". The panel treats
-them differently, and 🔑 Fix secrets on Maddie correctly does nothing.
+Both are declared in Maddie's entry in the proxy's `platforms.json`
+(`"secrets": ["ADMIN_PASSWORD", "SESSION_SECRET"]`). Without them `/admin` says it
+is not configured and refuses — there is no default password, because a default
+in a public repository is a password everybody has. `MONGO_URI` is configuration,
+not a secret this button generates.
 
 ### The proxy does not guess these names — this repo declares them
 

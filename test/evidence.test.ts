@@ -5,12 +5,11 @@ import { readFileSync, readdirSync } from "node:fs";
 import { CITIES } from "../src/lib/cities.ts";
 import {
   describeLighting, districtOf, histogram, lightingWithin, monthKeys, niceMax, pointInPolygon, projectAlong,
-  REPORT_TYPES, reportType, routeEvidence, runsOf, subPath, summariseInterval, withinBudget,
+  REPORT_TYPES, reportType, routeEvidence, runsOf, subPath, summariseInterval, whenOf, withinBudget,
 } from "../src/lib/evidence.ts";
-import { exampleReports } from "../src/lib/example-reports.ts";
 import { pathLengthM } from "../src/lib/geo.ts";
 import type { SampleRead } from "../src/lib/overpass.ts";
-import { CRIME_CATEGORIES, type Report } from "../src/lib/reports.ts";
+import type { Report } from "../src/lib/reports.ts";
 
 /*
  * The evidence dashboard's arithmetic. `docs/Maddie-Evidence-Dashboard.md` is
@@ -25,9 +24,15 @@ function read(alongM: number, lit: SampleRead["lit"], extra: Partial<SampleRead>
 
 test("every stored category falls into exactly one of the four dashboard types", () => {
   const ids = new Set(REPORT_TYPES.map((type) => type.id));
-  for (const category of CRIME_CATEGORIES) assert.ok(ids.has(reportType(category.id)), category.id);
-  assert.equal(reportType("rape"), "assault");
+  for (const category of ["experienced", "witnessed", "environment", "other", "something-new"]) {
+    assert.ok(ids.has(reportType(category)), category);
+  }
   assert.equal(reportType("something-new"), "other");
+});
+
+test("a report with no time-of-day answer is its own bin, never folded into one", () => {
+  assert.equal(whenOf({}), "unknown");
+  assert.equal(whenOf({ when: "dark" }), "dark");
 });
 
 test("a point is inside its district's outline and nowhere else", () => {
@@ -82,7 +87,7 @@ test("an interval's lighting is described without a verdict", () => {
 });
 
 test("reports near a route are placed along it; far ones are not counted", () => {
-  const near: Report = { id: "a", category: "other", point: { lat: 52.0002, lng: 5.015 }, at: "2025-01-01T20:00:00Z", source: "example", note: "x" };
+  const near: Report = { id: "a", category: "other", point: { lat: 52.0002, lng: 5.015 }, at: "2025-01-01T20:00:00Z", source: "pointer", note: "x" };
   const far: Report = { id: "b", category: "other", point: { lat: 52.01, lng: 5.015 }, at: "2025-01-01T20:00:00Z", source: "community" };
   const evidence = routeEvidence({ path: line, seconds: 60, metres: 1 }, [read(0, "yes")], [], [near, far]);
   assert.deepEqual(evidence.reports.map((mark) => mark.item.id), ["a"]);
@@ -90,7 +95,7 @@ test("reports near a route are placed along it; far ones are not counted", () =>
   const summary = summariseInterval(evidence, 0.6, 0.9);
   assert.equal(summary.reportCount, 1);
   assert.equal(summary.narrative?.id, "a");
-  assert.match(summary.reports, /example/);
+  assert.match(summary.reports, /1 marked place · 1 with a story/);
 });
 
 test("the trade-off slider filters routes and never ranks them", () => {
@@ -111,25 +116,11 @@ test("month keys run inclusive from one day to another", () => {
   assert.deepEqual(monthKeys("2025-05-01", "2025-05-30"), ["2025-05"]);
 });
 
-test("example reports are deterministic, marked as examples, and inside their district", () => {
-  for (const city of CITIES) {
-    const one = exampleReports(city);
-    const two = exampleReports(city);
-    assert.deepEqual(one, two);
-    assert.ok(one.length > 100);
-    for (const report of one) {
-      assert.equal(report.source, "example");
-      const district = city.districts.find((d) => d.name === report.area);
-      assert.ok(district && pointInPolygon(report.point, district.outline), `${report.id} outside ${report.area}`);
-    }
-  }
-});
-
 test("nothing that computes a verdict imports the dashboard's report counting", () => {
   // Reports are context, never inputs (CLAUDE.md § "Beside, never inside").
   for (const file of ["score.ts", "segments.ts", "compare.ts", "evidence.ts"]) {
     const source = readFileSync(new URL(`../src/lib/${file}`, import.meta.url), "utf8");
-    if (file !== "evidence.ts") assert.doesNotMatch(source, /from "\.\/(evidence|example-reports|alongside)\.ts"/, file);
+    if (file !== "evidence.ts") assert.doesNotMatch(source, /from "\.\/(evidence|alongside)\.ts"/, file);
     else assert.doesNotMatch(source, /from "\.\/score\.ts"/, "the evidence boards must not reach for the score");
   }
   assert.ok(readdirSync(new URL("../src/lib/", import.meta.url)).includes("evidence.ts"));
