@@ -147,6 +147,19 @@ export const ENTRY_PROXY: string | null = null;
  */
 export const PROBE_URL = "https://overpass-api.de/api/status";
 
+/**
+ * What the DIRECT probe fetches — more than one, and any one answering is a yes.
+ *
+ * The question is "does this server's own network reach OpenStreetMap", and it
+ * gates EVERY service, tiles and routing included. Asked of overpass-api.de
+ * alone, an overloaded Overpass (a timeout on aschkan, a 502 on parsa, the same
+ * evening) read as "no internet here" on both boxes while both fetched tiles
+ * and routes directly in under half a second — and with the proxy pool empty,
+ * every tile, route and search on the site then failed in ten milliseconds.
+ * A busy upstream is the rotation's problem, never the network's.
+ */
+export const DIRECT_PROBE_URLS = [PROBE_URL, "https://tile.openstreetmap.org/0/0/0.png"];
+
 /** A real request through the chain. */
 export const REQUEST_TIMEOUT_MS = 25_000;
 /** Shorter: a probe exists to find dead entries fast. */
@@ -369,6 +382,7 @@ export class ProxyPool {
   directState: EntryState;
   states: HopState[];
   probeUrl: string;
+  directProbeUrls: string[];
   timeoutMs: number;
   probeTimeoutMs: number;
   entryTimeoutMs: number;
@@ -405,6 +419,7 @@ export class ProxyPool {
     // Every one of these is a constant at the top of this file. See the block
     // there for why none of them is settable per machine any more.
     this.probeUrl = PROBE_URL;
+    this.directProbeUrls = DIRECT_PROBE_URLS;
     this.timeoutMs = REQUEST_TIMEOUT_MS;
     this.probeTimeoutMs = PROBE_TIMEOUT_MS;
     this.entryTimeoutMs = ENTRY_TIMEOUT_MS;
@@ -541,28 +556,29 @@ export class ProxyPool {
    */
   async checkDirect(): Promise<boolean> {
     const started = Date.now();
+    const failures: string[] = [];
+    const one = async (url: string): Promise<void> => {
+      try {
+        const response = await requestThrough(url, {
+          entry: null,
+          hop: null,
+          timeoutMs: PROBE_TIMEOUT_MS,
+          headers: { "User-Agent": USER_AGENT },
+        });
+        if (response.status >= 200 && response.status < 400) return;
+        failures.push(`${new URL(url).host} answered ${response.status}`);
+      } catch (error) {
+        failures.push((error instanceof Error ? error.message : "failed").slice(0, 120));
+      }
+      throw new Error("no");
+    };
     try {
-      const response = await requestThrough(this.probeUrl, {
-        entry: null,
-        hop: null,
-        timeoutMs: this.entryTimeoutMs,
-        headers: { "User-Agent": USER_AGENT },
-      });
-      const ok = response.status >= 200 && response.status < 400;
-      this.directState = {
-        ok,
-        lastError: ok ? null : `probe answered ${response.status}`,
-        lastCheck: started,
-        latencyMs: ok ? Date.now() - started : null,
-      };
-      return ok;
-    } catch (error) {
-      this.directState = {
-        ok: false,
-        lastError: (error instanceof Error ? error.message : "failed").slice(0, 200),
-        lastCheck: started,
-        latencyMs: null,
-      };
+      // The first to answer settles it; the slow one is not waited for.
+      await Promise.any(this.directProbeUrls.map(one));
+      this.directState = { ok: true, lastError: null, lastCheck: started, latencyMs: Date.now() - started };
+      return true;
+    } catch {
+      this.directState = { ok: false, lastError: failures.join("; ").slice(0, 200), lastCheck: started, latencyMs: null };
       return false;
     }
   }
