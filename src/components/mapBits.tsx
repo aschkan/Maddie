@@ -19,7 +19,8 @@ export function Basemap({ tone, onFail, onOk }: { tone: Tone; onFail?: () => voi
   return (
     <TileLayer
       url={TILE_URL}
-      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      // Dutch tiles come from the study PC's OpenMapTiles build, whose licence asks for this credit.
+      attribution='&copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       className={tone === "night" ? "tiles-night" : "tiles-day"}
       maxZoom={19}
       eventHandlers={{ tileerror: () => onFail?.(), tileload: () => onOk?.() }}

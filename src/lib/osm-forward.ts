@@ -102,16 +102,24 @@ export function queryWithin(body: string, region: Coverage): boolean {
   return true;
 }
 
+/** aschkan's own Overpass, as parsa reaches it over the tunnel. */
+export const OVERPASS_RELAY = "http://10.8.0.2:12346";
+
 /* ── the study PC: tiles, routing and search, self-hosted ─────────────── */
 
 /**
  * Tiles, routing and search for the Netherlands, self-hosted on the study PC
- * (Docker: tileserver-gl, three OSRM profiles, Nominatim — `scripts/osm-pc/`).
+ * (WSL Ubuntu: tileserver-gl over a Planetiler build, and one OSRM per profile).
  *
  * The PC sits on aschkan's LAN, so BOTH servers reach it the same way: through
- * aschkan's WireGuard address, where `scripts/osm-pc/relay.js` forwards each
- * port to the PC. One address, the same constant on both boxes — parsa
- * crosses the tunnel, aschkan talks to its own interface.
+ * aschkan's WireGuard address, where the proxy's LAN forwarders
+ * (`data/forwards.json` on aschkan) pass each port on to the PC. One address,
+ * the same constant on both boxes — parsa crosses the tunnel, aschkan talks to
+ * its own interface.
+ *
+ * The ports are 18100–18104 because Windows lends out every port from 1024 up
+ * and Hyper-V had reserved 18105–18204 on the PC: a forward there is accepted
+ * by `netsh` and then never listens.
  *
  * Asked FIRST and only about what it holds — a tile wholly inside
  * `NETHERLANDS`, a route whose every point is inside, a search that comes back
@@ -120,11 +128,8 @@ export function queryWithin(body: string, region: Coverage): boolean {
  * for a minute (`PC_RETRY_MS`), so a switched-off PC costs one short timeout a
  * minute, not one per tile.
  */
-/** aschkan's own Overpass, as parsa reaches it over the tunnel. */
-export const OVERPASS_RELAY = "http://10.8.0.2:12346";
-
 export const PC_RELAY = "http://10.8.0.2";
-export const PC_PORTS = { tile: 18180, nominatim: 18188, foot: 18101, bike: 18102, driving: 18103 } as const;
+export const PC_PORTS = { tile: 18100, nominatim: 18104, foot: 18101, bike: 18102, driving: 18103 } as const;
 /** The tileserver-gl style the PC renders. */
 export const PC_TILE_STYLE = "maddie";
 /** Below this a tile spans much more than the country; the public tiles draw it. */
