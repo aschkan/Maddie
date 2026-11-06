@@ -1,6 +1,6 @@
 # Maddie — Evidence Dashboard
 
-**Version 2.0 · 13 October 2026 · supersedes `Maddie-Design-System.md` for everything a person sees**
+**Version 3.0 · 7 November 2026 · § 7 supersedes §§ 2–4 where they disagree** (purple reports, three boards, the radar, the donut and the line chart are gone — see § 7)
 
 Maddie is a **visualization system, not a smart app**. It does not tell anybody where it is safe. It shows what is known — and what is not — about the places a person moves through, each piece of knowledge in the chart type that piece asks for, and lets the reader decide.
 
@@ -89,3 +89,57 @@ The team expects to refine which chart goes with which data. Each chart type is 
 
 - Should the radar stay, given that a polygon's area invites a "bigger is better" reading the data does not support? It is kept because the team asked for it, and its card says why not to read it that way.
 - Should the lighting figures per district be computed live (slow, rate-limited) or recorded per round of interviews, like the scenario?
+
+---
+
+## 7. Version 3 — after the supervisor meetings of 28 October and 4 November 2026
+
+Both supervisors and the interview participants said the same thing: *too many graphs, and some repeat in every layout.*
+
+### 7.1 Two audiences, two doors
+
+| Who | View | Route | What it holds |
+|---|---|---|---|
+| A woman going from A to B | **Plan a route** — the landing page | `/` | three routes, factor by factor; *where do the differences occur*; the stretch you brush, with every story in it |
+| The same woman, not going anywhere | **Around me** | `/explore` | the map; why places were reported (one stacked bar); when reports were made (small bars); what people do about it; a tapped neighbourhood's numbers inline |
+| Researchers, police, municipality | **Data dashboard** | `/dashboard` | neighbourhoods per km of road; lighting by neighbourhood; age × reason; reports per month; distance to the route; provenance |
+
+`/compare` redirects to `/`; `/area` redirects to `/dashboard`. No tutorial: if the first screen does not say what the tool is for, that is the design to fix.
+
+### 7.2 Removed, and where the information went
+
+| Removed | Why | Now |
+|---|---|---|
+| Pie "share by reason" | its percentages fit on the bars | "141 (36%)" on each bar |
+| Radar | duplicates the dot plots; unreadable past three routes | dot plots |
+| Factor table / list | the numbers are already on the dots | number on each dot |
+| Area detail board | repeats Explore, area-focused | inline neighbourhood facts + dashboard |
+| Age × reason matrix (main view) | a stacked bar with a toggle says it | split "by age group"; matrix on dashboard |
+| Monthly line chart | sparse data — a line invents a trend | `MonthBars` |
+| Lighting by neighbourhood, per-km bars, distance histogram (main view) | static, or for analysts | dashboard |
+
+### 7.3 The map
+
+- **Reports are dark grey, shaded by how serious they read** (`palette.ts` `REPORT_RAMP` / `REPORT_OPACITY` / `REPORT_RADIUS`; `importance.ts`). Darkest, most opaque, slightly larger = what the reader counts as most serious; the lightest is little more than an outline. The default order is shown on screen and can be dragged: *story mentions harassment or catcalling → happened to me → happened to others → feels threatening → other*. A record with several reasons takes its most serious one. The harassment flag is a basic Dutch/English keyword check of the story — a hint about how to shade a dot, labelled as such, never a classifier and never counted.
+- **Lighting sits under everything** in its own Leaflet pane.
+- **The popup** says why, when, what the respondent does about it, and the story (with a Translate link) — plus one line crediting the source.
+
+### 7.4 Crowd
+
+Participants all named crowdedness beside lighting, and that *not every crowd is a good crowd*. OpenStreetMap records no footfall, so two stand-ins are shown separately and never merged: **busy streets & squares** (`highway=pedestrian`, teal `+`) and **bars, pubs & cafés** (brown square). Both are counted per route (within 60 m) on Plan a route, drawn as a timeline track, and switchable on both maps.
+
+### 7.5 Colours added
+
+| Meaning | Day | Night |
+|---|---|---|
+| report, five ranks | `#252131` → `#c9c7d2` | `#f4f2f8` → `#5e596b` |
+| park segment | `#41ab5d` green | `#74c476` |
+| busy streets | `#11898a` teal | `#2cc8c8` |
+| bars, pubs, cafés | `#a6611a` brown | `#d08c3c` |
+| age bands (chart only) | ColorBrewer BuPu, 9 classes | |
+
+### 7.6 Still open
+
+- Data permissions for the Pointer set (public display of single places, stories, aggregates, retention) — to be confirmed with the university's data contact.
+- The CBS police-figures feed does not reach the map yet.
+- A real crowd/footfall source, and whether a crowd's *kind* can be read from the stories.

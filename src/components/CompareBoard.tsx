@@ -1,8 +1,17 @@
 "use client";
 
 /**
- * Board 02 — "Compare route evidence". `docs/reference/board-02-compare.webp`
- * is the picture it is built to; `docs/Maddie-Evidence-Dashboard.md` the spec.
+ * "Plan a route" — the LANDING page (`/`). From the supervisor meeting of
+ * 4 Nov 2026: "You should start the tool with the easy thing … when I saw the
+ * three routes, this was a sign. This works well." No tutorial: the three
+ * routes are meant to say what the tool is for on their own.
+ *
+ * Kept as it was, per both supervisors: the route comparison and "where do
+ * the differences occur". Removed: the radar and the factor table — the same
+ * numbers twice more ("the table is nice … but I don't need the list because
+ * you already have the numbers in the plot"). Added: a CROWD factor (busy
+ * streets, and bars as their own kind of crowd), parks in green, report dots
+ * shaded by how serious they read, and every story in a stretch, readable.
  *
  * Three routes, five factors, NO SCORE. One dot plot per factor, one row per
  * route, so the eye crosses a row to see one route and runs down a column to
@@ -25,16 +34,18 @@ import { Bike, CalendarDays, Car, ChevronDown, Clock, Database, Footprints, Exte
 
 import { SOURCE_LABEL } from "@/lib/reports";
 import BoardHeader, { Sources } from "@/components/BoardHeader";
-import { DotColumn, Key, Radar, Swatch } from "@/components/charts";
+import { DotColumn, Key, Swatch } from "@/components/charts";
 import { useEvidence } from "@/components/EvidenceProvider";
+import ImportancePanel, { RankDot } from "@/components/ImportancePanel";
 import PlaceField from "@/components/PlaceField";
+import { translateLink } from "@/components/ReportCard";
 import Timeline from "@/components/Timeline";
 import { PLACE_KINDS, useLiveLayers, useRecording } from "@/components/useMapData";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import type { City, TripEnd } from "@/lib/cities";
 import { lightAt } from "@/lib/daylight";
 import {
-  niceMax, routeEvidence, routeLetter, subPath, summariseInterval, withinBudget, type RouteEvidence,
+  CROWD_KINDS, niceMax, routeEvidence, routeLetter, subPath, summariseInterval, withinBudget, type RouteEvidence,
 } from "@/lib/evidence";
 import { boundsAround, distanceM } from "@/lib/geo";
 import { googleMapsLink } from "@/lib/handoff";
@@ -42,6 +53,7 @@ import { EMPTY_LAYERS } from "@/lib/layers";
 import { fetchRoutes, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import type { SampleRead } from "@/lib/overpass";
 import { pick, ROUTE_DASH, ROUTE_INK } from "@/lib/palette";
+import { rankOf } from "@/lib/importance";
 import { recordedLeg, SCENARIO_DESTINATIONS, SCENARIO_PROFILES, SCENARIO_START } from "@/lib/scenario";
 
 const CompareMap = dynamic(() => import("@/components/CompareMap"), {
@@ -84,6 +96,8 @@ function CompareFor({ city }: { city: City }) {
   const [extra, setExtra] = useState(10);
   const [tilesOk, setTilesOk] = useState(true);
   const [placing, setPlacing] = useState<"A" | "B">("A");
+  const [showCrowd, setShowCrowd] = useState(false);
+  const [shadeOpen, setShadeOpen] = useState(false);
 
   /** A tap or a drag on the map: that end moves, and the next tap sets the other. */
   function place(letter: "A" | "B", point: LatLng) {
@@ -148,15 +162,16 @@ function CompareFor({ city }: { city: City }) {
   const reads: (SampleRead[] | null)[] = scenarioLeg ? recorded.map((route) => route.reads) : live.reads;
 
   const routeBox = useMemo(() => boundsAround(routes.flatMap((route) => route.path), 150), [routes]);
-  const liveLayers = useLiveLayers(scenarioLeg ? null : routeBox, PLACE_KINDS, true);
+  const liveLayers = useLiveLayers(scenarioLeg ? null : routeBox, [...PLACE_KINDS, ...CROWD_KINDS], true);
   const layers = scenarioLeg ? recording?.layers ?? EMPTY_LAYERS : liveLayers.layers;
   const spots = useMemo(() => layers.spots.filter((spot) => PLACE_KINDS.includes(spot.kind)), [layers.spots]);
+  const crowdSpots = useMemo(() => layers.spots.filter((spot) => CROWD_KINDS.includes(spot.kind)), [layers.spots]);
   const reports = useMemo(() => (source === "osm" ? [] : ev.reports), [source, ev.reports]);
 
   /* ── each route, decomposed ─────────────────────────────────────────── */
   const evidence = useMemo<(RouteEvidence | null)[]>(
-    () => routes.map((route, i) => (reads[i] ? routeEvidence(route, reads[i], spots, reports) : null)),
-    [routes, reads, spots, reports],
+    () => routes.map((route, i) => (reads[i] ? routeEvidence(route, reads[i], spots, reports, crowdSpots) : null)),
+    [routes, reads, spots, reports, crowdSpots],
   );
   const minutes = routes.map((route) => route.seconds / 60);
   const kept = withinBudget(minutes, extra);
@@ -186,6 +201,10 @@ function CompareFor({ city }: { city: City }) {
     const ids = new Set(evidence.flatMap((e) => e?.reports.map((mark) => mark.item.id) ?? []));
     return reports.filter((report) => ids.has(report.id));
   }, [evidence, reports]);
+  const nearCrowd = useMemo(() => {
+    const ids = new Set(evidence.flatMap((e) => [...(e?.busy ?? []), ...(e?.nightlife ?? [])].map((mark) => mark.item.id)));
+    return crowdSpots.filter((spot) => ids.has(spot.id));
+  }, [evidence, crowdSpots]);
   const nearPlaces = useMemo(() => {
     const ids = new Set(evidence.flatMap((e) => e?.places.map((mark) => mark.item.id) ?? []));
     return spots.filter((spot) => ids.has(spot.id));
@@ -195,8 +214,11 @@ function CompareFor({ city }: { city: City }) {
     { title: "Time (min)", values: evidence.map((e, i) => (routes[i] ? minutes[i]! : e?.minutes ?? null)), max: niceMax(Math.max(10, ...minutes) * 1.08) },
     { title: "Mapped lit (%)", values: evidence.map((e) => e?.litPct ?? null), max: 100 },
     { title: "Unknown lighting (%)", values: evidence.map((e) => e?.unknownPct ?? null), max: 100 },
-    { title: "Nearby places (count)", values: evidence.map((e) => e?.places.length ?? null), max: niceMax(Math.max(5, ...evidence.map((e) => e?.places.length ?? 0))) },
-    { title: "Parkland (m)", values: evidence.map((e) => e?.parklandM ?? null), max: niceMax(Math.max(100, ...evidence.map((e) => e?.parklandM ?? 0))) },
+    { title: "Places to go in (count)", values: evidence.map((e) => e?.places.length ?? null), max: niceMax(Math.max(5, ...evidence.map((e) => e?.places.length ?? 0))) },
+    { title: "Busy streets (count)", values: evidence.map((e) => e?.busy.length ?? null), max: niceMax(Math.max(5, ...evidence.map((e) => e?.busy.length ?? 0))) },
+    { title: "Bars & cafés (count)", values: evidence.map((e) => e?.nightlife.length ?? null), max: niceMax(Math.max(5, ...evidence.map((e) => e?.nightlife.length ?? 0))) },
+    { title: "Through parks (m)", values: evidence.map((e) => e?.parklandM ?? null), max: niceMax(Math.max(100, ...evidence.map((e) => e?.parklandM ?? 0))) },
+    { title: "Reported places nearby", values: evidence.map((e) => e?.reports.length ?? null), max: niceMax(Math.max(3, ...evidence.map((e) => e?.reports.length ?? 0))) },
   ];
   const rowH = 52;
 
@@ -212,8 +234,8 @@ function CompareFor({ city }: { city: City }) {
   return (
     <main className="board compare">
       <BoardHeader
-        title="Compare route evidence"
-        note={<>Compare individual factors; there is no <b>overall safety score</b>.</>}
+        title="Plan a route"
+        note={<>Three ways from A to B, side by side: how lit, how busy, what is nearby, what people reported. There is no <b>overall score</b> — you decide.</>}
       />
 
       {/* ── the trip ────────────────────────────────────────────────── */}
@@ -278,6 +300,8 @@ function CompareFor({ city }: { city: City }) {
               litWays={layers.litWays}
               places={nearPlaces}
               reports={nearReports}
+              crowd={showCrowd ? nearCrowd : []}
+              order={ev.order}
               onTiles={setTilesOk}
               placing={placing}
               onPlace={place}
@@ -292,9 +316,13 @@ function CompareFor({ city }: { city: City }) {
             </div>
             <span className="north" aria-hidden>N<br />▲</span>
             <div className="map-key boxed">
-              <span><span className="heart">♥</span> Nearby places</span>
+              <span><span className="heart">♥</span> Places to go in</span>
               <span><i className="sw sw-line" style={{ background: "var(--lit)" }} /> Mapped lighting</span>
-              <span><Swatch colour="var(--report)" round /> Community reports</span>
+              <span><span className="rank-ramp">{[0, 2, 4].map((r) => <RankDot key={r} rank={r} />)}</span> Reported places — tap one to read it</span>
+              <label className="key-toggle">
+                <input type="checkbox" checked={showCrowd} onChange={() => setShowCrowd(!showCrowd)} />
+                <span><span className="crowd-mark">+</span> busy streets · <span className="bar-mark" /> bars</span>
+              </label>
             </div>
             {!tilesOk && <p className="map-banner">The basemap did not load — the routes are still drawn.</p>}
             {routing && <p className="map-banner">Asking for routes…</p>}
@@ -310,11 +338,12 @@ function CompareFor({ city }: { city: City }) {
 
         {/* ── dot plots ───────────────────────────────────────────────── */}
         <section className="card factors">
-          <div className="card-head"><h2>Route comparison (individual factors)</h2></div>
+          <div className="card-head"><h2>The routes, factor by factor</h2></div>
+          <p className="card-sub">One row per route, one column per factor. Tap a route to follow it on the map and below.</p>
           {routes.length === 0 ? (
             <p className="empty">{routing ? "Asking for routes…" : "No routes yet — pick a start and a destination above."}</p>
           ) : (
-            <div className="dot-grid" style={{ ["--rows" as string]: routes.length }}>
+            <div className="dot-grid" style={{ ["--rows" as string]: routes.length, ["--cols" as string]: factors.length }}>
               <div className="dot-names" style={{ paddingTop: 34 + 22 }}>
                 {routes.map((_, i) => (
                   <button
@@ -355,20 +384,28 @@ function CompareFor({ city }: { city: City }) {
         <section className="card timeline-card">
           <div className="card-head">
             <h2>Where do differences occur?</h2>
-            <span className="card-hint">Brush a route interval to highlight its map segments.</span>
+            <span className="card-hint">Drag along a route to look at one stretch of it.</span>
           </div>
+          <p className="card-sub">Each route from start (0) to destination (100%): where it is dark, where there are places to go in, where people reported something, where it is busy, and where it runs through a park or under a bridge.</p>
           {routes.length > 0 && (
-            <Timeline evidence={evidence} inks={inks} hidden={hidden} selected={chosen} onSelect={setSelected} brush={brush} onBrush={setBrush} />
+            <Timeline evidence={evidence} inks={inks} hidden={hidden} selected={chosen} onSelect={setSelected} brush={brush} onBrush={setBrush} rankOf={(report) => rankOf(report, ev.order)} />
           )}
           <Key items={[
             { swatch: <Swatch colour="var(--lit)" />, label: "Mapped lit (street lighting present)" },
             { swatch: <Swatch colour="var(--unlit)" />, label: "Mapped unlit" },
             { swatch: <Swatch colour="" hatch />, label: "Unknown lighting" },
-            { swatch: <span className="heart">♥</span>, label: "Nearby place (e.g. station, shop, pharmacy)" },
-            { swatch: <Swatch colour="var(--report)" round />, label: "Community report" },
-            { swatch: <Swatch colour="var(--park)" />, label: "Park segment" },
-            { swatch: <span className="arch" aria-hidden>∩</span>, label: "Underpass" },
+            { swatch: <span className="heart">♥</span>, label: "Place to go in (station, shop, pharmacy…)" },
+            { swatch: <span className="rank-ramp">{[0, 2, 4].map((r) => <RankDot key={r} rank={r} />)}</span>, label: "Reported place (darker = more serious)" },
+            { swatch: <span className="crowd-mark">+</span>, label: "Busy street or square" },
+            { swatch: <span className="bar-mark" />, label: "Bar, pub or café" },
+            { swatch: <Swatch colour="var(--park)" />, label: "Through a park" },
+            { swatch: <span className="arch" aria-hidden>∩</span>, label: "Underpass (under a bridge or road)" },
           ]} />
+          <button type="button" className="section-toggle" onClick={() => setShadeOpen(!shadeOpen)} aria-expanded={shadeOpen}>
+            <span>How the report dots are shaded</span>
+            <ChevronDown size={16} aria-hidden className={shadeOpen ? "flip" : undefined} />
+          </button>
+          {shadeOpen && <ImportancePanel compact />}
         </section>
 
         {/* ── the brushed interval, and the trade-off ─────────────────── */}
@@ -385,14 +422,20 @@ function CompareFor({ city }: { city: City }) {
                     <dt>Lighting:</dt><dd>{summary.lighting}</dd>
                     <dt>Place opening hours:</dt><dd>{summary.openingHours}</dd>
                     <dt>Mapped features:</dt><dd>OpenStreetMap</dd>
+                    <dt>Crowd:</dt><dd>{summary.crowd}</dd>
                     <dt>Reports:</dt><dd>{summary.reports}</dd>
                   </dl>
-                  <h3>Qualitative experience</h3>
-                  {summary.narrative ? (
-                    <>
-                      <p className="narrative-label">{SOURCE_LABEL[summary.narrative.source]}{summary.narrative.place ? `, ${summary.narrative.place}` : ""}:</p>
-                      <q className="narrative">{summary.narrative.note}</q>
-                    </>
+                  <h3>What people said here</h3>
+                  {summary.stories.length > 0 ? (
+                    <ul className="stories">
+                      {summary.stories.map((story) => (
+                        <li key={story.id}>
+                          <p className="narrative-label">{SOURCE_LABEL[story.source]}{story.place ? `, ${story.place}` : ""}:</p>
+                          <q className="narrative">{story.note}</q>
+                          <a className="translate" href={translateLink(story.note ?? "")} target="_blank" rel="noreferrer">Translate ↗</a>
+                        </li>
+                      ))}
+                    </ul>
                   ) : (
                     <p className="note">No respondent shared a story about this stretch.</p>
                   )}
@@ -413,65 +456,7 @@ function CompareFor({ city }: { city: City }) {
         </div>
       </div>
 
-      {/* ── more views: what the team asked for after the mockups ────── */}
-      {routes.length > 0 && <>
-      <h2 className="section-title">The same factors, another shape</h2>
-      <div className="more-grid">
-        <section className="card span-2">
-          <div className="card-head"><h2>Every route on every factor</h2></div>
-          <p className="card-sub">
-            A radar of the five factors above, plus reports nearby. Each axis has its OWN scale, from zero to the
-            largest value among these routes — so the shape is a profile, not a score. A bigger polygon is not a
-            better route; read each spoke on its own.
-          </p>
-          {routes.length > 0 && (
-            <Radar
-              axes={[
-                ...factors.map((factor) => ({ label: factor.title, max: factor.max })),
-                { label: "Reports nearby", max: niceMax(Math.max(3, ...evidence.map((e) => e?.reports.length ?? 0))) },
-              ]}
-              series={routes.map((_, i) => ({
-                label: `Route ${routeLetter(i)}`,
-                values: [...factors.map((factor) => factor.values[i] ?? null), evidence[i]?.reports.length ?? null],
-                colour: inks[i]!,
-                dash: ROUTE_DASH[i],
-                muted: hidden[i],
-              }))}
-              selected={chosen}
-              onPick={setSelected}
-            />
-          )}
-        </section>
-        <section className="card">
-          <div className="card-head"><h2>The factors, as numbers</h2></div>
-          <table className="factor-table">
-            <thead>
-              <tr><th />{routes.map((_, i) => <th key={i} className={i === chosen ? "on" : undefined}>{routeLetter(i)}</th>)}</tr>
-            </thead>
-            <tbody>
-              {[...factors.map((factor) => ({ title: factor.title, values: factor.values })),
-                { title: "Mapped unlit (%)", values: evidence.map((e) => e?.unlitPct ?? null) },
-                { title: "Underpasses", values: evidence.map((e) => e?.underpasses.length ?? null) },
-                { title: "Reports nearby", values: evidence.map((e) => e?.reports.length ?? null) },
-                { title: "Length (km)", values: evidence.map((e) => (e ? e.lengthM / 1000 : null)) },
-              ].map((row) => (
-                <tr key={row.title}>
-                  <th>{row.title}</th>
-                  {row.values.map((value, i) => (
-                    <td key={i} className={i === chosen ? "on" : undefined}>
-                      {value === null ? "…" : row.title.startsWith("Length") ? value.toFixed(1) : Math.round(value)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="note">No column adds these up. Reports are counted within 75 m and places within 100 m of the line.</p>
-        </section>
-      </div>
-      </>}
-
-      <p className="caveat">Route progress aligns relative position; distances differ. Marked places are context, not inputs to a route score.</p>
+      <p className="caveat">Route progress aligns relative position; distances differ. Reported places are context; nothing here adds the factors up.</p>
       <Sources />
     </main>
   );

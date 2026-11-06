@@ -2,7 +2,10 @@
 
 /**
  * "Where do differences occur?" — every route on one 0–100% progress axis,
- * four tracks each: lighting, nearby places, reports, park / underpass.
+ * five tracks each: lighting, places to go in, reports, crowd, parks and
+ * underpasses. Kept as it was — "the one that helps me the most … everyone
+ * loved it" — with parks now GREEN, report dots shaded by how serious they
+ * read, and a crowd track (busy streets as +, bars as small squares).
  *
  * Progress, not metres, so the three line up; the board's footnote says the
  * distances differ. Drag across the SELECTED route's tracks to brush an
@@ -13,10 +16,11 @@
 import { useRef } from "react";
 
 import { useSvgId, useWidth, Hatch } from "@/components/charts";
-import { SOURCE_LABEL } from "@/lib/reports";
+import { SOURCE_LABEL, type Report } from "@/lib/reports";
+import { REPORT_OPACITY, REPORT_RADIUS } from "@/lib/palette";
 import { routeLetter, type RouteEvidence } from "@/lib/evidence";
 
-const TRACKS = ["Lighting", "Nearby places", "Reports", "Park / underpass"] as const;
+const TRACKS = ["Lighting", "Places to go in", "Reports", "Crowd", "Parks · underpasses"] as const;
 
 interface Props {
   evidence: (RouteEvidence | null)[];
@@ -26,16 +30,18 @@ interface Props {
   onSelect: (index: number) => void;
   brush: [number, number] | null;
   onBrush: (range: [number, number] | null) => void;
+  /** How serious a report reads, 0 = most — its shade. */
+  rankOf?: (report: Report) => number;
 }
 
 const HEART = "M12 21s-6.7-4.35-9.33-8.1C.6 9.95 2.02 5.5 6.04 5.5c2.3 0 3.6 1.4 4.46 2.66.86-1.26 2.16-2.66 4.46-2.66 4.02 0 5.44 4.45 3.37 7.4C18.7 16.65 12 21 12 21z";
 
-export default function Timeline({ evidence, inks, hidden, selected, onSelect, brush, onBrush }: Props) {
+export default function Timeline({ evidence, inks, hidden, selected, onSelect, brush, onBrush, rankOf }: Props) {
   const [ref, width] = useWidth<HTMLDivElement>(700);
   const hatch = useSvgId("tl-hatch");
   const narrow = width < 560;
   const nameW = narrow ? 64 : 110;
-  const trackW = narrow ? 86 : 112;
+  const trackW = narrow ? 92 : 128;
   const right = 14;
   const top = 30;
   const trackH = narrow ? 20 : 21;
@@ -117,7 +123,7 @@ export default function Timeline({ evidence, inks, hidden, selected, onSelect, b
               )}
               <line x1={nameW - 6} x2={nameW - 6} y1={y0 + gap} y2={y0 + blockH - gap} style={{ stroke: ink }} strokeWidth={2} />
               {TRACKS.map((track, t) => (
-                <text key={track} x={nameW + 2} y={yTrack(t) + trackH / 2 + 4} className="track-label">{track}</text>
+                <text key={track} x={nameW + 2} y={yTrack(t) + trackH / 2 + 4} className="track-label">{narrow && t === 4 ? "Parks · ∩" : track}</text>
               ))}
 
               {!ev ? (
@@ -147,20 +153,48 @@ export default function Timeline({ evidence, inks, hidden, selected, onSelect, b
                   ))}
                   {/* reports */}
                   <line x1={x(0)} x2={x(1)} y1={yTrack(2) + trackH / 2} y2={yTrack(2) + trackH / 2} className="track" />
-                  {ev.reports.map((mark, m) => (
-                    <circle key={m} cx={x(mark.at)} cy={yTrack(2) + trackH / 2} r={4} style={{ fill: "var(--report)" }}>
-                      <title>{SOURCE_LABEL[mark.item.source]}{mark.item.place ? ` · ${mark.item.place}` : ""}</title>
-                    </circle>
-                  ))}
-                  {/* park and underpass */}
+                  {[...ev.reports]
+                    .map((mark) => ({ mark, rank: rankOf ? rankOf(mark.item) : 0 }))
+                    .sort((a, b) => b.rank - a.rank)
+                    .map(({ mark, rank }, m) => {
+                      const r = Math.min(rank, REPORT_RADIUS.length - 1);
+                      return (
+                        <circle
+                          key={m}
+                          cx={x(mark.at)}
+                          cy={yTrack(2) + trackH / 2}
+                          r={Math.min(5.5, REPORT_RADIUS[r]! * 0.85)}
+                          style={{ fill: `var(--rank-${r})`, stroke: r === REPORT_RADIUS.length - 1 ? "var(--rank-2)" : "var(--card)" }}
+                          fillOpacity={REPORT_OPACITY[r]}
+                          strokeWidth={0.8}
+                        >
+                          <title>{SOURCE_LABEL[mark.item.source]}{mark.item.place ? ` · ${mark.item.place}` : ""}{mark.item.note ? ` — "${mark.item.note.slice(0, 120)}${mark.item.note.length > 120 ? "…" : ""}"` : ""}</title>
+                        </circle>
+                      );
+                    })}
+                  {/* crowd: busy streets (+) and bars (square) */}
                   <line x1={x(0)} x2={x(1)} y1={yTrack(3) + trackH / 2} y2={yTrack(3) + trackH / 2} className="track" />
+                  {ev.busy.map((mark, m) => (
+                    <path key={`b${m}`} d={`M ${x(mark.at)} ${yTrack(3) + 5} v ${trackH - 10} M ${x(mark.at) - 4} ${yTrack(3) + trackH / 2} h 8`} style={{ stroke: "var(--crowd)" }} strokeWidth={2} strokeLinecap="round">
+                      <title>{mark.item.name ?? mark.item.label}</title>
+                    </path>
+                  ))}
+                  {ev.nightlife.map((mark, m) => (
+                    <rect key={`n${m}`} x={x(mark.at) - 3} y={yTrack(3) + trackH / 2 - 3} width={6} height={6} style={{ fill: "var(--nightlife)" }} fillOpacity={0.85}>
+                      <title>{mark.item.name ? `${mark.item.name} · ${mark.item.label}` : mark.item.label}</title>
+                    </rect>
+                  ))}
+                  {/* parks (green) and underpasses (∩) */}
+                  <line x1={x(0)} x2={x(1)} y1={yTrack(4) + trackH / 2} y2={yTrack(4) + trackH / 2} className="track" />
                   {ev.parks.map((run, r) => (
-                    <rect key={r} x={x(run.from)} y={yTrack(3) + 6} width={Math.max(2, x(run.to) - x(run.from))} height={trackH - 12} style={{ fill: "var(--park)" }} />
+                    <rect key={r} x={x(run.from)} y={yTrack(4) + 5} width={Math.max(2, x(run.to) - x(run.from))} height={trackH - 10} rx={2} style={{ fill: "var(--park)" }}>
+                      <title>Through a park</title>
+                    </rect>
                   ))}
                   {ev.underpasses.map((mark, m) => (
                     <path
                       key={m}
-                      d={`M ${x(mark.at) - 6} ${yTrack(3) + trackH - 4} v -5 a 6 6 0 0 1 12 0 v 5`}
+                      d={`M ${x(mark.at) - 6} ${yTrack(4) + trackH - 4} v -5 a 6 6 0 0 1 12 0 v 5`}
                       fill="none"
                       style={{ stroke: "var(--ink)" }}
                       strokeWidth={2}

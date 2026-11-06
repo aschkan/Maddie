@@ -17,11 +17,16 @@ import { Moon, Sun } from "lucide-react";
 import { useEvidence } from "@/components/EvidenceProvider";
 import { POINTER_CREDIT } from "@/lib/pointer";
 
+/**
+ * Two audiences, kept apart (supervisor meeting, 4 Nov 2026): the woman
+ * deciding where to go gets the first two; the analysts' dashboard sits
+ * behind its own door, labelled by who it is for.
+ */
 const BOARDS = [
-  { href: "/", label: "Explore" },
-  { href: "/compare", label: "Compare routes" },
-  { href: "/area", label: "Area detail" },
+  { href: "/", label: "Plan a route" },
+  { href: "/explore", label: "Around me" },
 ];
+const ANALYST = { href: "/dashboard", label: "Data dashboard", who: "for researchers & city" };
 
 const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
@@ -32,7 +37,7 @@ export default function BoardHeader({ title, note }: { title: string; note: Reac
     <header className="board-head">
       <div className="board-title">
         <h1>Maddie — {title}</h1>
-        <p className="board-sub">Pointer survey · community reports · OpenStreetMap</p>
+        <p className="board-sub">See what is known about the streets between A and B — and decide for yourself.</p>
       </div>
       <p className="board-note">{note}</p>
       <nav className="board-nav" aria-label="Boards">
@@ -46,6 +51,13 @@ export default function BoardHeader({ title, note }: { title: string; note: Reac
             {board.label}
           </Link>
         ))}
+        <Link
+          href={ANALYST.href}
+          className={`analyst${path === ANALYST.href ? " on" : ""}`}
+          aria-current={path === ANALYST.href ? "page" : undefined}
+        >
+          {ANALYST.label} <small>{ANALYST.who}</small>
+        </Link>
         <button type="button" className="theme" onClick={toggleTheme} aria-label="Switch light or dark">
           {tone === "night" ? <Sun size={16} /> : <Moon size={16} />}
         </button>

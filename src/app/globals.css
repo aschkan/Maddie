@@ -15,25 +15,35 @@
 @import "tailwindcss/preflight.css" layer(base);
 
 :root {
-  --report: #6d3fd0;
+  --report: #2f2a3d;
   --place: #ec4899;
   --lit: #f5c400;
   --unlit: #3f3f46;
   --unknown: #b8bec8;
   --selection: #2f6fe0;
   --context: #d5d8de;
-  --park: #c3c8cf;
+  --park: #41ab5d;
+  --crowd: #11898a;
+  --nightlife: #a6611a;
   --police: #475569;
   --trip: #111827;
   --route-a: #13254d;
   --route-b: #3d8fe0;
   --route-c: #71757d;
 
-  /* Four report types — one meaning (a report), four lightnesses of it. */
-  --type-1: #4c1d95;
-  --type-2: #6d3fd0;
-  --type-3: #a78bfa;
-  --type-4: #d6ccfa;
+  /* A report's five shades, most serious first (palette.ts REPORT_RAMP). */
+  --rank-0: #252131;
+  --rank-1: #46405a;
+  --rank-2: #6b6680;
+  --rank-3: #9a96a8;
+  --rank-4: #c9c7d2;
+
+  /* Respondent age bands — ColorBrewer BuPu, 9 classes (ordinal). */
+  --age-0: #e0ecf4; --age-1: #bfd3e6; --age-2: #9ebcda; --age-3: #8c96c6; --age-4: #8c6bb1;
+  --age-5: #88419d; --age-6: #810f7c; --age-7: #4d004b; --age-8: #2a0029;
+
+  /* When a place feels this way — after dark / any time / by day. */
+  --when-dark: #3b2f63; --when-any: #8c96c6; --when-day: #cfdcec;
 
   --on-lit: #1f2937;
   --on-unlit: #ffffff;
@@ -58,24 +68,30 @@
 }
 
 [data-theme="dark"] {
-  --report: #a78bfa;
+  --report: #e2dfea;
   --place: #f472b6;
   --lit: #fbbf24;
   --unlit: #a1a1aa;
   --unknown: #64748b;
   --selection: #60a5fa;
   --context: #475569;
-  --park: #3f4c5f;
+  --park: #74c476;
+  --crowd: #2cc8c8;
+  --nightlife: #d08c3c;
   --police: #cbd5e1;
   --trip: #f8fafc;
   --route-a: #e2e8f0;
   --route-b: #38bdf8;
   --route-c: #94a3b8;
 
-  --type-1: #ede9fe;
-  --type-2: #c4b5fd;
-  --type-3: #a78bfa;
-  --type-4: #7c3aed;
+  --rank-0: #f4f2f8;
+  --rank-1: #d4d0de;
+  --rank-2: #a9a4b8;
+  --rank-3: #827d90;
+  --rank-4: #5e596b;
+  --age-0: #2a2140; --age-1: #3a2f63; --age-2: #4f4588; --age-3: #6a62a8; --age-4: #8c6bb1;
+  --age-5: #a983c9; --age-6: #c5a3dc; --age-7: #dcc6ea; --age-8: #f0e6f6;
+  --when-dark: #c5b8f0; --when-any: #7f88b8; --when-day: #3b4a63;
 
   --on-lit: #1f2937;
   --on-unlit: #0f172a;
@@ -162,6 +178,10 @@ h1, h2, h3 { margin: 0; }
   font-size: 13px; font-weight: 500;
 }
 .board-nav a.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
+/* The analysts' door: same bar, set apart and labelled by audience. */
+.board-nav a.analyst { margin-left: 10px; border-style: dashed; color: var(--ink-2); }
+.board-nav a.analyst small { margin-left: 5px; font-size: 11px; color: var(--ink-3); }
+.board-nav a.analyst.on small { color: inherit; opacity: .8; }
 .board-nav a:hover { text-decoration: none; border-color: var(--ink-3); }
 .board-nav .theme { width: var(--tap); padding: 0; }
 
@@ -202,7 +222,20 @@ h1, h2, h3 { margin: 0; }
 
 /* ── charts ────────────────────────────────────────────────────────────── */
 
-.chart { width: 100%; min-width: 0; }
+.chart { width: 100%; min-width: 0; position: relative; }
+.chart .pct { font-weight: 500; fill: var(--ink-3); }
+.chart .value { fill: var(--ink); }
+
+/* The detailed numbers live in a tooltip over the bar, not in another chart. */
+.chart-tip {
+  position: absolute; z-index: 20; pointer-events: none; max-width: 220px;
+  display: flex; flex-direction: column; gap: 2px; padding: 7px 9px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .14); font-size: 12.5px; line-height: 1.35;
+}
+.chart-tip b { font-size: 13px; }
+.chart-tip .muted { color: var(--ink-3); }
+.tip-row { display: inline-flex; align-items: center; gap: 5px; }
 .chart svg { display: block; overflow: visible; font-family: var(--sans); }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .grid.faint { stroke: var(--line); opacity: .7; }
@@ -232,7 +265,7 @@ svg .track { stroke: var(--line-2); stroke-width: 1; }
 svg .hatched { stroke: var(--unknown); stroke-width: .5; }
 
 /* Dot plot columns — one per factor. */
-.dot-grid { display: grid; grid-template-columns: 26px repeat(5, minmax(128px, 1fr)); overflow-x: auto; }
+.dot-grid { display: grid; grid-template-columns: 26px repeat(var(--cols, 5), minmax(86px, 1fr)); overflow-x: auto; }
 .dot-names { display: flex; flex-direction: column; }
 .dot-names button {
   background: none; border: 0; padding: 0; text-align: left;
@@ -598,6 +631,63 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
 .iv-cues li { padding: .15rem 0; display: flex; gap: .45rem; }
 .iv-n { flex: none; min-width: 1.4rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; }
 
+/* ── Nov 2026: report shading, crowd, stacked bars, tooltips ───────────── */
+
+.rank-dot { display: inline-block; vertical-align: middle; flex: none; }
+.rank-ramp { display: inline-flex; align-items: center; gap: 1px; }
+.crowd-mark { color: var(--crowd); font-weight: 800; font-size: 15px; line-height: 1; }
+.bar-mark { display: inline-block; width: 8px !important; height: 8px; max-width: 8px; justify-self: end; background: var(--nightlife); opacity: .85; flex: none; }
+.crowd-icon { background: none; border: 0; }
+.key-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.key-toggle input { width: 15px; height: 15px; }
+
+.section-toggle {
+  display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px;
+  background: none; border: 0; padding: 0; min-height: var(--tap); color: var(--ink); font-size: 13.5px; font-weight: 600; text-align: left;
+}
+.section-toggle h2 { margin: 0; }
+.section-toggle .flip { transform: rotate(180deg); }
+
+.segmented { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; margin: 2px 0 8px; }
+.segmented button {
+  min-height: var(--tap); padding: 0 11px; border: 0; border-right: 1px solid var(--line-2);
+  background: var(--card); color: var(--ink-2); font-size: 13px;
+}
+.segmented button:last-child { border-right: 0; }
+.segmented button[aria-pressed="true"] { background: var(--selection); color: #fff; }
+
+.importance-list { list-style: none; margin: 6px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.importance-list li {
+  display: flex; align-items: center; gap: 7px; min-height: var(--tap); padding: 2px 4px 2px 6px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: grab; font-size: 13px;
+}
+.importance-list li.dragging { opacity: .45; }
+.importance-list li.over { border-color: var(--selection); box-shadow: inset 0 2px 0 var(--selection); }
+.importance-list .grip { color: var(--ink-3); flex: none; }
+.importance-label { flex: 1; min-width: 0; }
+.importance-move { display: inline-flex; gap: 2px; }
+.importance-move button {
+  width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--line); border-radius: 5px; background: var(--card); color: var(--ink-2);
+}
+.importance-move button:disabled { opacity: .3; }
+.importance .reset { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; }
+
+.explore-below { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 4px 0 8px; font-size: 13.5px; }
+.facts dt { color: var(--ink-2); }
+.facts dd { margin: 0; }
+.facts .muted { color: var(--ink-3); }
+.mini-share { display: flex; height: 10px; border-radius: 3px; overflow: hidden; border: 1px solid var(--line); }
+.mini-share i { display: block; height: 100%; }
+
+.stories { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.stories li { border-top: 1px solid var(--line); padding-top: 6px; }
+.stories li:first-child { border-top: 0; padding-top: 0; }
+.translate { font-size: 12px; }
+.report-card .report-reasons { margin: 2px 0 0; padding-left: 18px; }
+.intro { margin: 0; max-width: 72ch; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
@@ -653,6 +743,7 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
   .filters:not(.open) section { display: block; }
   .explore .map-card { grid-column: 2 / span 2; grid-row: 1; }
   .explore .types-card { grid-column: 4; grid-row: 1; }
+  .explore-below { grid-column: 2 / span 3; grid-row: 2; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
   .explore .map-wrap { height: 100%; min-height: 360px; }
   .more-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 

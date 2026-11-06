@@ -65,6 +65,34 @@ export function roundTicks(max: number): number[] {
 
 const fmt = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1));
 
+/** A share, rounded, as the bars print it in parentheses. */
+export const pct = (value: number, of: number) => `${of > 0 ? Math.round((100 * value) / of) : 0}%`;
+
+/**
+ * A hover tooltip for a chart: the detailed numbers live HERE, over the bar,
+ * instead of in another table or another chart. Positioned inside the
+ * chart's own container (`.chart` is `position: relative`).
+ */
+export function useTip(ref: React.RefObject<HTMLElement | null>) {
+  const [tip, setTip] = useState<{ x: number; y: number; w: number; content: ReactNode } | null>(null);
+  const show = useCallback((event: React.PointerEvent | React.MouseEvent, content: ReactNode) => {
+    const box = ref.current?.getBoundingClientRect();
+    if (!box) return;
+    setTip({ x: event.clientX - box.left, y: event.clientY - box.top, w: box.width, content });
+  }, [ref]);
+  const hide = useCallback(() => setTip(null), []);
+  const node = tip ? (
+    <div
+      className="chart-tip"
+      role="tooltip"
+      style={{ left: Math.min(Math.max(8, tip.x + 12), Math.max(8, tip.w - 210)), top: tip.y + 14 }}
+    >
+      {tip.content}
+    </div>
+  ) : null;
+  return { show, hide, node };
+}
+
 /** A legend row: swatches with labels. */
 export function Key({ items }: { items: { label: ReactNode; swatch: ReactNode }[] }) {
   return (
@@ -100,7 +128,7 @@ export interface GroupedRow {
  * count against the whole city's, per category. Clicking a row picks it.
  */
 export function GroupedBars({
-  rows, focus, onPick, axisLabel, labelWidth = 92,
+  rows, focus, onPick, axisLabel, labelWidth = 92, pctOf, selectionLabel = "Selected", contextLabel = "All displayed",
 }: {
   rows: GroupedRow[];
   focus: string | null;
@@ -108,8 +136,13 @@ export function GroupedBars({
   axisLabel: string;
   /** Room for the row labels; long labels need more than the default. */
   labelWidth?: number;
+  /** When given, each value also shows its share of this, in parentheses — "12 (34%)". */
+  pctOf?: number;
+  selectionLabel?: string;
+  contextLabel?: string;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
+  const tip = useTip(ref);
   const labelW = Math.min(labelWidth, Math.max(92, width * 0.45));
   const right = 18;
   const rowH = 54;
@@ -142,16 +175,27 @@ export function GroupedBars({
               tabIndex={0}
               onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onPick(row.id); }}
               aria-pressed={focus === row.id}
+              onPointerMove={(event) => tip.show(event, (
+                <>
+                  <b>{row.label}</b>
+                  <span>{selectionLabel}: {row.value.toLocaleString("en-GB")}{pctOf ? ` (${pct(row.value, pctOf)})` : ""}</span>
+                  <span>{contextLabel}: {row.context.toLocaleString("en-GB")}</span>
+                </>
+              ))}
+              onPointerLeave={tip.hide}
             >
               <rect x={0} y={y - 9} width={width} height={rowH} fill="transparent" />
               <text x={labelW - 10} y={y + 16} className="row-label" textAnchor="end">{row.label}</text>
               <rect x={labelW} y={y} width={Math.max(0, x(row.value) - labelW)} height={18} style={{ fill: "var(--report)" }} />
               <rect x={labelW} y={y + 20} width={Math.max(0, x(row.context) - labelW)} height={16} style={{ fill: "var(--context)" }} />
-              <text x={x(row.value) + 5} y={y + 13.5} className="value" style={{ fill: "var(--report)" }}>{row.value}</text>
+              <text x={x(row.value) + 5} y={y + 13.5} className="value" style={{ fill: "var(--report)" }}>
+                {row.value}{pctOf ? <tspan className="pct"> ({pct(row.value, pctOf)})</tspan> : null}
+              </text>
             </g>
           );
         })}
       </svg>
+      {tip.node}
     </div>
   );
 }
@@ -712,6 +756,188 @@ export function Heatmap({
         ) : null))}
         <text x={labelW + (cols.length * cell) / 2} y={height - 4} textAnchor="middle" className="axis-title">{xLabel} · darker = more (max {max})</text>
       </svg>
+    </div>
+  );
+}
+
+/* ── stacked horizontal bars: one chart, two modes ────────────────────── */
+
+export interface StackRow {
+  id: string;
+  label: string;
+  /** The selection's parts, in `series` order. Their sum is the bar. */
+  parts: number[];
+  /** Everything displayed, for the thin bar behind. */
+  context: number;
+}
+
+/**
+ * Why places were reported — and, with the toggle on, the SAME bars split into
+ * a second variable (age group, or when it feels this way). One chart instead
+ * of a bar chart, a pie and an age × reason matrix: the supervisors' "combine
+ * them as a stacked bar, with an on/off button". Each bar prints its count and
+ * its share of the selection in parentheses; the split's numbers are in the
+ * tooltip.
+ */
+export function StackBars({
+  rows, series, focus, onPick, axisLabel, labelWidth = 150, total, selectionLabel = "Selected",
+}: {
+  rows: StackRow[];
+  /** One entry per part; a single entry means "no split". */
+  series: { key: string; label: string; colour: string }[];
+  focus: string | null;
+  onPick: (id: string) => void;
+  axisLabel: string;
+  labelWidth?: number;
+  /** What the percentages are of — normally the sum of every row's bar. */
+  total: number;
+  selectionLabel?: string;
+}) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const tip = useTip(ref);
+  const labelW = Math.min(labelWidth, Math.max(92, width * 0.42));
+  const right = 70;
+  const rowH = 44;
+  const top = 6;
+  const sums = rows.map((row) => row.parts.reduce((a, b) => a + b, 0));
+  // Scaled to the SELECTION: the city-wide count is in the tooltip, not a bar
+  // that would shrink a neighbourhood's bars to slivers.
+  const max = niceMax(Math.max(1, ...sums));
+  const plotW = Math.max(60, width - labelW - right);
+  const x = (value: number) => labelW + (value / max) * plotW;
+  const height = top + rows.length * rowH + 40;
+  const axis = roundTicks(max);
+  const split = series.length > 1;
+
+  return (
+    <div ref={ref} className="chart">
+      <svg width={width} height={height} role="img" aria-label="Stacked bar chart">
+        {axis.map((tick) => (
+          <g key={tick}>
+            <line x1={x(tick)} x2={x(tick)} y1={top} y2={top + rows.length * rowH} className="grid" />
+            <text x={x(tick)} y={top + rows.length * rowH + 16} className="tick" textAnchor="middle">{fmt(tick)}</text>
+          </g>
+        ))}
+        <text x={labelW + plotW / 2} y={height - 4} className="axis-title" textAnchor="middle">{axisLabel}</text>
+        {rows.map((row, i) => {
+          const y = top + i * rowH + 7;
+          const sum = sums[i]!;
+          const dim = focus !== null && focus !== row.id;
+          const starts = row.parts.map((_, k) => row.parts.slice(0, k).reduce((a, b) => a + b, 0));
+          return (
+            <g
+              key={row.id}
+              className={`pick${dim ? " dim" : ""}`}
+              onClick={() => onPick(row.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onPick(row.id); }}
+              aria-pressed={focus === row.id}
+              onPointerMove={(event) => tip.show(event, (
+                <>
+                  <b>{row.label}</b>
+                  <span>{selectionLabel}: {sum.toLocaleString("en-GB")} ({pct(sum, total)})</span>
+                  {split && series.map((s, k) => (row.parts[k] ?? 0) > 0 && (
+                    <span key={s.key} className="tip-row">
+                      <i className="sw" style={{ background: s.colour }} /> {s.label}: {row.parts[k]} ({pct(row.parts[k]!, sum)})
+                    </span>
+                  ))}
+                  <span className="muted">All displayed: {row.context.toLocaleString("en-GB")}</span>
+                </>
+              ))}
+              onPointerLeave={tip.hide}
+            >
+              <rect x={0} y={y - 7} width={width} height={rowH} fill="transparent" />
+              <text x={labelW - 10} y={y + 14} className="row-label" textAnchor="end">{row.label}</text>
+              {row.parts.map((value, k) => (value <= 0 ? null : (
+                <rect
+                  key={k}
+                  x={x(starts[k]!)}
+                  y={y}
+                  width={Math.max(0.5, x(starts[k]! + value) - x(starts[k]!))}
+                  height={24}
+                  style={{ fill: series[k]?.colour ?? "var(--report)", stroke: split ? "var(--card)" : "none" }}
+                  strokeWidth={split ? 0.8 : 0}
+                />
+              )))}
+              <text x={x(sum) + 5} y={y + 17} className="value">
+                {sum}<tspan className="pct"> ({pct(sum, total)})</tspan>
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      {tip.node}
+    </div>
+  );
+}
+
+/* ── a small timeline: bars, because the data is sparse ───────────────── */
+
+/**
+ * When reports were made, month by month. BARS, not a line: "this thing
+ * happened ten times, then nothing, nothing, then three" — a line between
+ * sparse months draws a trend that is not there. The breakdown is in the
+ * tooltip. Clicking a month filters the other views to it.
+ */
+export function MonthBars({
+  bins, focus, onPick, height = 120, yLabel,
+}: {
+  bins: { id: string; label: string; short: string; value: number; detail?: ReactNode }[];
+  focus: string | null;
+  onPick?: (id: string) => void;
+  height?: number;
+  yLabel: string;
+}) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const tip = useTip(ref);
+  const left = 30;
+  const right = 6;
+  const top = 8;
+  const bottom = 22;
+  const plotH = height - top - bottom;
+  const plotW = Math.max(60, width - left - right);
+  const max = niceMax(Math.max(1, ...bins.map((bin) => bin.value)));
+  const step = plotW / Math.max(1, bins.length);
+  const barW = Math.max(2, Math.min(28, step * 0.72));
+  const y = (value: number) => top + plotH - (value / max) * plotH;
+  const labelEvery = Math.max(1, Math.ceil(bins.length / Math.max(2, Math.floor(plotW / 44))));
+
+  return (
+    <div ref={ref} className="chart">
+      <svg width={width} height={height} role="img" aria-label={yLabel}>
+        {ticks(max, 2).map((tick) => (
+          <g key={tick}>
+            <line x1={left} x2={left + plotW} y1={y(tick)} y2={y(tick)} className="grid faint" />
+            <text x={left - 5} y={y(tick) + 4} className="tick" textAnchor="end">{fmt(tick)}</text>
+          </g>
+        ))}
+        {bins.map((bin, i) => {
+          const cx = left + step * i + step / 2;
+          const dim = focus !== null && focus !== bin.id;
+          return (
+            <g
+              key={bin.id}
+              className={`pick${dim ? " dim" : ""}`}
+              onClick={() => onPick?.(bin.id)}
+              onPointerMove={(event) => tip.show(event, (
+                <>
+                  <b>{bin.label}</b>
+                  <span>{bin.value.toLocaleString("en-GB")} {yLabel.toLowerCase()}</span>
+                  {bin.detail}
+                </>
+              ))}
+              onPointerLeave={tip.hide}
+            >
+              <rect x={cx - step / 2} y={top} width={step} height={plotH} fill="transparent" />
+              <rect x={cx - barW / 2} y={y(bin.value)} width={barW} height={Math.max(bin.value > 0 ? 1.5 : 0, top + plotH - y(bin.value))} style={{ fill: focus === bin.id ? "var(--selection)" : "var(--report)" }} />
+              {i % labelEvery === 0 && <text x={cx} y={height - 6} className="tick" textAnchor="middle">{bin.short}</text>}
+            </g>
+          );
+        })}
+        <line x1={left} x2={left + plotW} y1={top + plotH} y2={top + plotH} className="axis" />
+      </svg>
+      {tip.node}
     </div>
   );
 }

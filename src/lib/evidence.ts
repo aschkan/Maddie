@@ -179,12 +179,24 @@ export interface RouteEvidence {
   underpasses: Mark<string>[];
   places: Mark<Spot>[];
   reports: Mark<Report>[];
+  /** Pedestrianised streets and squares along the way — people likely about. */
+  busy: Mark<Spot>[];
+  /** Bars, pubs, cafés, restaurants along the way — a crowd, of a particular kind. */
+  nightlife: Mark<Spot>[];
 }
 
 /** How far off the line a place still counts as nearby. Same as `alongside.ts`. */
 export const PLACE_RADIUS_M = 100;
 /** …and a report. */
 export const REPORT_RADIUS_M = 75;
+/**
+ * …and a crowd mark (a pedestrian street, a bar). Tighter than a place: a bar
+ * one street over is not a crowd on this street.
+ */
+export const CROWD_RADIUS_M = 60;
+
+/** The OSM kinds that stand for a crowd. Never counted as "nearby places". */
+export const CROWD_KINDS = ["busy", "bar"];
 
 /**
  * Consecutive samples with the same value, merged into runs.
@@ -214,6 +226,7 @@ export function routeEvidence(
   reads: readonly SampleRead[] | null,
   spots: readonly Spot[],
   reports: readonly Report[],
+  crowd: readonly Spot[] = [],
 ): RouteEvidence {
   const lengthM = pathLengthM(route.path) || route.metres;
   const known = reads ?? [];
@@ -256,6 +269,8 @@ export function routeEvidence(
     underpasses,
     places: near(spots, PLACE_RADIUS_M),
     reports: near(reports, REPORT_RADIUS_M),
+    busy: near(crowd.filter((spot) => spot.kind === "busy"), CROWD_RADIUS_M),
+    nightlife: near(crowd.filter((spot) => spot.kind === "bar"), CROWD_RADIUS_M),
   };
 }
 
@@ -267,6 +282,10 @@ export interface IntervalSummary {
   reports: string;
   /** The first report in the interval that says something, if any. */
   narrative: Report | null;
+  /** EVERY report in the interval with a story — not just the first. */
+  stories: Report[];
+  /** Busy streets and bars in the interval, in words. */
+  crowd: string;
   places: number;
   reportCount: number;
 }
@@ -305,17 +324,24 @@ export function summariseInterval(evidence: RouteEvidence, from: number, to: num
     openingHours = `${places.filter((place) => alwaysOpen(place.openingHours)).length} open 24/7`;
   } else if (places.some((place) => place.openingHours)) openingHours = "as tagged — not checked against the hour";
 
-  let reportLine = "none marked here";
+  let reportLine = "none reported here";
   if (reports.length > 0) {
     const stories = reports.filter((report) => report.note).length;
-    reportLine = `${reports.length} marked place${reports.length === 1 ? "" : "s"}${stories ? ` · ${stories} with a story` : ""}`;
+    reportLine = `${reports.length} reported place${reports.length === 1 ? "" : "s"}${stories ? ` · ${stories} with a story` : ""}`;
   }
+  const busy = inside(evidence.busy ?? []).length;
+  const bars = inside(evidence.nightlife ?? []).length;
+  const crowd = busy + bars === 0
+    ? "no busy streets or bars mapped"
+    : [busy ? `${busy} busy street${busy === 1 ? "" : "s"}` : "", bars ? `${bars} bar${bars === 1 ? "" : "s"} or café${bars === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
 
   return {
     lighting: describeLighting(lightingWithin(evidence.lighting, lo, hi)),
     openingHours,
     reports: reportLine,
     narrative: reports.find((report) => report.note) ?? null,
+    stories: reports.filter((report) => report.note),
+    crowd,
     places: places.length,
     reportCount: reports.length,
   };

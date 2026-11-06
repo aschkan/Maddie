@@ -5,10 +5,10 @@ import "./globals.css";
 import EvidenceProvider from "@/components/EvidenceProvider";
 
 export const metadata: Metadata = {
-  title: "Maddie — Explore urban mobility evidence",
+  title: "Maddie — Plan a route",
   description:
-    "An evidence dashboard: community reports, mapped lighting and nearby places, " +
-    "and the ways round from A to B compared factor by factor. No overall safety score.",
+    "Three ways from A to B, compared factor by factor: mapped lighting, places to go in, crowds, " +
+    "and what people reported along the way. No overall score — you decide.",
 };
 
 export const viewport: Viewport = {

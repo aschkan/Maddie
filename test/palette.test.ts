@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 
 import {
-  CONTEXT, hsl, LIGHT, MEANINGS, PARK, PLACE, POLICE, REPORT, ROUTE_INK, SELECTION, TRIP, UNKNOWN, UNLIT,
-  type Swatch,
+  CONTEXT, CROWD, hsl, LIGHT, MEANINGS, NIGHTLIFE, PARK, PLACE, POLICE, REPORT, REPORT_OPACITY, REPORT_RADIUS,
+  REPORT_RAMP, ROUTE_INK, SELECTION, TRIP, UNKNOWN, UNLIT, type Swatch,
 } from "../src/lib/palette.ts";
 import { VERDICT_EXPLAIN, VERDICT_LABEL } from "../src/lib/verdict.ts";
 import { FACTORS } from "../src/lib/score.ts";
@@ -24,21 +24,29 @@ function chroma(hex: string): number {
   return (Math.max(...channels) - Math.min(...channels)) / 255;
 }
 
-test("purple means a community report, and nothing else", () => {
-  // Purple once meant the destination, "still loading" AND a report at once,
-  // and a participant read the reports as places to visit. The evidence
-  // boards bring it back for ONE meaning, so every other hue stays out of it.
-  for (const entry of MEANINGS) {
-    if (entry.swatch === REPORT) continue;
-    for (const hex of tones(entry.swatch)) {
-      const { h, s } = hsl(hex);
-      if (s < 0.15) continue;
-      assert.ok(h < 250 || h > 320, `${entry.meaning} (${hex}) is purple — hue ${Math.round(h)}°`);
-    }
+test("a report is a dark grey, not a hue — and its shades run from serious to light", () => {
+  // "The purples are so positive … can we make it grey. Dark grey." A report
+  // is a near-neutral dot; how serious it reads is lightness + opacity + size.
+  for (const hex of [...tones(REPORT), ...REPORT_RAMP.flatMap(tones)]) {
+    assert.ok(chroma(hex) < 0.15, `${hex} carries too much hue for a report`);
   }
-  for (const hex of tones(REPORT)) {
-    const { h } = hsl(hex);
-    assert.ok(h >= 250 && h <= 320, `a report (${hex}) should be the purple — hue ${Math.round(h)}°`);
+  // Not the basemap's pure neutral grey: a few degrees of tint, always.
+  for (const swatch of REPORT_RAMP) assert.ok(chroma(swatch.day) > 0.02, `${swatch.day} is pure grey — it would read as a road`);
+  // Day: darkest first. Night: brightest first (dark map).
+  for (let i = 1; i < REPORT_RAMP.length; i++) {
+    assert.ok(hsl(REPORT_RAMP[i]!.day).l > hsl(REPORT_RAMP[i - 1]!.day).l, `day rank ${i} is not lighter than rank ${i - 1}`);
+    assert.ok(hsl(REPORT_RAMP[i]!.night).l < hsl(REPORT_RAMP[i - 1]!.night).l, `night rank ${i} is not darker than rank ${i - 1}`);
+    assert.ok(REPORT_OPACITY[i]! < REPORT_OPACITY[i - 1]!, `rank ${i} is not more transparent than rank ${i - 1}`);
+  }
+  assert.equal(REPORT_RAMP.length, REPORT_OPACITY.length);
+  assert.equal(REPORT_RAMP.length, REPORT_RADIUS.length);
+});
+
+test("parks are green", () => {
+  // A participant read the grey park band as something else: "show it with green".
+  for (const hex of tones(PARK)) {
+    const { h, s } = hsl(hex);
+    assert.ok(s > 0.2 && h > 90 && h < 160, `park ${hex} is not green — hue ${Math.round(h)}°`);
   }
 });
 
@@ -95,6 +103,8 @@ test("the stylesheet's tokens are the palette's colours", () => {
   const pairs: [string, Swatch][] = [
     ["--report", REPORT], ["--place", PLACE], ["--lit", LIGHT], ["--unlit", UNLIT], ["--unknown", UNKNOWN],
     ["--selection", SELECTION], ["--context", CONTEXT], ["--park", PARK], ["--police", POLICE],
+    ["--crowd", CROWD], ["--nightlife", NIGHTLIFE],
+    ...REPORT_RAMP.map((swatch, i): [string, Swatch] => [`--rank-${i}`, swatch]),
     ["--trip", TRIP], ["--route-a", ROUTE_INK[0]!], ["--route-b", ROUTE_INK[1]!], ["--route-c", ROUTE_INK[2]!],
   ];
   for (const [token, swatch] of pairs) {

@@ -10,7 +10,7 @@ import { TileLayer, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 
 import { endpoint } from "@/lib/endpoints";
-import type { Tone } from "@/lib/palette";
+import { pick as pickTone, REPORT_OPACITY, REPORT_RADIUS, REPORT_RAMP, type Tone } from "@/lib/palette";
 
 /** Tiles come through this server by default — see `endpoints.ts`. */
 const TILE_URL = endpoint("tile");
@@ -101,6 +101,50 @@ export function textIcon(html: string, className: string): L.DivIcon {
   if (!icon) {
     icon = L.divIcon({ className, html, iconSize: undefined as unknown as L.PointExpression, iconAnchor: [0, 0] });
     labels.set(key, icon);
+  }
+  return icon;
+}
+
+/* ── report dots, shaded by how serious they read ──────────────────────── */
+
+/**
+ * Leaflet path options for one report at a rank (`importance.ts`): the most
+ * serious is dark, opaque and a little larger; the lightest is an outline
+ * that is "visible but does not dominate my view".
+ */
+export function reportStyle(rank: number, tone: Tone, opts: { open?: boolean; dim?: boolean; selectionInk?: string } = {}) {
+  const last = REPORT_RAMP.length - 1;
+  const r = Math.max(0, Math.min(last, rank));
+  const ink = pickTone(REPORT_RAMP[r]!, tone);
+  const outline = r === last;
+  const fade = opts.dim ? 0.22 : 1;
+  return {
+    radius: opts.open ? 8 : REPORT_RADIUS[r]!,
+    pathOptions: {
+      color: opts.open ? opts.selectionInk ?? ink : outline ? pickTone(REPORT_RAMP[2]!, tone) : tone === "night" ? "#0b1120" : "#ffffff",
+      weight: opts.open ? 3 : outline ? 1.1 : 0.8,
+      fillColor: ink,
+      fillOpacity: REPORT_OPACITY[r]! * fade,
+      opacity: (outline ? 0.7 : 0.9) * fade,
+    },
+  };
+}
+
+/** Panes, bottom to top. Lighting sits UNDER everything — "the light is on top of things, it hides stuff". */
+export const PANES = { under: 330, lighting: 340 } as const;
+
+const crowdIcons = new Map<string, L.DivIcon>();
+
+/** A busy street (tick) or a bar (square) — small, so a city centre does not turn solid. */
+export function crowdIcon(kind: "busy" | "bar", colour: string): L.DivIcon {
+  const key = `${kind}|${colour}`;
+  let icon = crowdIcons.get(key);
+  if (!icon) {
+    const html = kind === "bar"
+      ? `<svg width="8" height="8"><rect x="1" y="1" width="6" height="6" fill="${colour}" fill-opacity=".8"/></svg>`
+      : `<svg width="10" height="10"><path d="M5 1v8M1 5h8" stroke="${colour}" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+    icon = L.divIcon({ className: "crowd-icon", html, iconSize: kind === "bar" ? [8, 8] : [10, 10], iconAnchor: kind === "bar" ? [4, 4] : [5, 5] });
+    crowdIcons.set(key, icon);
   }
   return icon;
 }

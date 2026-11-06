@@ -1,39 +1,43 @@
 "use client";
 
 /**
- * Board 01 — "Explore urban mobility evidence". `docs/reference/board-01-explore.webp`
- * is the picture it is built to; `docs/Maddie-Evidence-Dashboard.md` is the spec.
+ * "Around me" — what has been reported near you, and what is there: street
+ * lighting, places to go in, crowds. The SECOND view of the woman's tool; the
+ * first is "Plan a route" (`CompareBoard`, the landing page).
  *
- * One map and coordinated small views, linked both ways (Munzner ch. 12):
+ * Pruned after the supervisor meetings of 28 Oct and 4 Nov 2026 ("everything
+ * is a lot", "some graphs are repetitive in every layout"):
  *
- *   * tick or click a NEIGHBOURHOOD → it is the selection in every chart;
- *   * click a BAR (or a slice)      → that reason is focused everywhere;
- *   * click a TIME bar              → every other view re-counts within it.
+ *   * ONE chart for why places were reported — a stacked bar with a split
+ *     toggle (none / age group / when) replaces the bar chart, the pie and
+ *     the age × reason matrix. Percentages are in parentheses on the bars.
+ *   * A small BAR timeline of when reports were made (bars, not lines — the
+ *     months are sparse).
+ *   * Clicking a neighbourhood shows its numbers INLINE; there is no separate
+ *     area board any more.
+ *   * Detailed numbers live in tooltips over the bars.
+ *   * The analysts' charts (lighting by neighbourhood, per-km comparison,
+ *     distance to route, the matrix) are on `/dashboard`, not here.
  *
- * The data is Pointer's "Onveilige plekken" survey plus reports added since
- * (`reports.ts`). A record is a place somebody marked and WHY — not an
- * incident, and not timed: the survey asks whether a place feels unsafe after
- * dark, by day or at any time, and that is what the time view shows.
- *
- * Nothing here is a score. Counts are counts; missing lighting is its own
- * hatched category; the reports are context, never inputs to a verdict.
+ * Linked both ways (Munzner ch. 12): a neighbourhood, a reason bar and a
+ * month each filter every other view. Nothing here is a score.
  */
 
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useMemo, useState } from "react";
-import { CalendarDays, Info, Plus, SlidersHorizontal, X } from "lucide-react";
+import { CalendarDays, ChevronDown, Info, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import BoardHeader, { Sources } from "@/components/BoardHeader";
-import { Donut, GroupedBars, Histogram, Key, Lines, StackedShare, Swatch } from "@/components/charts";
+import { GroupedBars, Key, MonthBars, pct, StackBars, Swatch } from "@/components/charts";
 import { useEvidence } from "@/components/EvidenceProvider";
+import ImportancePanel, { RankDot } from "@/components/ImportancePanel";
 import { cityBox, PLACE_KINDS, useLiveLayers, usePoliceFigures, useRecording } from "@/components/useMapData";
 import type { City } from "@/lib/cities";
-import { districtOf, histogram, monthKeys, REPORT_TYPES, reportType, WHEN_BINS, whenOf, type ReportType, type WhenBin } from "@/lib/evidence";
-import { distanceToPathM } from "@/lib/geo";
+import { CROWD_KINDS, districtOf, monthKeys, REPORT_TYPES, reportType, WHEN_BINS, whenOf, type ReportType, type WhenBin } from "@/lib/evidence";
+import { IMPORTANCE_ITEMS } from "@/lib/importance";
 import { EMPTY_LAYERS, type LayerData } from "@/lib/layers";
 import type { LatLng } from "@/lib/osrm";
-import { ADJUSTMENTS } from "@/lib/pointer";
+import { ADJUSTMENTS, AGE_BANDS } from "@/lib/pointer";
 import { exactDay, inDates, newReportId, WHEN_OPTIONS, type Report, type When } from "@/lib/reports";
 
 const ExploreMap = dynamic(() => import("@/components/ExploreMap"), {
@@ -41,17 +45,19 @@ const ExploreMap = dynamic(() => import("@/components/ExploreMap"), {
   loading: () => <div className="map map-loading">Loading the map…</div>,
 });
 
-/** The purple ramp the type views use: one meaning (a report), four reasons. */
-export const TYPE_INK: Record<ReportType, string> = {
-  experienced: "var(--type-1)", witnessed: "var(--type-2)", environment: "var(--type-3)", other: "var(--type-4)",
-};
-
 const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const DISTANCE_MAX = 500;
-const DISTANCE_BIN = 20;
+const WHEN_INK: Record<WhenBin, string> = { dark: "var(--when-dark)", any: "var(--when-any)", day: "var(--when-day)", unknown: "var(--unknown)" };
+
+type Split = "none" | "age" | "when";
+const SPLITS: { id: Split; label: string }[] = [
+  { id: "none", label: "No split" },
+  { id: "age", label: "By age group" },
+  { id: "when", label: "By time of day" },
+];
 
 const day = (iso: string) => iso.slice(0, 10);
+const monthLabel = (key: string, long = false) => `${MONTHS[Number(key.slice(5, 7)) - 1]}${long ? ` ${key.slice(0, 4)}` : ` ’${key.slice(2, 4)}`}`;
 
 export default function ExploreBoard() {
   const { city } = useEvidence();
@@ -61,15 +67,19 @@ export default function ExploreBoard() {
 
 function ExploreFor({ city }: { city: City }) {
   const ev = useEvidence();
-  const [districts, setDistricts] = useState<string[]>(() => [city.districts[0]?.id ?? ""]);
+  const [districts, setDistricts] = useState<string[]>([]);
   const [community, setCommunity] = useState(true);
   const [official, setOfficial] = useState(false);
   const [types, setTypes] = useState<ReportType[]>(REPORT_TYPES.map((type) => type.id));
+  const [whens, setWhens] = useState<WhenBin[]>(WHEN_BINS.map((bin) => bin.id));
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [showLighting, setShowLighting] = useState(false);
   const [showPlaces, setShowPlaces] = useState(true);
+  const [showCrowd, setShowCrowd] = useState(false);
+  const [showBars, setShowBars] = useState(false);
   const [focus, setFocus] = useState<ReportType | null>(null);
-  const [when, setWhen] = useState<WhenBin | null>(null);
+  const [month, setMonth] = useState<string | null>(null);
+  const [split, setSplit] = useState<Split>("none");
   const [openReport, setOpenReport] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<{ point: LatLng; type: ReportType; when: When | ""; note: string } | null>(null);
@@ -77,18 +87,26 @@ function ExploreFor({ city }: { city: City }) {
   const [infoOpen, setInfoOpen] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [shadeOpen, setShadeOpen] = useState(false);
 
   /* ── the data ───────────────────────────────────────────────────────── */
   const box = useMemo(() => cityBox(city), [city]);
   const { recording } = useRecording(city.scenario);
-  const live = useLiveLayers(city.scenario ? null : box, showPlaces ? PLACE_KINDS : [], showLighting);
-  const layers: LayerData = useMemo(() => {
-    const source = city.scenario ? recording?.layers ?? EMPTY_LAYERS : live.layers;
-    return {
-      ...source,
-      spots: source.spots.filter((spot) => PLACE_KINDS.includes(spot.kind)),
-    };
-  }, [city.scenario, recording, live.layers]);
+  const wantedKinds = [
+    ...(showPlaces ? PLACE_KINDS : []),
+    ...(showCrowd ? ["busy"] : []),
+    ...(showBars ? ["bar"] : []),
+  ];
+  const live = useLiveLayers(city.scenario ? null : box, wantedKinds, showLighting);
+  const source: LayerData = city.scenario ? recording?.layers ?? EMPTY_LAYERS : live.layers;
+  const layers: LayerData = useMemo(() => ({
+    ...source,
+    spots: source.spots.filter((spot) => PLACE_KINDS.includes(spot.kind)),
+  }), [source]);
+  const crowd = useMemo(
+    () => source.spots.filter((spot) => CROWD_KINDS.includes(spot.kind) && ((spot.kind === "busy" && showCrowd) || (spot.kind === "bar" && showBars))),
+    [source, showCrowd, showBars],
+  );
   const police = usePoliceFigures(official, box);
 
   const extent = useMemo(() => {
@@ -107,72 +125,103 @@ function ExploreFor({ city }: { city: City }) {
   /** Every record the filters on the left let through. */
   const shown = useMemo(() => {
     if (!community) return [];
-    return ev.reports.filter((report) => {
-      return types.includes(reportType(report.category)) && inDates(report, dates.from, dates.to);
-    });
-  }, [ev.reports, community, types, dates]);
+    return ev.reports.filter((report) => (
+      types.includes(reportType(report.category)) && whens.includes(whenOf(report)) && inDates(report, dates.from, dates.to)
+    ));
+  }, [ev.reports, community, types, whens, dates]);
 
   const inSelection = (report: Report) => districts.length === 0 || districts.includes(where.get(report.id) ?? "");
-  const inBrush = (report: Report) => when === null || whenOf(report) === when;
+  const inMonth = (report: Report) => month === null || (exactDay(report) && day(report.at).slice(0, 7) === month);
   const inFocus = (report: Report) => focus === null || reportType(report.category) === focus;
 
   const selectedNames = districts.map((id) => city.districts.find((d) => d.id === id)?.name).filter(Boolean).join(", ");
-  const selectionLabel = districts.length === 0 ? "All areas" : `Selected area (${selectedNames})`;
+  const selectionLabel = districts.length === 0 ? `All of ${city.name}` : selectedNames;
 
-  /* ── linked views ───────────────────────────────────────────────────── */
-  const brushed = shown.filter(inBrush);
-  const typeRows = REPORT_TYPES.filter((type) => types.includes(type.id)).map((type) => ({
-    id: type.id,
-    label: type.short,
-    value: brushed.filter((report) => inSelection(report) && reportType(report.category) === type.id).length,
-    context: brushed.filter((report) => reportType(report.category) === type.id).length,
-  }));
+  /* ── why it was reported: one stacked bar, three modes ──────────────── */
+  const inPeriod = shown.filter(inMonth);
+  const selected = inPeriod.filter(inSelection);
+  const series = split === "age"
+    ? [...AGE_BANDS.map((band, i) => ({ key: band, label: band, colour: `var(--age-${i})` })), { key: "none", label: "Age not given", colour: "var(--unknown)" }]
+    : split === "when"
+      ? WHEN_BINS.map((bin) => ({ key: bin.id, label: bin.label, colour: WHEN_INK[bin.id] }))
+      : [{ key: "all", label: selectionLabel, colour: "var(--report)" }];
+  const partOf = (report: Report): string => (split === "age" ? report.age ?? "none" : split === "when" ? whenOf(report) : "all");
+  const reasonRows = REPORT_TYPES.filter((type) => types.includes(type.id)).map((type) => {
+    const here = selected.filter((report) => reportType(report.category) === type.id);
+    return {
+      id: type.id,
+      label: type.short,
+      parts: series.map((s) => here.filter((report) => partOf(report) === s.key).length),
+      context: inPeriod.filter((report) => reportType(report.category) === type.id).length,
+    };
+  });
+  const reasonTotal = reasonRows.reduce((sum, row) => sum + row.parts.reduce((a, b) => a + b, 0), 0);
 
-  const forWhen = shown.filter((r) => inFocus(r));
-  const whenRows = WHEN_BINS.map((bin) => ({
-    id: bin.id,
-    label: bin.label,
-    value: forWhen.filter((report) => inSelection(report) && whenOf(report) === bin.id).length,
-    context: forWhen.filter((report) => whenOf(report) === bin.id).length,
-  })).filter((row) => row.id !== "unknown" || row.context > 0);
+  /* ── when reports were made: small bars ─────────────────────────────── */
+  const monthList = useMemo(() => monthKeys(dates.from, dates.to), [dates.from, dates.to]);
+  const forMonths = shown.filter((report) => inSelection(report) && inFocus(report));
+  const monthBins = monthList.map((key) => {
+    const inIt = forMonths.filter((report) => exactDay(report) && day(report.at).slice(0, 7) === key);
+    return {
+      id: key,
+      label: monthLabel(key, true),
+      short: monthLabel(key),
+      value: inIt.length,
+      detail: REPORT_TYPES.map((type) => {
+        const n = inIt.filter((report) => reportType(report.category) === type.id).length;
+        return n ? <span key={type.id}>{type.short}: {n}</span> : null;
+      }),
+    };
+  });
+  const undated = forMonths.filter((report) => !exactDay(report)).length;
 
-  const adaptSelected = brushed.filter((r) => inSelection(r) && inFocus(r));
+  /* ── how people adapt ───────────────────────────────────────────────── */
+  const adaptBase = inPeriod.filter(inFocus);
+  const adaptSelected = adaptBase.filter(inSelection);
+  const answeredAdapt = adaptSelected.filter((r) => r.adjustments?.length).length;
   const adaptRows = ADJUSTMENTS.map((a) => ({
     id: a.id,
     label: a.label,
     value: adaptSelected.filter((r) => r.adjustments?.includes(a.id)).length,
-    context: brushed.filter((r) => inFocus(r) && r.adjustments?.includes(a.id)).length,
+    context: adaptBase.filter((r) => r.adjustments?.includes(a.id)).length,
   }))
-    .filter((row) => row.context > 0)
-    .sort((a, b) => b.value - a.value || b.context - a.context);
-  const answeredAdapt = adaptSelected.filter((r) => r.adjustments?.length).length;
-  const undated = brushed.filter((r) => inSelection(r) && !exactDay(r)).length;
-
-  const route = ev.route?.path ?? city.exampleRoute;
-  const routeName = ev.route ? ev.route.label : `default walk through ${city.name}`;
-  const distances = brushed.filter((r) => inSelection(r) && inFocus(r)).map((r) => distanceToPathM(r.point, route));
-  const distanceBins = histogram(distances, 0, DISTANCE_MAX, DISTANCE_BIN);
+    .filter((row) => row.context > 0 && row.id !== "none")
+    .sort((a, b) => b.value - a.value || b.context - a.context)
+    .slice(0, 8);
 
   const faded = useMemo(
-    () => new Set(shown.filter((report) => !(inBrush(report) && inFocus(report))).map((report) => report.id)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- inBrush/inFocus read brush/focus
-    [shown, when, focus],
+    () => new Set(shown.filter((report) => !(inMonth(report) && inFocus(report))).map((report) => report.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- inMonth/inFocus read month/focus
+    [shown, month, focus],
   );
 
-  const monthList = useMemo(() => monthKeys(dates.from, dates.to), [dates.from, dates.to]);
-  const months = useMemo(() => {
-    const selected = brushed.filter((report) => inSelection(report) && exactDay(report));
-    const index = new Map(monthList.map((key, i) => [key, i]));
-    return REPORT_TYPES.filter((type) => types.includes(type.id)).map((type) => {
-      const values = new Array<number>(monthList.length).fill(0);
-      for (const report of selected) {
-        const at = index.get(day(report.at).slice(0, 7));
-        if (at !== undefined && reportType(report.category) === type.id) values[at]! += 1;
-      }
-      return { id: type.id, label: type.short, values, colour: TYPE_INK[type.id], width: focus === type.id ? 3.2 : focus ? 1.2 : 2 };
-    });
+  /* ── the clicked neighbourhood, inline ──────────────────────────────── */
+  const areaFacts = useMemo(() => {
+    if (districts.length === 0) return null;
+    const picked = city.districts.filter((d) => districts.includes(d.id));
+    const here = inPeriod.filter(inSelection);
+    const roadKm = picked.reduce((sum, d) => sum + (d.roadKm || 0), 0);
+    const cityKm = city.districts.reduce((sum, d) => sum + (d.roadKm || 0), 0);
+    const inCity = inPeriod.filter((report) => where.get(report.id) !== null).length;
+    const share = (key: "lit" | "unlit" | "unknown") => {
+      const km = picked.reduce((sum, d) => sum + d.lighting[key] * (d.roadKm || 1), 0);
+      return Math.round(km / Math.max(1, picked.reduce((sum, d) => sum + (d.roadKm || 1), 0)));
+    };
+    return {
+      names: picked.map((d) => d.name).join(", "),
+      count: here.length,
+      cityCount: inCity,
+      afterDark: here.filter((r) => whenOf(r) === "dark").length,
+      stories: here.filter((r) => r.note).length,
+      perKm: roadKm > 0 ? here.length / roadKm : null,
+      cityPerKm: cityKm > 0 ? inCity / cityKm : null,
+      places: picked.reduce((sum, d) => sum + d.places, 0),
+      lit: share("lit"),
+      unlit: share("unlit"),
+      unknown: share("unknown"),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- inSelection reads districts
-  }, [brushed, districts, types, focus, monthList]);
+  }, [districts, inPeriod, city, where]);
 
   /* ── actions ────────────────────────────────────────────────────────── */
   const toggle = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
@@ -196,13 +245,13 @@ function ExploreFor({ city }: { city: City }) {
     setAdding(false);
   }
 
-  const firstSelected = city.districts.find((d) => d.id === districts[0]);
+  const topKey = IMPORTANCE_ITEMS.find((item) => item.id === ev.order[0])?.label ?? "";
 
   return (
     <main className="board explore">
       <BoardHeader
-        title="Explore urban mobility evidence"
-        note={<>Select a bar or map area → highlight related records in every view</>}
+        title="Around me"
+        note={<>What people have reported near you, and what is there. Tap a neighbourhood, a bar or a month to filter everything.</>}
       />
 
       <div className="explore-grid">
@@ -217,27 +266,24 @@ function ExploreFor({ city }: { city: City }) {
             <select value={city.id} onChange={(event) => ev.setCity(event.target.value)} aria-label="Area">
               {ev.cities.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
             </select>
-            <h3>Neighbourhood ({city.districts.length} shown)</h3>
+            <h3>Neighbourhood <small className="muted">— or tap it on the map</small></h3>
             {city.districts.map((district) => (
               <label key={district.id} className="check">
                 <input type="checkbox" checked={districts.includes(district.id)} onChange={() => pickDistrict(district.id)} />
                 <span>{district.name}</span>
               </label>
             ))}
-            {firstSelected && (
-              <Link className="more-link" href={`/area?d=${firstSelected.id}`}>Open {firstSelected.name} in detail →</Link>
-            )}
           </section>
 
           <section>
-            <h2>Report source</h2>
+            <h2>What to show</h2>
             <label className="check">
               <input type="checkbox" checked={community} onChange={() => setCommunity(!community)} />
-              <span>Marked places<small>Pointer survey + community reports</small></span>
+              <span>Reported places<small>Pointer survey + community reports</small></span>
             </label>
             <label className="check">
               <input type="checkbox" checked={official} onChange={() => setOfficial(!official)} />
-              <span>Official crime <em>(optional)</em><small>Neighbourhood aggregates</small></span>
+              <span>Official crime <em>(optional)</em><small>Police figures per neighbourhood</small></span>
               <button type="button" className="info" onClick={(event) => { event.preventDefault(); setInfoOpen(!infoOpen); }} aria-label="About official crime figures" aria-expanded={infoOpen}>
                 <Info size={15} />
               </button>
@@ -254,11 +300,21 @@ function ExploreFor({ city }: { city: City }) {
           </section>
 
           <section>
-            <h2>Reason given</h2>
+            <h2>Why it was reported</h2>
             {REPORT_TYPES.map((type) => (
               <label key={type.id} className="check">
                 <input type="checkbox" checked={types.includes(type.id)} onChange={() => setTypes(toggle(types, type.id))} />
                 <span>{type.label}</span>
+              </label>
+            ))}
+          </section>
+
+          <section>
+            <h2>When it feels this way</h2>
+            {WHEN_BINS.map((bin) => (
+              <label key={bin.id} className="check">
+                <input type="checkbox" checked={whens.includes(bin.id)} onChange={() => setWhens(toggle(whens, bin.id))} />
+                <span>{bin.label}</span>
               </label>
             ))}
           </section>
@@ -280,7 +336,7 @@ function ExploreFor({ city }: { city: City }) {
           </section>
 
           <section>
-            <h2>Map layers <em>(optional)</em></h2>
+            <h2>On the map</h2>
             <label className="check">
               <input type="checkbox" checked={showLighting} onChange={() => setShowLighting(!showLighting)} />
               <span>Street lighting (mapped)</span>
@@ -288,24 +344,44 @@ function ExploreFor({ city }: { city: City }) {
             </label>
             <label className="check">
               <input type="checkbox" checked={showPlaces} onChange={() => setShowPlaces(!showPlaces)} />
-              <span>Nearby places</span>
+              <span>Places to go in<small>Station, supermarket, pharmacy, police…</small></span>
               <span className="heart" aria-hidden>♥</span>
             </label>
-            {!city.scenario && (showPlaces || showLighting) && live.error && <p className="note warn">{live.error}</p>}
+            <h3>Crowd</h3>
+            <label className="check">
+              <input type="checkbox" checked={showCrowd} onChange={() => setShowCrowd(!showCrowd)} />
+              <span>Busy streets &amp; squares<small>Pedestrian streets — people likely about</small></span>
+              <span className="crowd-mark" aria-hidden>+</span>
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={showBars} onChange={() => setShowBars(!showBars)} />
+              <span>Bars, pubs &amp; cafés<small>A crowd too — but not every crowd feels the same</small></span>
+              <span className="bar-mark" aria-hidden />
+            </label>
+            {!city.scenario && (showPlaces || showLighting || showCrowd || showBars) && live.error && <p className="note warn">{live.error}</p>}
+          </section>
+
+          <section>
+            <button type="button" className="section-toggle" onClick={() => setShadeOpen(!shadeOpen)} aria-expanded={shadeOpen}>
+              <h2>How the dots are shaded</h2>
+              <ChevronDown size={16} aria-hidden className={shadeOpen ? "flip" : undefined} />
+            </button>
+            {!shadeOpen && <p className="note"><RankDot rank={0} /> Darkest: {topKey.toLowerCase()}. Tap to change.</p>}
+            {shadeOpen && <ImportancePanel />}
           </section>
         </aside>
 
         {/* ── the map ─────────────────────────────────────────────────── */}
         <section className="card map-card">
           <div className="card-head">
-            <h2>{city.name} — marked places</h2>
+            <h2>{city.name} — reported places</h2>
             <Key items={[
-              { swatch: <Swatch colour="var(--report)" round />, label: "Marked place" },
-              { swatch: <span className="heart" aria-hidden>♥</span>, label: "Nearby place" },
-              { swatch: <i className="sw sw-area" aria-hidden />, label: selectionLabel },
+              { swatch: <span className="rank-ramp" aria-hidden>{[0, 2, 4].map((r) => <RankDot key={r} rank={r} />)}</span>, label: "Reported place (darker = more serious)" },
+              { swatch: <span className="heart" aria-hidden>♥</span>, label: "Place to go in" },
+              { swatch: <i className="sw sw-area" aria-hidden />, label: districts.length ? selectionLabel : "Tap a neighbourhood" },
             ]} />
             <button type="button" className={`btn-small${adding ? " on" : ""}`} onClick={() => { setAdding(!adding); setDraft(null); }}>
-              {adding ? <><X size={14} /> Cancel</> : <><Plus size={14} /> Add a report</>}
+              {adding ? <><X size={14} /> Cancel</> : <><Plus size={14} /> Report a place</>}
             </button>
           </div>
           <div className="map-wrap">
@@ -319,6 +395,8 @@ function ExploreFor({ city }: { city: City }) {
               layers={layers}
               showLighting={showLighting}
               showPlaces={showPlaces}
+              crowd={crowd}
+              order={ev.order}
               police={official ? police.areas : []}
               openReport={openReport}
               onOpenReport={setOpenReport}
@@ -327,11 +405,11 @@ function ExploreFor({ city }: { city: City }) {
               onTiles={setTilesOk}
             />
             {!tilesOk && <p className="map-banner">The basemap did not load — the records are still drawn where they are.</p>}
-            {ev.reportsLoading && <p className="map-banner">Loading the marked places…</p>}
+            {ev.reportsLoading && <p className="map-banner">Loading the reported places…</p>}
             {adding && !draft && <p className="map-banner">Tap the place on the map.</p>}
             {draft && (
               <form className="draft" onSubmit={(event) => { event.preventDefault(); saveDraft(); }}>
-                <b>Mark this place</b>
+                <b>Report this place</b>
                 <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as ReportType })} aria-label="Why">
                   {REPORT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
                 </select>
@@ -350,112 +428,112 @@ function ExploreFor({ city }: { city: City }) {
               </form>
             )}
             <div className="map-key">
-              <span><Swatch colour="var(--report)" round /> Marked places: where respondents pointed (Pointer survey, community)</span>
-              <span><i className="sw sw-dashed" aria-hidden /> Official crime: neighbourhood aggregates ({official ? "on" : "off"})</span>
+              <span>Tap a dot to read what the respondent said.</span>
+              {official && <span><i className="sw sw-dashed" aria-hidden /> Official crime: neighbourhood figures</span>}
+              {showCrowd && <span><span className="crowd-mark">+</span> Busy street</span>}
+              {showBars && <span><span className="bar-mark" /> Bar or café</span>}
             </div>
           </div>
         </section>
 
-        {/* ── by type ─────────────────────────────────────────────────── */}
+        {/* ── why: one stacked bar, three modes ───────────────────────── */}
         <section className="card types-card">
           <div className="card-head">
-            <h2>Why the place was marked</h2>
+            <h2>Why it was reported</h2>
+            {focus && <button type="button" className="link" onClick={() => setFocus(null)}>Clear</button>}
           </div>
-          <Key items={[
-            { swatch: <Swatch colour="var(--report)" />, label: selectionLabel },
-            { swatch: <Swatch colour="var(--context)" />, label: "All displayed records" },
-          ]} />
-          <GroupedBars rows={typeRows} focus={focus} onPick={pickType} axisLabel="Marked places" labelWidth={170} />
-        </section>
-
-        {/* ── when ────────────────────────────────────────────────────── */}
-        <section className="card">
-          <div className="card-head">
-            <h2>When respondents feel this way</h2>
-            {when && <button type="button" className="link" onClick={() => setWhen(null)}>Clear</button>}
-          </div>
-          <p className="card-sub">As the respondent answered it — the survey asks no hour. Click a bar to filter every view.</p>
-          <GroupedBars
-            rows={whenRows}
-            focus={when}
-            onPick={(id) => setWhen((current) => (current === id ? null : (id as WhenBin)))}
-            axisLabel="Marked places"
-            labelWidth={170}
-          />
-        </section>
-
-        {/* ── lighting ────────────────────────────────────────────────── */}
-        <section className="card">
-          <div className="card-head"><h2>Lighting data by neighbourhood</h2></div>
-          <Key items={[
-            { swatch: <Swatch colour="var(--lit)" />, label: "Mapped lit" },
-            { swatch: <Swatch colour="var(--unlit)" />, label: "Mapped unlit" },
-            { swatch: <Swatch colour="" hatch />, label: "Unknown" },
-          ]} />
-          <StackedShare
-            rows={city.districts.map((d) => ({ id: d.id, label: d.name, ...d.lighting }))}
-            selected={districts}
-            onPick={pickDistrict}
-            axisLabel="Percentage of street length"
-          />
-        </section>
-
-        {/* ── distance ────────────────────────────────────────────────── */}
-        <section className="card">
-          <div className="card-head">
-            <h2>Distance from report to selected route</h2>
+          <div className="segmented" role="group" aria-label="Split the bars">
+            {SPLITS.map((option) => (
+              <button key={option.id} type="button" aria-pressed={split === option.id} onClick={() => setSplit(option.id)}>{option.label}</button>
+            ))}
           </div>
           <p className="card-sub">
-            {ev.route ? <>Route: {routeName}</> : <>No route picked yet — measuring to a {routeName}. <Link href="/compare">Pick one →</Link></>}
+            {selectionLabel}{month ? `, ${monthLabel(month, true)}` : ""}. Tap a bar to show only that reason; hover for the numbers.
           </p>
-          <Histogram
-            bins={distanceBins}
-            binLabel={(i) => String(i * DISTANCE_BIN)}
-            tickEvery={[0, 5, 10, 15, 20, 24]}
-            xLabel="Distance (m)"
-            yLabel="Marked places"
-            height={190}
-          />
-        </section>
-      </div>
-
-      {/* ── more views: what the team asked for after the mockups ────── */}
-      <h2 className="section-title">More views of the same records</h2>
-      <div className="more-grid">
-        <section className="card">
-          <div className="card-head"><h2>Share by reason</h2></div>
-          <p className="card-sub">{selectionLabel}{when ? `, ${WHEN_BINS.find((bin) => bin.id === when)?.label.toLowerCase()}` : ""}. Click a slice to focus it everywhere.</p>
-          <Donut
-            parts={typeRows.map((row) => ({ id: row.id, label: row.label, value: row.value, colour: TYPE_INK[row.id as ReportType] }))}
+          <StackBars
+            rows={reasonRows}
+            series={series}
             focus={focus}
             onPick={pickType}
-            centre="places"
+            axisLabel="Reported places"
+            total={reasonTotal}
+            selectionLabel={selectionLabel}
           />
+          {split !== "none" && (
+            <Key items={series.filter((s) => reasonRows.some((row) => (row.parts[series.indexOf(s)] ?? 0) > 0)).map((s) => ({ swatch: <Swatch colour={s.colour} />, label: s.label }))} />
+          )}
         </section>
-        <section className="card span-2">
-          <div className="card-head"><h2>When places were marked, by reason</h2></div>
-          <p className="card-sub">
-            {selectionLabel}. The month the survey was filled in — not when anything happened, and not a trend in risk.
-            {undated > 0 && <> {undated.toLocaleString("en-GB")} place{undated === 1 ? " was" : "s were"} marked during a window (no day given) and {undated === 1 ? "is" : "are"} not drawn here.</>}
-          </p>
-          <Key items={months.map((series) => ({ swatch: <Swatch colour={series.colour} />, label: series.label }))} />
-          <Lines labels={monthList.map((key) => `${MONTHS[Number(key.slice(5, 7)) - 1]}${monthList.length > 12 ? ` ${key.slice(2, 4)}` : ""}`)} series={months} xLabel="Month" yLabel="Marked places" />
-        </section>
-        <section className="card span-3">
-          <div className="card-head"><h2>How people adapt</h2></div>
-          <p className="card-sub">
-            {selectionLabel}. &ldquo;Do you change your behaviour because of this place?&rdquo; — several answers allowed;
-            {" "}{answeredAdapt.toLocaleString("en-GB")} of these places have an answer.
-          </p>
-          <Key items={[
-            { swatch: <Swatch colour="var(--report)" />, label: selectionLabel },
-            { swatch: <Swatch colour="var(--context)" />, label: "All displayed records" },
-          ]} />
-          <GroupedBars rows={adaptRows} focus={null} onPick={() => undefined} axisLabel="Marked places" labelWidth={250} />
-        </section>
+
+        <div className="explore-below">
+          {/* ── the neighbourhood you tapped ─────────────────────────────── */}
+          {areaFacts && (
+            <section className="card area-facts">
+              <div className="card-head">
+                <h2>{areaFacts.names}</h2>
+                <button type="button" className="link" onClick={() => setDistricts([])}>Clear</button>
+              </div>
+              <dl className="facts">
+                <dt>Reported places</dt>
+                <dd><b>{areaFacts.count.toLocaleString("en-GB")}</b> ({pct(areaFacts.count, areaFacts.cityCount)} of {city.name})</dd>
+                <dt>Mostly after dark</dt>
+                <dd>{areaFacts.afterDark} ({pct(areaFacts.afterDark, areaFacts.count)})</dd>
+                <dt>With a story</dt>
+                <dd>{areaFacts.stories}</dd>
+                {areaFacts.perKm !== null && (
+                  <>
+                    <dt>Per km of road</dt>
+                    <dd>{areaFacts.perKm.toFixed(1)}{areaFacts.cityPerKm !== null && <span className="muted"> · city {areaFacts.cityPerKm.toFixed(1)}</span>}</dd>
+                  </>
+                )}
+                <dt>Streets mapped lit</dt>
+                <dd>{areaFacts.lit}% <span className="muted">· unlit {areaFacts.unlit}% · unknown {areaFacts.unknown}%</span></dd>
+                <dt>Places to go in</dt>
+                <dd>{areaFacts.places}</dd>
+              </dl>
+              <div className="mini-share" aria-hidden>
+                <i style={{ width: `${areaFacts.lit}%`, background: "var(--lit)" }} />
+                <i style={{ width: `${areaFacts.unlit}%`, background: "var(--unlit)" }} />
+                <i className="sw-hatch" style={{ width: `${areaFacts.unknown}%` }} />
+              </div>
+              <p className="note">Counts, not a rating: more reports can mean more people answered the survey here.{city.figures === "osm" ? "" : " Lighting and place figures are not measured yet."}</p>
+            </section>
+          )}
+
+          {/* ── when reports were made ───────────────────────────────────── */}
+          <section className="card">
+            <div className="card-head">
+              <h2>When reports were made</h2>
+              {month && <button type="button" className="link" onClick={() => setMonth(null)}>Clear</button>}
+            </div>
+            <p className="card-sub">
+              Reports per month — when the survey was filled in, not when anything happened. Tap a month to filter.
+              {undated > 0 && <> {undated.toLocaleString("en-GB")} reported during a window with no day are not drawn.</>}
+            </p>
+            <MonthBars bins={monthBins} focus={month} onPick={(id) => setMonth((current) => (current === id ? null : id))} yLabel="Reported places" />
+          </section>
+
+          {/* ── how people adapt ─────────────────────────────────────────── */}
+          <section className="card">
+            <div className="card-head"><h2>What people do about it</h2></div>
+            <p className="card-sub">
+              &ldquo;Do you change your behaviour because of this place?&rdquo; — {answeredAdapt.toLocaleString("en-GB")} answered,
+              {" "}several answers allowed. Percentages are of those who answered.
+            </p>
+            <GroupedBars
+              rows={adaptRows}
+              focus={null}
+              onPick={() => undefined}
+              axisLabel="Reported places"
+              labelWidth={240}
+              pctOf={answeredAdapt}
+              selectionLabel={selectionLabel}
+              contextLabel="All displayed"
+            />
+          </section>
+        </div>
       </div>
 
-      <p className="caveat">Marked places describe what respondents told a survey, not incident risk. Missing lighting stays unknown.</p>
+      <p className="caveat">Reported places are what respondents told a survey, not incident risk. Missing lighting stays unknown.</p>
       <Sources />
     </main>
   );

@@ -72,8 +72,13 @@ short list of things that will bite you while editing.
   hand-traced; lighting/road/places figures are MEASURED (`district-figures.ts`).
 - `src/components/EvidenceProvider.tsx` — city, theme, reports, chosen route,
   shared by every board (wrapped in `layout.tsx`).
-- `src/components/ExploreBoard.tsx` (`/`), `CompareBoard.tsx` (`/compare`),
-  `AreaBoard.tsx` (`/area?d=…`) — the three evidence boards.
+- `src/components/CompareBoard.tsx` (`/`, "Plan a route" — the LANDING page),
+  `ExploreBoard.tsx` (`/explore`, "Around me") — the woman's two views;
+  `DashboardBoard.tsx` (`/dashboard`) — the analysts' view, behind its own
+  door. `/compare` and `/area` redirect. **Read § "Two audiences" below.**
+- `src/lib/importance.ts` — how serious a report READS: the reader's order of
+  kinds + a basic harassment/catcalling keyword check → a rank → the dot's
+  shade. `ImportancePanel.tsx` is the drag-and-drop control. Never counted.
 - `src/components/charts.tsx` — every chart, one component per chart TYPE.
 - `src/components/ExploreMap.tsx`, `CompareMap.tsx`, `mapBits.tsx` — Leaflet.
 - `src/components/Timeline.tsx` — "where do differences occur", brushable.
@@ -436,25 +441,40 @@ nothing to explain but the gap, and a model asked to comment anyway produces a
 sentence that sounds like an answer. That was observed: a fluent "most of this
 walk is on lit streets" printed directly under "Not enough map data".
 
-## The UI is three evidence boards — and shows NO SCORE
+## Two audiences — and NO SCORE anywhere
 
-**`docs/Maddie-Evidence-Dashboard.md` is the spec; `docs/reference/` holds the
-pictures.** Explore (`/`), Compare (`/compare`), one area (`/area?d=…`). The
-team's position, from their voice notes: Maddie was "too much of a smart app"
-and must be a visualization system — each factor in the chart its data type
-asks for, the reader decides. The rules that will be undone by accident:
+**`docs/Maddie-Evidence-Dashboard.md` § 7 is the spec for this version** (the
+supervisor meetings of 28 Oct and 4 Nov 2026). The app serves two users, kept
+apart: the woman deciding where to go ("Plan a route" `/` — the landing page —
+and "Around me" `/explore`), and researchers / police / the municipality (the
+Data dashboard `/dashboard`). The rules that will be undone by accident:
+
+- **The landing page is the three-route comparison.** "When I saw the three
+  routes, this was a sign." No tutorial and no explainer screen in front of it.
+- **Nothing analytical goes back into the woman's views.** Lighting by
+  neighbourhood, per-km comparison, distance-to-route, the age x reason matrix
+  live on `/dashboard` — "hide them, don't delete them".
+- **No chart says the same thing twice.** The pie, the radar, the factor table,
+  the monthly line and the area board were removed for exactly that. Detailed
+  numbers go in a TOOLTIP over an existing bar (`useTip` in `charts.tsx`), and
+  shares go in parentheses on the bar: "141 (36%)".
+- **Combine with a toggle rather than add a chart.** "Why it was reported" is
+  ONE `StackBars` with a split (none / age group / time of day).
+- **Time is BARS** (`MonthBars`): the months are sparse and a line invents a trend.
+- **Words:** "reported place", never "marked place" — the participants did not
+  understand "marked". Not "incident" either: a Pointer row is not an incident.
 
 - **No overall score, no verdict, no "Preferred" badge on any board.**
   `score.ts`, `segments.ts`, `compare.ts`, `verdict.ts` and `/api/assess` still
   exist and are still tested, but nothing on screen calls them. Putting a
   number back is a change to what the app claims, not a feature.
-- **Decompose.** Route factors are separate dot plots / radar spokes / table
-  rows. The radar's axes each have their OWN scale and the card says a bigger
-  polygon is not a better route — keep that sentence.
+- **Decompose.** Route factors are separate dot-plot columns, one per factor,
+  with the number printed on the dot. The radar and table are gone.
 - **Unknown lighting is HATCHED**, its own category, everywhere.
-- **Brush and link.** Neighbourhood, bar/slice focus and the hour brush filter
-  every other view on Explore; the brushed interval on Compare highlights the
-  map. A view that ignores the selection is a bug.
+- **Brush and link.** Neighbourhood, reason bar and month filter every other
+  view on Around me; a tapped neighbourhood shows its numbers INLINE; the
+  brushed interval on Plan a route highlights the map and lists EVERY story in
+  it (with a Translate link). A view that ignores the selection is a bug.
 - **There is no example data, anywhere.** The browser-side generator, the
   seeded reports and the synthetic cohort are deleted. `parseReports` and
   `parseInterviews` DROP a record marked `source: "example"` — never show it,
@@ -463,8 +483,8 @@ asks for, the reader decides. The rules that will be undone by accident:
 - **Every board ends with `<Sources />`** — Pointer's credit is a condition of
   using the data, not decoration.
 - **The survey has no hour.** "When" is Pointer's after dark / by day / any
-  time, a bar you click to filter (it replaced the hour brush). `at` is when the
-  survey was filled in — never chart it as when something happened.
+  time — a filter and a split of the reasons bar. `at` is when the survey was
+  filled in — never chart it as when something happened.
 - **The trade-off slider FILTERS, never re-scores** (`withinBudget`).
 - **Compare reads the Utrecht RECORDING** for scenario trips (no network) and
   OSRM + Overpass live otherwise. "Nearby places" are `PLACE_KINDS` in
@@ -567,10 +587,17 @@ invents a distinction the map cannot support.
 **`docs/Maddie-Evidence-Dashboard.md` § 2 is the table** and
 `test/palette.test.ts` holds it:
 
-- **Purple is a community report and NOTHING else** — and always a dot. It
-  was retired because it once meant three things; the boards bring it back for
-  one, and the test fails if any other colour enters the purple band. The four
-  report types are four lightnesses of it.
+- **A report is a DARK GREY dot, shaded by how serious it reads** — five
+  ranks of a ColorBrewer Greys ramp tinted slightly violet (never the
+  basemap's neutral road grey), with OPACITY and SIZE falling with the rank;
+  the lightest is little more than an outline. The rank comes from
+  `importance.ts`: the reader's drag-and-drop order (default: story mentions
+  harassment, happened to me, to others, feels threatening, other), and a
+  record with several reasons takes its MOST serious. Purple was retired for
+  reports: "the purples are so positive", and they hid everything else.
+- **Lighting is drawn in a pane UNDER everything** (`PANES` in `mapBits.tsx`).
+- **Parks are GREEN.** Crowd: busy streets `+` teal, bars a small brown square
+  — "not every crowd is a good crowd", so the two are never merged.
 - **No alarm red.** **A and B carry no hue.** **Routes differ by line style**
   (solid / dashed / dotted) before ink. **Selection is blue** — area, brushed
   interval, selected row.

@@ -18,12 +18,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import { useReports, type Backend, type Dataset } from "@/components/useReports";
 import { CITIES, cityById, DEFAULT_CITY, type City } from "@/lib/cities";
+import { DEFAULT_ORDER, normaliseOrder, type ImportanceKey } from "@/lib/importance";
 import type { LatLng } from "@/lib/osrm";
 import type { Tone } from "@/lib/palette";
 import type { Report } from "@/lib/reports";
 
 const CITY_KEY = "maddie.city.v1";
 const THEME_KEY = "maddie.theme.v1";
+const ORDER_KEY = "maddie.importance.v1";
 
 /** A report belongs to a city if it is within this of the centre. */
 const CITY_RADIUS_M = 9_000;
@@ -50,6 +52,9 @@ interface Evidence {
   addReport: (report: Report) => void;
   route: ChosenRoute | null;
   setRoute: (route: ChosenRoute | null) => void;
+  /** Which kinds of report the reader counts as most serious — the dots' shading (`importance.ts`). */
+  order: ImportanceKey[];
+  setOrder: (order: ImportanceKey[]) => void;
 }
 
 const Context = createContext<Evidence | null>(null);
@@ -64,6 +69,7 @@ export default function EvidenceProvider({ children }: { children: ReactNode }) 
   const [cityId, setCityId] = useState(DEFAULT_CITY);
   const [tone, setTone] = useState<Tone>("day");
   const [route, setRoute] = useState<ChosenRoute | null>(null);
+  const [order, setOrderState] = useState<ImportanceKey[]>(DEFAULT_ORDER);
   const city = cityById(cityId);
   const store = useReports(city.centre, CITY_RADIUS_M);
 
@@ -75,6 +81,8 @@ export default function EvidenceProvider({ children }: { children: ReactNode }) 
         const saved = window.localStorage.getItem(CITY_KEY);
         if (saved && CITIES.some((city) => city.id === saved)) setCityId(saved);
         setTone(document.documentElement.dataset.theme === "dark" ? "night" : "day");
+        const savedOrder = window.localStorage.getItem(ORDER_KEY);
+        if (savedOrder) setOrderState(normaliseOrder(JSON.parse(savedOrder)));
       } catch {
         // A browser that stores nothing still gets the default city.
       }
@@ -88,6 +96,15 @@ export default function EvidenceProvider({ children }: { children: ReactNode }) 
       window.localStorage.setItem(CITY_KEY, id);
     } catch {
       // Nothing to remember it in.
+    }
+  }, []);
+
+  const setOrder = useCallback((next: ImportanceKey[]) => {
+    setOrderState(next);
+    try {
+      window.localStorage.setItem(ORDER_KEY, JSON.stringify(next));
+    } catch {
+      // The order still applies to this visit.
     }
   }, []);
 
@@ -118,7 +135,9 @@ export default function EvidenceProvider({ children }: { children: ReactNode }) 
     addReport: store.add,
     route: route && route.cityId === city.id ? route : null,
     setRoute,
-  }), [city, setCity, tone, toggleTheme, store.reports, store.datasets, store.backend, store.error, store.loading, store.add, route]);
+    order,
+    setOrder,
+  }), [city, setCity, tone, toggleTheme, store.reports, store.datasets, store.backend, store.error, store.loading, store.add, route, order, setOrder]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

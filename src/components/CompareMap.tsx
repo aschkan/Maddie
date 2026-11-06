@@ -13,17 +13,19 @@
  * route never moves an end.
  */
 
-import { Fragment, useEffect } from "react";
-import { CircleMarker, MapContainer, Marker, Polyline, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { Fragment, useEffect, useMemo } from "react";
+import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-import { Basemap, heartIcon, Resizer, ScaleBar, textIcon } from "@/components/mapBits";
+import { Basemap, crowdIcon, heartIcon, PANES, reportStyle, Resizer, ScaleBar, textIcon } from "@/components/mapBits";
+import ReportCard from "@/components/ReportCard";
+import { rankOf, type ImportanceKey } from "@/lib/importance";
 import type { TripEnd } from "@/lib/cities";
 import { routeLetter } from "@/lib/evidence";
 import type { LitWay, Spot } from "@/lib/layers";
 import type { LatLng, Route } from "@/lib/osrm";
-import { LIGHT, pick, PLACE, REPORT, ROUTE_DASH, ROUTE_INK, SELECTION, TRIP, type Tone } from "@/lib/palette";
+import { CROWD, LIGHT, NIGHTLIFE, pick, PLACE, ROUTE_DASH, ROUTE_INK, SELECTION, TRIP, type Tone } from "@/lib/palette";
 import type { Report } from "@/lib/reports";
 
 interface Props {
@@ -39,6 +41,10 @@ interface Props {
   litWays: LitWay[];
   places: Spot[];
   reports: Report[];
+  /** Busy streets and bars near the routes, when the crowd toggle is on. */
+  crowd: Spot[];
+  /** The reader's order of what is most serious — the dots' shading. */
+  order: ImportanceKey[];
   onTiles: (ok: boolean) => void;
   /** Which end a tap on the map puts down. */
   placing: "A" | "B";
@@ -72,6 +78,10 @@ export default function CompareMap(props: Props) {
   const trip = pick(TRIP, tone);
   const heart = heartIcon(pick(PLACE, tone), 15);
   const order = routes.map((_, i) => i).filter((i) => i !== selected).concat(routes[selected] ? [selected] : []);
+  const ranked = useMemo(
+    () => props.reports.map((report) => ({ report, rank: rankOf(report, props.order) })).sort((a, b) => b.rank - a.rank),
+    [props.reports, props.order],
+  );
 
   return (
     <MapContainer
@@ -86,14 +96,17 @@ export default function CompareMap(props: Props) {
       <Fit routes={routes} from={props.from} to={props.to} />
       <Taps placing={props.placing} onPlace={props.onPlace} />
 
-      {props.litWays.map((way) => (
-        <Polyline
-          key={way.id}
-          positions={way.path.map((point) => [point.lat, point.lng])}
-          pathOptions={{ color: pick(LIGHT, tone), weight: 1.6, opacity: 0.5 }}
-          interactive={false}
-        />
-      ))}
+      {/* Lighting in its own pane UNDER the routes, the places and the reports. */}
+      <Pane name="lighting" style={{ zIndex: PANES.lighting }}>
+        {props.litWays.map((way) => (
+          <Polyline
+            key={way.id}
+            positions={way.path.map((point) => [point.lat, point.lng])}
+            pathOptions={{ color: pick(LIGHT, tone), weight: 1.6, opacity: 0.5 }}
+            interactive={false}
+          />
+        ))}
+      </Pane>
 
       {props.highlight.length > 1 && (
         <Polyline
@@ -140,14 +153,28 @@ export default function CompareMap(props: Props) {
         </Marker>
       ))}
 
-      {props.reports.map((report) => (
-        <CircleMarker
-          key={report.id}
-          center={[report.point.lat, report.point.lng]}
-          radius={4}
-          pathOptions={{ color: "#ffffff", weight: 0.8, fillColor: pick(REPORT, tone), fillOpacity: 0.95 }}
-        />
+      {props.crowd.map((spot) => (
+        <Marker key={spot.id} position={[spot.point.lat, spot.point.lng]} icon={crowdIcon(spot.kind === "bar" ? "bar" : "busy", pick(spot.kind === "bar" ? NIGHTLIFE : CROWD, tone))}>
+          <Tooltip direction="top" offset={[0, -4]}>{spot.name ? `${spot.name} · ${spot.label}` : spot.label}</Tooltip>
+        </Marker>
       ))}
+
+      {/* Least serious first, so the serious ones are drawn on top. Tap one to read it. */}
+      {ranked.map(({ report, rank }) => {
+        const style = reportStyle(rank, tone);
+        return (
+          <CircleMarker
+            key={report.id}
+            center={[report.point.lat, report.point.lng]}
+            radius={style.radius}
+            pathOptions={{ ...style.pathOptions, bubblingMouseEvents: false }}
+          >
+            <Popup closeButton={false} className="report-pop" offset={[0, -4]}>
+              <ReportCard report={report} />
+            </Popup>
+          </CircleMarker>
+        );
+      })}
 
       {[{ end: props.from, letter: "A" }, { end: props.to, letter: "B" }].map(({ end, letter }) => (
         <Fragment key={letter}>

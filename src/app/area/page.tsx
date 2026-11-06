@@ -1,16 +1,9 @@
-import type { Metadata } from "next";
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
 
-import AreaFromQuery from "@/components/AreaFromQuery";
-
-export const metadata: Metadata = { title: "Maddie — Area in detail" };
-
+/**
+ * The area board is gone: its numbers show inline when a neighbourhood is
+ * tapped in "Around me", and its analytics are on the data dashboard.
+ */
 export default function Area() {
-  // `useSearchParams` below renders client-side up to this boundary; the rest
-  // of the page is still prerendered.
-  return (
-    <Suspense fallback={<main className="board"><p className="empty">Loading…</p></main>}>
-      <AreaFromQuery />
-    </Suspense>
-  );
+  redirect("/dashboard");
 }

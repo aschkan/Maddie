@@ -1,9 +1,6 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import CompareBoard from "@/components/CompareBoard";
-
-export const metadata: Metadata = { title: "Maddie — Compare route evidence" };
-
+/** The comparison is the landing page now; old links still arrive there. */
 export default function Compare() {
-  return <CompareBoard />;
+  redirect("/");
 }

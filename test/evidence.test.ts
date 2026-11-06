@@ -95,7 +95,7 @@ test("reports near a route are placed along it; far ones are not counted", () =>
   const summary = summariseInterval(evidence, 0.6, 0.9);
   assert.equal(summary.reportCount, 1);
   assert.equal(summary.narrative?.id, "a");
-  assert.match(summary.reports, /1 marked place · 1 with a story/);
+  assert.match(summary.reports, /1 reported place · 1 with a story/);
 });
 
 test("the trade-off slider filters routes and never ranks them", () => {
