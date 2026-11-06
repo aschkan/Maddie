@@ -98,6 +98,7 @@ function CompareFor({ city }: { city: City }) {
   const [placing, setPlacing] = useState<"A" | "B">("A");
   const [showCrowd, setShowCrowd] = useState(false);
   const [shadeOpen, setShadeOpen] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
 
   /** A tap or a drag on the map: that end moves, and the next tap sets the other. */
   function place(letter: "A" | "B", point: LatLng) {
@@ -315,7 +316,11 @@ function CompareFor({ city }: { city: City }) {
               ))}
             </div>
             <span className="north" aria-hidden>N<br />▲</span>
-            <div className="map-key boxed">
+            <div className={`map-key boxed${keyOpen ? "" : " folded"}`}>
+              <button type="button" className="key-fold" onClick={() => setKeyOpen(!keyOpen)} aria-expanded={keyOpen}>
+                {keyOpen ? "Hide key ▾" : "Key ▸"}
+              </button>
+              {keyOpen && <>
               <span><span className="heart">♥</span> Places to go in</span>
               <span><i className="sw sw-line" style={{ background: "var(--lit)" }} /> Mapped lighting</span>
               <span><span className="rank-ramp">{[0, 2, 4].map((r) => <RankDot key={r} rank={r} />)}</span> Reported places — tap one to read it</span>
@@ -323,6 +328,7 @@ function CompareFor({ city }: { city: City }) {
                 <input type="checkbox" checked={showCrowd} onChange={() => setShowCrowd(!showCrowd)} />
                 <span><span className="crowd-mark">+</span> busy streets · <span className="bar-mark" /> bars</span>
               </label>
+              </>}
             </div>
             {!tilesOk && <p className="map-banner">The basemap did not load — the routes are still drawn.</p>}
             {routing && <p className="map-banner">Asking for routes…</p>}

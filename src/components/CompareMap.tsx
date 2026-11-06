@@ -62,7 +62,12 @@ function Fit({ routes, from, to }: { routes: Route[]; from: TripEnd; to: TripEnd
   useEffect(() => {
     const points = routes.length > 0 ? routes.flatMap((route) => route.path) : [from.point, to.point];
     const bounds = L.latLngBounds(points.map((point) => [point.lat, point.lng] as [number, number]));
-    if (bounds.isValid()) map.fitBounds(bounds, { padding: [36, 36] });
+    if (!bounds.isValid()) return;
+    // Only move the map when the trip no longer fits the view. Re-fitting on
+    // EVERY change made the map jump the moment A was tapped, so the tap meant
+    // for B landed somewhere else — it read as "A and B jump back".
+    if (map.getBounds().pad(-0.04).contains(bounds)) return;
+    map.fitBounds(bounds, { padding: [36, 36] });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures what matters
   }, [map, key]);
   return null;
@@ -148,13 +153,13 @@ export default function CompareMap(props: Props) {
       )))}
 
       {props.places.map((spot) => (
-        <Marker key={spot.id} position={[spot.point.lat, spot.point.lng]} icon={heart}>
+        <Marker key={spot.id} position={[spot.point.lat, spot.point.lng]} icon={heart} bubblingMouseEvents>
           <Tooltip direction="top" offset={[0, -5]}>{spot.name ? `${spot.name} · ${spot.label}` : spot.label}</Tooltip>
         </Marker>
       ))}
 
       {props.crowd.map((spot) => (
-        <Marker key={spot.id} position={[spot.point.lat, spot.point.lng]} icon={crowdIcon(spot.kind === "bar" ? "bar" : "busy", pick(spot.kind === "bar" ? NIGHTLIFE : CROWD, tone))}>
+        <Marker key={spot.id} position={[spot.point.lat, spot.point.lng]} icon={crowdIcon(spot.kind === "bar" ? "bar" : "busy", pick(spot.kind === "bar" ? NIGHTLIFE : CROWD, tone))} bubblingMouseEvents>
           <Tooltip direction="top" offset={[0, -4]}>{spot.name ? `${spot.name} · ${spot.label}` : spot.label}</Tooltip>
         </Marker>
       ))}
