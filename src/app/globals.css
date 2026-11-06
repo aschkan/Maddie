@@ -142,6 +142,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* 16px on anything typed into — below it iOS Safari zooms on focus and never
    zooms back. */
 input, select, textarea { font: inherit; font-size: 16px; color: var(--ink); }
+
+/*
+ * An OPEN select's list is drawn by the browser/OS, which takes the select's
+ * text colour but its own (white) background — so in the dark theme the
+ * options were light text on white, unreadable. Give the list both colours
+ * explicitly, in both themes, and tell the browser which scheme the control is.
+ */
+select { color-scheme: inherit; background-color: var(--field); }
+select option, select optgroup { background-color: var(--card); color: var(--ink); }
+select option:checked { background-color: var(--selection); color: #ffffff; }
+select option:disabled { color: var(--ink-3); }
 h1, h2, h3 { margin: 0; }
 :focus-visible { outline: 2px solid var(--selection); outline-offset: 2px; }
 
