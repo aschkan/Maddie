@@ -69,7 +69,7 @@ export default function AdminView() {
         <Link href="/" className="link-quiet">← Back to the boards</Link>
         {state?.signedIn && <>{" · "}<Link href="/research" className="link-quiet">Interviews (read)</Link></>}
         <h1>Maddie admin</h1>
-        <p className="hint">Add what you find: marked places, a newer Pointer export, interviews. Everything here is real
+        <p className="hint">Add what you find: reported places, a newer Pointer export, interviews. Everything here is real
           data and goes straight into the shared database on both servers.</p>
       </header>
 
@@ -86,7 +86,7 @@ export default function AdminView() {
           <nav className="admin-tabs" aria-label="Admin sections">
             {(["places", "import", "interviews"] as Tab[]).map((id) => (
               <button key={id} type="button" className={tab === id ? "on" : undefined} onClick={() => setTab(id)}>
-                {id === "places" ? "Marked places" : id === "import" ? "Import Pointer export" : "Interviews"}
+                {id === "places" ? "Reported places" : id === "import" ? "Import Pointer export" : "Interviews"}
               </button>
             ))}
             <button type="button" className="btn-ghost" onClick={() => void signOut()}>Sign out</button>
@@ -205,7 +205,7 @@ function Places() {
       {draft ? (
         <PlaceForm draft={draft} onCancel={() => setDraft(null)} onSaved={() => { setDraft(null); setRound((n) => n + 1); }} />
       ) : (
-        <button type="button" className="btn" onClick={() => setDraft({ ...EMPTY, date: today() })}>+ Add a marked place</button>
+        <button type="button" className="btn" onClick={() => setDraft({ ...EMPTY, date: today() })}>+ Add a reported place</button>
       )}
 
       <div className="admin-filters">
@@ -295,7 +295,7 @@ function PlaceForm({ draft: initial, onCancel, onSaved }: { draft: Draft; onCanc
 
   return (
     <form className="admin-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <h2>{draft.id ? "Correct this place" : "Add a marked place"}</h2>
+      <h2>{draft.id ? "Correct this place" : "Add a reported place"}</h2>
       <div className="map-wrap admin-map-wrap"><AdminMap point={draft.point} onPick={picked} /></div>
       <label>Coordinates (click the map, or paste &ldquo;lat, lng&rdquo;)
         <input value={coords} onChange={(e) => typed(e.target.value)} placeholder="52.0907, 5.1214" inputMode="decimal" />
@@ -303,7 +303,7 @@ function PlaceForm({ draft: initial, onCancel, onSaved }: { draft: Draft; onCanc
       <label>Town / place name<input value={draft.place} onChange={(e) => setDraft({ ...draft, place: e.target.value })} placeholder="Utrecht" /></label>
       <label>Date reported<input type="date" value={draft.date} max={today()} onChange={(e) => setDraft({ ...draft, date: e.target.value || today() })} /></label>
       <fieldset>
-        <legend>Why the place is marked (any that apply)</legend>
+        <legend>Why the place was reported (any that apply)</legend>
         {REPORT_TYPES.filter((t) => t.id !== "other").map((type) => (
           <label key={type.id} className="check">
             <input type="checkbox" checked={draft.reasons.includes(type.id)} onChange={() => setDraft({ ...draft, reasons: toggle(draft.reasons, type.id) })} />
