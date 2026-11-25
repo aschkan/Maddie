@@ -598,9 +598,20 @@ invents a distinction the map cannot support.
 - **Lighting is drawn in a pane UNDER everything** (`PANES` in `mapBits.tsx`).
 - **Parks are GREEN.** Crowd: busy streets `+` teal, bars a small brown square
   — "not every crowd is a good crowd", so the two are never merged.
-- **No alarm red.** **A and B carry no hue.** **Routes differ by line style**
-  (solid / dashed / dotted) before ink. **Selection is blue** — area, brushed
-  interval, selected row.
+- **No alarm red.** **Start and Destination carry no hue** (and are never
+  called A and B on screen — that collided with Route A/B). **Routes differ by
+  colour ONLY** — solid, same width, none blue, similar lightness; the selected
+  one by opacity (100% vs 80%), never by a new colour. `docs/…Dashboard.md` § 8.
+  **Blue is selection and nothing else** — area, brushed interval.
+- **"Route A" is one chip, `RouteChip.tsx`, everywhere** — map, bars, timeline,
+  side panel, legend. Do not draw a route name any other way.
+- **The bars above and the timeline below share group names and ORDER**
+  (`TRACKS` in `Timeline.tsx`). Change one, change both.
+- **Report shades are exclusive classes** (`classOf` in `importance.ts`):
+  harassment mentioned × to the respondent / to others, then other stories by
+  who, then "nothing happened". One report, one row of the legend.
+- **Reports switched off is "hidden", never 0.** Every view that counts them
+  says so with strikethrough.
 - **The words.** No *safe*, *unsafe*, *safest* or *danger(ous)* in anything a
   participant reads; the test greps every component's JSX text.
 - **CSS tokens = palette values**; the test parses `globals.css`.

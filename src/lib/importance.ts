@@ -11,8 +11,9 @@
  *   * the rank becomes colour intensity + opacity + size (`palette.ts`
  *     `REPORT_RAMP`): darkest/most opaque = what the reader says matters most,
  *     the lightest is little more than an outline;
- *   * a record can carry several reasons ("one crate can be more than one data
- *     point"), so it takes the MOST serious of them — never an average;
+ *   * every report falls into exactly ONE class (`classOf`): harassment
+ *     mentioned or not, crossed with whether it happened to the respondent or
+ *     to others, plus "nothing happened, it feels threatening";
  *   * a very basic keyword read of the story text flags harassment and
  *     catcalling, so such a report can surface without anybody tagging it.
  *     "The point is not whether this is accurate. The point is how you show
@@ -25,22 +26,38 @@
 
 import type { Report, ReportType } from "./reports.ts";
 
-/** What can be ranked: the survey's reasons, and the story-text flag. */
-export type ImportanceKey = ReportType | "harassment";
+/**
+ * The CLASSES a report falls into — exactly one each. From the meeting of
+ * 25 Nov 2026: "if a story is harassment and it happened to me, where does it
+ * go, up or down?" The earlier list mixed two questions (what the story says,
+ * and who it happened to), so one report could match several rows and the
+ * reader could not tell which shade it would get. Now the two questions are
+ * crossed:
+ *
+ *   is harassment or catcalling mentioned?  ×  did it happen to me or others?
+ *
+ * plus one class for a place where nothing is said to have happened. Every
+ * report lands in exactly one row of the legend.
+ */
+export type ImportanceKey = "harassment-me" | "harassment-others" | "me" | "others" | "feeling";
 
 export const IMPORTANCE_ITEMS: { id: ImportanceKey; label: string; hint: string }[] = [
   {
-    id: "harassment",
-    label: "Story mentions harassment or catcalling",
-    hint: "A basic keyword check of the respondent's own words (Dutch and English). Not a classifier — a hint.",
+    id: "harassment-me",
+    label: "Harassment or catcalling, happened to the respondent",
+    hint: "The story mentions harassment or catcalling (a basic keyword check, Dutch and English) and the respondent says it happened to them.",
   },
-  { id: "experienced", label: "Happened to me", hint: "Something happened to the respondent here." },
-  { id: "witnessed", label: "Happened to others", hint: "Something happened to someone the respondent knows of." },
-  { id: "environment", label: "Feels threatening", hint: "The surroundings feel threatening; nothing is said to have happened." },
-  { id: "other", label: "Other / not given", hint: "No reason given." },
+  {
+    id: "harassment-others",
+    label: "Harassment or catcalling, happened to others",
+    hint: "The story mentions harassment or catcalling, and it happened to someone else (or the respondent does not say to whom).",
+  },
+  { id: "me", label: "Other story, happened to the respondent", hint: "Something happened to the respondent here; the story does not mention harassment or catcalling." },
+  { id: "others", label: "Other story, happened to others", hint: "Something happened to someone the respondent knows of; no mention of harassment or catcalling." },
+  { id: "feeling", label: "Nothing happened — the place feels threatening, or no reason given", hint: "The surroundings feel threatening, or no reason was given. Nothing is said to have happened." },
 ];
 
-/** The designer's default: the most direct experience first. Shown, and changeable. */
+/** The designer's default: the clearest, most direct experience first. Shown, and changeable. */
 export const DEFAULT_ORDER: ImportanceKey[] = IMPORTANCE_ITEMS.map((item) => item.id);
 
 /** How many shades there are — one per rank. */
@@ -70,24 +87,24 @@ export function mentionsHarassment(note: string | undefined | null): boolean {
   return !!note && PATTERN.test(note);
 }
 
-/** Every rankable kind a report carries — all its reasons, plus the story flag. */
-export function keysOf(report: Pick<Report, "category" | "reasons" | "note">): ImportanceKey[] {
-  const keys: ImportanceKey[] = [...(report.reasons?.length ? report.reasons : [report.category])];
-  if (mentionsHarassment(report.note)) keys.push("harassment");
-  return keys;
+/**
+ * The ONE class a report belongs to. "Happened to me" beats "to others" when a
+ * record gives both — the more direct account.
+ */
+export function classOf(report: Pick<Report, "category" | "reasons" | "note">): ImportanceKey {
+  const reasons: ReportType[] = report.reasons?.length ? report.reasons : [report.category];
+  const me = reasons.includes("experienced");
+  const others = reasons.includes("witnessed");
+  if (mentionsHarassment(report.note)) return me ? "harassment-me" : "harassment-others";
+  if (me) return "me";
+  if (others) return "others";
+  return "feeling";
 }
 
-/**
- * 0 = the most serious shade. A record takes the MOST serious of its kinds —
- * a place marked both "happened to me" and "feels threatening" is the former.
- */
+/** 0 = the darkest shade: where the report's class sits in the reader's order. */
 export function rankOf(report: Pick<Report, "category" | "reasons" | "note">, order: readonly ImportanceKey[] = DEFAULT_ORDER): number {
-  let best = LEVELS - 1;
-  for (const key of keysOf(report)) {
-    const at = order.indexOf(key);
-    if (at >= 0 && at < best) best = at;
-  }
-  return best;
+  const at = order.indexOf(classOf(report));
+  return at >= 0 ? at : LEVELS - 1;
 }
 
 /** An order read back from storage: every key once, unknown ones dropped, missing ones appended. */

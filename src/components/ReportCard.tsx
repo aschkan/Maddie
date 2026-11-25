@@ -9,6 +9,7 @@
  * Plain markup: it renders inside a Leaflet popup and in the boards' lists alike.
  */
 
+import Story from "@/components/Story";
 import { ADJUSTMENT_LABEL } from "@/lib/pointer";
 import { mentionsHarassment } from "@/lib/importance";
 import { REPORT_TYPES, SOURCE_LABEL, WHEN_OPTIONS, type Report } from "@/lib/reports";
@@ -16,11 +17,6 @@ import { REPORT_TYPES, SOURCE_LABEL, WHEN_OPTIONS, type Report } from "@/lib/rep
 const DATE = new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" });
 const TYPE_LABEL = new Map(REPORT_TYPES.map((type) => [type.id, type.label]));
 const WHEN_LABEL = new Map(WHEN_OPTIONS.map((option) => [option.id, option.label]));
-
-/** Google Translate for a Dutch story — opened only when the reader clicks. */
-export function translateLink(text: string): string {
-  return `https://translate.google.com/?sl=auto&tl=en&op=translate&text=${encodeURIComponent(text.slice(0, 1800))}`;
-}
 
 export default function ReportCard({ report }: { report: Report }) {
   const reasons = report.reasons?.length ? report.reasons : [report.category];
@@ -39,8 +35,7 @@ export default function ReportCard({ report }: { report: Report }) {
       )}
       {report.note && (
         <>
-          <q>{report.note}</q>
-          <a className="translate" href={translateLink(report.note)} target="_blank" rel="noreferrer">Translate ↗</a>
+          <Story text={report.note} />
           {mentionsHarassment(report.note) && <span className="muted">The story mentions harassment or catcalling (keyword check).</span>}
         </>
       )}

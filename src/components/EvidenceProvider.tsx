@@ -25,7 +25,7 @@ import type { Report } from "@/lib/reports";
 
 const CITY_KEY = "maddie.city.v1";
 const THEME_KEY = "maddie.theme.v1";
-const ORDER_KEY = "maddie.importance.v1";
+const ORDER_KEY = "maddie.importance.v2";
 
 /** A report belongs to a city if it is within this of the centre. */
 const CITY_RADIUS_M = 9_000;

@@ -125,7 +125,7 @@ export default function DashboardBoard() {
 
       <div className="area-grid">
         <section className="card">
-          <div className="card-head"><h2>Which neighbourhoods have the most reports, for their size?</h2></div>
+          <div className="card-head"><h2>Which neighbourhoods have the most reported places, for their size?</h2></div>
           <p className="card-sub">Reported places per km of road. Higher means more places were reported relative to the street network — not more risk. Tap one to focus the page on it.</p>
           <RankBars rows={perKm} highlight={picked} axisLabel="Reported places per km of road" onPick={(id) => setPicked(id === picked ? null : id)} />
         </section>
@@ -134,8 +134,8 @@ export default function DashboardBoard() {
           <div className="card-head"><h2>How much of each neighbourhood is mapped as lit?</h2></div>
           <p className="card-sub">Share of street length by its OpenStreetMap lighting tag. Unknown is its own category — nobody has tagged it, which is not the same as dark.</p>
           <Key items={[
-            { swatch: <Swatch colour="var(--lit)" />, label: "Mapped lit" },
-            { swatch: <Swatch colour="var(--unlit)" />, label: "Mapped unlit" },
+            { swatch: <Swatch colour="var(--lit)" />, label: "Lit — street lighting is mapped" },
+            { swatch: <Swatch colour="var(--unlit)" />, label: "Unlit" },
             { swatch: <Swatch colour="" hatch />, label: "Unknown" },
           ]} />
           <StackedShare
@@ -160,7 +160,7 @@ export default function DashboardBoard() {
         </section>
 
         <section className="card">
-          <div className="card-head"><h2>When were reports made? — {scope}</h2></div>
+          <div className="card-head"><h2>When were places reported? — {scope}</h2></div>
           <p className="card-sub">
             Reports per month: when the survey was filled in, not when anything happened, and not a trend in risk.
             Hover a bar for the reasons.{here.length > dated.length && <> {here.length - dated.length} reported during a window with no day are not drawn.</>}
@@ -169,7 +169,7 @@ export default function DashboardBoard() {
         </section>
 
         <section className="card">
-          <div className="card-head"><h2>How far are reports from the route you picked?</h2></div>
+          <div className="card-head"><h2>How far are reported places from the route you picked?</h2></div>
           <p className="card-sub">
             {ev.route ? <>Route: {ev.route.label}.</> : <>No route picked yet — measured to a default walk through {city.name}. <Link href="/">Pick one →</Link></>}
             {" "}Distance from each reported place in {scope} to the line.
@@ -194,7 +194,7 @@ export default function DashboardBoard() {
               </tr>
               <tr>
                 <th>Street lighting<small>OpenStreetMap · tagged edges</small></th>
-                <td>{district ? `${district.lighting.lit}% mapped lit` : "per neighbourhood, above"}{figureNote}</td>
+                <td>{district ? `${district.lighting.lit}% lit` : "per neighbourhood, above"}{figureNote}</td>
               </tr>
               <tr>
                 <th>Places to go in<small>Opening hours · OpenStreetMap POI</small></th>

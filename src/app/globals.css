@@ -24,12 +24,12 @@
   --context: #d5d8de;
   --park: #41ab5d;
   --crowd: #11898a;
-  --nightlife: #a6611a;
+  --nightlife: #7f4a12;
   --police: #475569;
   --trip: #111827;
-  --route-a: #13254d;
-  --route-b: #3d8fe0;
-  --route-c: #71757d;
+  --route-a: #7a4fa3;
+  --route-b: #d95f02;
+  --route-c: #ae017e;
 
   /* A report's five shades, most serious first (palette.ts REPORT_RAMP). */
   --rank-0: #252131;
@@ -77,12 +77,12 @@
   --context: #475569;
   --park: #74c476;
   --crowd: #2cc8c8;
-  --nightlife: #d08c3c;
+  --nightlife: #a0601c;
   --police: #cbd5e1;
   --trip: #f8fafc;
-  --route-a: #e2e8f0;
-  --route-b: #38bdf8;
-  --route-c: #94a3b8;
+  --route-a: #b08fd6;
+  --route-b: #fd8d3c;
+  --route-c: #dd3497;
 
   --rank-0: #f4f2f8;
   --rank-1: #d4d0de;
@@ -364,7 +364,7 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
 /* OSM's own tiles, made into a quiet grey canvas — one host, filtered here, so
    there is no second tile server that can be unreachable. */
 .tiles-day { filter: grayscale(1) brightness(1.06) contrast(.82); }
-.tiles-night { filter: grayscale(1) invert(1) brightness(.92) contrast(.88); }
+.tiles-night { filter: grayscale(1) invert(1) brightness(.78) contrast(.8); }
 
 .leaflet-container { font-family: var(--sans); }
 .leaflet-container .leaflet-control-attribution { font-size: 10px; background: color-mix(in srgb, var(--card) 80%, transparent); color: var(--ink-3); }
@@ -376,21 +376,28 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
   color: var(--ink-2); text-shadow: 0 0 3px var(--card), 0 0 6px var(--card);
   pointer-events: none;
 }
-.route-label span {
-  display: block; transform: translate(-50%, -50%);
-  padding: 2px 7px; border-radius: 3px; white-space: nowrap;
-  font-size: 12px; font-weight: 600; color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2);
+/* "Route A/B/C" — one chip, identical on the map and everywhere else (RouteChip.tsx). */
+.route-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px 7px; min-height: 0; border: 0; border-radius: 3px; white-space: nowrap;
+  font: 600 12px/1.35 var(--sans); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2);
+  opacity: .8; outline: 1.5px solid transparent; outline-offset: 1px;
 }
-.route-label .r0 { background: var(--route-a); }
-.route-label .r1 { background: var(--route-b); }
-.route-label .r2 { background: var(--route-c); }
-[data-theme="dark"] .route-label .r0 { color: #0f172a; }
+.route-chip.on { opacity: 1; outline-color: var(--ink); }
+button.route-chip { cursor: pointer; }
+.route-chip.r0 { background: var(--route-a); }
+.route-chip.r1 { background: var(--route-b); }
+.route-chip.r2 { background: var(--route-c); }
+[data-theme="dark"] .route-chip { color: #0f172a; }
+svg .route-chip-text { font: 600 12px var(--sans); fill: #fff; pointer-events: none; }
+[data-theme="dark"] svg .route-chip-text { fill: #0f172a; }
+.route-label .route-chip { transform: translate(-50%, -50%); }
 .end-label span {
   display: block; transform: translate(10px, -110%);
   font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap;
   text-shadow: 0 0 3px var(--card), 0 0 6px var(--card), 0 0 8px var(--card);
 }
-.end-label b { display: block; font-size: 15px; font-weight: 800; }
+.end-label b { display: block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
 .heart-icon { background: none; border: 0; }
 
 .report-pop .leaflet-popup-content-wrapper { border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.18); background: var(--card); color: var(--ink); }
@@ -431,7 +438,7 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
   font-size: 12.5px; background: var(--card); border: 1px solid var(--line-2); border-radius: 4px;
 }
 .map-banner.warn { color: #b45309; }
-.handoff { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; min-height: var(--tap); font-size: 12.5px; }
+.handoff { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; min-height: var(--tap); font-size: 12.5px; }
 
 .btn-small {
   display: inline-flex; align-items: center; gap: 4px;
@@ -494,7 +501,45 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
 .factors .key { margin-top: 8px; }
 .timeline .route-name { font-size: 14px; font-weight: 700; }
 .timeline .track-label { font-size: 12px; fill: var(--ink-2); }
+.timeline .track-label.struck { text-decoration: line-through; opacity: .6; }
+.timeline .hidden-note { font-style: italic; }
+svg .cursor-line { stroke: var(--trip); stroke-width: 1.5; }
+svg .cursor-dot { fill: var(--trip); }
+
+/* The routes in numbers — bars under group headers (FactorBars in charts.tsx). */
+.fbars { display: grid; grid-template-columns: 70px repeat(var(--cols, 6), minmax(86px, 1fr)); overflow-x: auto; column-gap: 0; }
+.fb-row { display: contents; cursor: pointer; }
+.fb-group { padding: 4px 8px 2px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line-2); font-size: 13px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+.fb-title { padding: 4px 8px 6px; border-left: 1px solid var(--line); font-size: 12px; font-weight: 500; color: var(--ink-2); line-height: 1.25; }
+.fb-title.struck { text-decoration: line-through; color: var(--ink-3); }
+.fb-name { display: flex; align-items: center; padding: 6px 4px 6px 0; border-top: 1px solid var(--line); }
+.fb-cell { min-width: 0; padding: 6px 6px; border-left: 1px solid var(--line); border-top: 1px solid var(--line); display: flex; align-items: center; }
+.fb-cell > div { width: 100%; }
+.fb-bar svg { display: block; overflow: visible; font-family: var(--sans); }
+.fb-bar .value { font-size: 12.5px; font-weight: 700; fill: var(--ink); }
+.fb-bar .tick { font-size: 11px; fill: var(--ink-3); }
+.fb-bar .axis { stroke: var(--line-2); stroke-width: 1; }
+.fb-share { display: block; margin-top: 3px; font-size: 11px; color: var(--ink-3); line-height: 1.25; }
+.fb-reading, .fb-hidden { font-size: 12px; color: var(--ink-3); font-style: italic; }
 .timeline-card .key { margin-top: 6px; }
+/* One legend for the map and the comparison, between the two. */
+.compare-legend h2 { font-size: 15px; font-weight: 700; margin: 0 0 6px; }
+.legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 18px; }
+.legend-group { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
+.legend-group h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink); }
+.legend-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.legend-row.check { min-height: 32px; }
+.legend-note { font-size: 12px; color: var(--ink-3); line-height: 1.35; }
+.area-swatch { display: inline-block; width: 18px; height: 12px; flex: none; border: 1.5px dashed var(--trip); opacity: .6; }
+.cursor-swatch { display: inline-block; width: 12px; height: 12px; flex: none; border: 3px solid var(--trip); border-radius: 50%; background: var(--card); }
+.struck-note { text-decoration: line-through; text-decoration-thickness: 1px; color: var(--ink-3); }
+.legend-note.struck-note { text-decoration: none; font-style: italic; }
+.trip-label { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.reports-switch { min-height: var(--tap); }
+.interval-title { display: flex; align-items: center; gap: 8px; }
+.handoff .route-chip { margin: 0 2px; }
+.card > h2 .route-chip, .note .route-chip { color: #fff; font-weight: 600; }
+[data-theme="dark"] .card > h2 .route-chip, [data-theme="dark"] .note .route-chip { color: #0f172a; }
 .side-stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 .interval h2 { font-size: 15px; }
 .interval-box {
@@ -698,6 +743,9 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
 .stories li { border-top: 1px solid var(--line); padding-top: 6px; }
 .stories li:first-child { border-top: 0; padding-top: 0; }
 .translate { font-size: 12px; }
+.story { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.story small { font-size: 11.5px; }
+.story .link { min-height: 0; padding: 0; }
 .report-card .report-reasons { margin: 2px 0 0; padding-left: 18px; }
 .intro { margin: 0; max-width: 72ch; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
 
@@ -766,6 +814,7 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
   .compare-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
   .compare-map { grid-column: 1 / span 5; }
   .compare .factors { grid-column: 6 / span 7; }
+  .compare-legend { grid-column: 1 / -1; }
   .timeline-card { grid-column: 1 / span 9; }
   .side-stack { grid-column: 10 / span 3; }
   .compare-map .map-wrap { height: 100%; min-height: 330px; }
@@ -784,4 +833,5 @@ svg .hatched { stroke: var(--unknown); stroke-width: .5; }
   min-width: var(--tap); min-height: var(--tap); border-radius: 6px;
   border: 1px solid var(--line); background: var(--card); color: var(--ink); font-weight: 700;
 }
-.map-place button[aria-pressed="true"] { background: var(--selection); border-color: var(--selection); color: #fff; }
+.map-place button { opacity: .55; padding: 0 8px; font-weight: 600; }
+.map-place button[aria-pressed="true"] { opacity: 1; border: 2px solid var(--ink); font-weight: 800; }

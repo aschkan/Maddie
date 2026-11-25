@@ -10,7 +10,7 @@ import { TileLayer, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 
 import { endpoint } from "@/lib/endpoints";
-import { pick as pickTone, REPORT_OPACITY, REPORT_RADIUS, REPORT_RAMP, type Tone } from "@/lib/palette";
+import { pick as pickTone, REPORT_OPACITY, REPORT_OPACITY_NIGHT, REPORT_RADIUS, REPORT_RAMP, type Tone } from "@/lib/palette";
 
 /** Tiles come through this server by default — see `endpoints.ts`. */
 const TILE_URL = endpoint("tile");
@@ -121,11 +121,11 @@ export function reportStyle(rank: number, tone: Tone, opts: { open?: boolean; di
   return {
     radius: opts.open ? 8 : REPORT_RADIUS[r]!,
     pathOptions: {
-      color: opts.open ? opts.selectionInk ?? ink : outline ? pickTone(REPORT_RAMP[2]!, tone) : tone === "night" ? "#0b1120" : "#ffffff",
-      weight: opts.open ? 3 : outline ? 1.1 : 0.8,
+      color: opts.open ? opts.selectionInk ?? ink : outline ? pickTone(REPORT_RAMP[2]!, tone) : tone === "night" ? "#020617" : "#ffffff",
+      weight: opts.open ? 3 : outline ? 1.2 : tone === "night" ? 1.4 : 0.8,
       fillColor: ink,
-      fillOpacity: REPORT_OPACITY[r]! * fade,
-      opacity: (outline ? 0.7 : 0.9) * fade,
+      fillOpacity: (tone === "night" ? REPORT_OPACITY_NIGHT[r]! : REPORT_OPACITY[r]!) * fade,
+      opacity: (outline ? (tone === "night" ? 0.95 : 0.7) : 0.9) * fade,
     },
   };
 }

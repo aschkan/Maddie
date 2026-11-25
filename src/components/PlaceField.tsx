@@ -18,13 +18,12 @@ import { searchPlaces } from "@/lib/geocode";
 
 interface Props {
   label: string;
-  letter: "A" | "B";
   value: TripEnd;
   presets: TripEnd[];
   onPick: (end: TripEnd) => void;
 }
 
-export default function PlaceField({ label, letter, value, presets, onPick }: Props) {
+export default function PlaceField({ label, value, presets, onPick }: Props) {
   const [text, setText] = useState<string | null>(null);
   const [hits, setHits] = useState<TripEnd[]>([]);
   const [open, setOpen] = useState(false);
@@ -75,7 +74,7 @@ export default function PlaceField({ label, letter, value, presets, onPick }: Pr
         <MapPin size={16} aria-hidden />
         <input
           id={id}
-          value={text ?? `${letter}. ${value.label}`}
+          value={text ?? value.label}
           onFocus={() => { setText(""); setOpen(true); }}
           onChange={(event) => { setText(event.target.value); setOpen(true); }}
           spellCheck={false}

@@ -135,7 +135,7 @@ Participants all named crowdedness beside lighting, and that *not every crowd is
 | report, five ranks | `#252131` → `#c9c7d2` | `#f4f2f8` → `#5e596b` |
 | park segment | `#41ab5d` green | `#74c476` |
 | busy streets | `#11898a` teal | `#2cc8c8` |
-| bars, pubs, cafés | `#a6611a` brown | `#d08c3c` |
+| bars, pubs, cafés | `#7f4a12` brown | `#a0601c` |
 | age bands (chart only) | ColorBrewer BuPu, 9 classes | |
 
 ### 7.6 Still open
@@ -143,3 +143,67 @@ Participants all named crowdedness beside lighting, and that *not every crowd is
 - Data permissions for the Pointer set (public display of single places, stories, aggregates, retention) — to be confirmed with the university's data contact.
 - The CBS police-figures feed does not reach the map yet.
 - A real crowd/footfall source, and whether a crowd's *kind* can be read from the stories.
+
+## 8. Version 4 — after the supervisor meeting of 25 November 2026
+
+Plan a route is the main view ("the creative, innovative part"); everything below is about it. Around me and the dashboard get only the basics: the default chart for the type of data, and the same words as Plan a route.
+
+### 8.1 Routes: one encoding, no recommendation
+
+- **Colour only.** Solid / dashed / dotted on top of three inks was a double encoding, and the dashes read as "less certain" or "less recommended". The app recommends no route — "that's their decision" — so every line is solid and the same width, and no route is brighter or heavier than another.
+- **No route is blue.** Blue means *what you picked* (area, brushed interval) and nothing else. A selected route is shown by **opacity** (100% vs 80%) and an outline on its chip, never by changing a colour.
+- **Overlap is drawn side by side**: routes sharing a street are offset a few pixels, so three options read as three, from start to destination.
+- **"Route A/B/C" is ONE chip** (`RouteChip.tsx`) — the route's colour, white text — identical on the map, beside the bars, on the timeline, in the side panel, in the legend.
+- **Start / Destination, not A / B.** The trip's ends were "A" and "B", which collided with Route A and Route B ("AA. Utrecht Centraal"). The tap-to-set control uses an outline, not the selection blue.
+
+| Meaning | Day | Night |
+|---|---|---|
+| Route A | `#7a4fa3` purple | `#b08fd6` |
+| Route B | `#d95f02` orange | `#fd8d3c` |
+| Route C | `#ae017e` magenta | `#dd3497` |
+
+`test/palette.test.ts` checks the three are ≥ 40° apart in hue, ≥ 45° from the selection blue, and within 0.2 of each other in lightness.
+
+### 8.2 Same names, same order, above and below
+
+The numbers (top right) and the timeline ("Compare the routes along the way") use the same groups in the same order: Duration · Lighting · Places to go in · Reported places · Crowd (busy streets, bars) · Parks & underpasses. Group headers sit over their sub-columns. "Where do differences occur?" was renamed — people may look for similarities too.
+
+### 8.3 The numbers are bars
+
+The dot plot (with its meaningless 0–50–100 axis on a duration) became **bars**: absolute bars for minutes, counts and metres, each from zero with the number printed; and one **100% bar** for lighting (lit · unlit · unknown, hatched). On Around me, "What people do about it" is now a 100% bar per answer (the whole bar = everyone who answered) instead of two same-length bars.
+
+### 8.4 One legend between the map and the comparison
+
+Every mark is explained once: routes, the cursor, lighting (lit / unlit / unknown lighting — and that the map draws **lit streets only, inside a dashed outline** where lighting was loaded), the heart (places to go in), the report dots, crowd, parks & underpasses.
+
+"All streets look lit" was checked: not a bug. On the recorded Utrecht routes 70–85% of samples are `lit=yes`; the rest is almost all *unknown*, which the map does not draw. The outline and the legend now say what is and is not shown.
+
+### 8.5 Reported places: classes that do not overlap
+
+The shades were five rows that mixed two questions (what the story says, who it happened to), so one report fitted several rows. Now each report is in exactly one class (`classOf` in `importance.ts`), still reorderable:
+
+1. harassment or catcalling mentioned, happened to the respondent
+2. harassment or catcalling mentioned, happened to others
+3. other story, happened to the respondent
+4. other story, happened to others
+5. nothing happened — the place feels threatening, or no reason given
+
+"Data source" (OpenStreetMap + reports / OpenStreetMap only) was not a choice of sources; it is now one switch, **Show places people reported**. When it is off, the numbers, timeline and side panel say **hidden**, with strikethrough, never 0 — "they may think: nobody reported anything, it's fine."
+
+### 8.6 Coordinated views
+
+Tap a point on a route on the map → that route is selected, a ring marks the point, the timeline draws a line at the same progress, and the side panel describes the stretch around it. Move along the selected route on the timeline → the ring on the map follows.
+
+### 8.7 Stories in English, in the app
+
+`/api/translate` translates a story (the app's model first, then Google Translate's public endpoint, fetched by the server); the English is shown with "Show original". If neither answers, the original is shown with the external link.
+
+### 8.8 Small fixes
+
+- **Night mode:** report dots were light-grey smudges at a fifth of their opacity on a mid-grey map. At night they keep a minimum opacity (`REPORT_OPACITY_NIGHT`) and a dark outline, and the night basemap is a little darker.
+- **Bars vs Route B:** the bar/pub squares were a brown of the same lightness as the orange Route B. They are now a much darker brown (`#7f4a12` / `#a0601c`); the test checks the gap.
+
+### 8.9 Still open from this meeting
+
+- Talk to the university's data-management contact about publishing the Pointer data before submission.
+- The model gateway (Liara) answered "Workspace is not ACTIVE" on 25 Nov 2026; until it is reactivated, translation runs on the Google fallback (aschkan only) and `/api/assess` has no sentence.

@@ -13,10 +13,14 @@
  * streets, and bars as their own kind of crowd), parks in green, report dots
  * shaded by how serious they read, and every story in a stretch, readable.
  *
- * Three routes, five factors, NO SCORE. One dot plot per factor, one row per
- * route, so the eye crosses a row to see one route and runs down a column to
- * see one factor (Franconeri: compare several items on several axes → small
- * multiples of dot plots). Below, where along each route the differences sit.
+ * Three routes, NO SCORE, and no route recommended — "that's their decision"
+ * (meeting of 25 Nov 2026). The routes differ by colour only; a selected one
+ * by opacity. "The routes in numbers" is bars (absolute values) and one 100%
+ * bar for lighting, under group headers named and ordered exactly like the
+ * timeline below it ("Compare the routes along the way"). One legend, between
+ * the map and the comparison, says what every mark means. The map and the
+ * timeline are COORDINATED: tap a route and the timeline marks that point;
+ * move along the timeline and the map's cursor follows.
  *
  * The trade-off slider FILTERS — a route over the time budget is set aside —
  * and never re-scores. "Route B is best on lighting and worst on parkland" is
@@ -30,29 +34,30 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import { Bike, CalendarDays, Car, ChevronDown, Clock, Database, Footprints, ExternalLink } from "lucide-react";
+import { Bike, CalendarDays, Car, ChevronDown, Clock, Footprints, ExternalLink } from "lucide-react";
 
 import { SOURCE_LABEL } from "@/lib/reports";
 import BoardHeader, { Sources } from "@/components/BoardHeader";
-import { DotColumn, Key, Swatch } from "@/components/charts";
+import { FactorBars, Swatch, type FactorColumn } from "@/components/charts";
 import { useEvidence } from "@/components/EvidenceProvider";
 import ImportancePanel, { RankDot } from "@/components/ImportancePanel";
 import PlaceField from "@/components/PlaceField";
-import { translateLink } from "@/components/ReportCard";
+import RouteChip from "@/components/RouteChip";
+import Story from "@/components/Story";
 import Timeline from "@/components/Timeline";
 import { PLACE_KINDS, useLiveLayers, useRecording } from "@/components/useMapData";
 import { useRouteFacts } from "@/components/useRouteFacts";
 import type { City, TripEnd } from "@/lib/cities";
 import { lightAt } from "@/lib/daylight";
 import {
-  CROWD_KINDS, niceMax, routeEvidence, routeLetter, subPath, summariseInterval, withinBudget, type RouteEvidence,
+  CROWD_KINDS, routeEvidence, routeLetter, subPath, summariseInterval, withinBudget, type RouteEvidence,
 } from "@/lib/evidence";
 import { boundsAround, distanceM } from "@/lib/geo";
 import { googleMapsLink } from "@/lib/handoff";
 import { EMPTY_LAYERS } from "@/lib/layers";
 import { fetchRoutes, type LatLng, type Profile, type Route } from "@/lib/osrm";
 import type { SampleRead } from "@/lib/overpass";
-import { pick, ROUTE_DASH, ROUTE_INK } from "@/lib/palette";
+import { pick, ROUTE_INK } from "@/lib/palette";
 import { rankOf } from "@/lib/importance";
 import { recordedLeg, SCENARIO_DESTINATIONS, SCENARIO_PROFILES, SCENARIO_START } from "@/lib/scenario";
 
@@ -71,8 +76,6 @@ const MODES: { id: Profile; label: string; Icon: typeof Footprints }[] = [
 ];
 const LIGHT_WORD = { day: "daylight", twilight: "dusk", night: "after dark" } as const;
 
-type Source = "osm+reports" | "osm";
-
 const same = (a: TripEnd, b: TripEnd) => distanceM(a.point, b.point) < 30;
 
 /** A point set on the map has no name until somebody searches; say where it is. */
@@ -90,7 +93,8 @@ function CompareFor({ city }: { city: City }) {
   const [profile, setProfile] = useState<Profile>("walking");
   const [departure, setDeparture] = useState("21:00");
   const [date, setDate] = useState("2026-10-09");
-  const [source, setSource] = useState<Source>("osm+reports");
+  const [showReports, setShowReports] = useState(true);
+  const [cursor, setCursor] = useState<number | null>(null);
   const [selected, setSelected] = useState(0);
   const [brush, setBrush] = useState<[number, number] | null>([0.4, 0.55]);
   const [extra, setExtra] = useState(10);
@@ -98,7 +102,6 @@ function CompareFor({ city }: { city: City }) {
   const [placing, setPlacing] = useState<"A" | "B">("A");
   const [showCrowd, setShowCrowd] = useState(false);
   const [shadeOpen, setShadeOpen] = useState(false);
-  const [keyOpen, setKeyOpen] = useState(false);
 
   /** A tap or a drag on the map: that end moves, and the next tap sets the other. */
   function place(letter: "A" | "B", point: LatLng) {
@@ -106,7 +109,13 @@ function CompareFor({ city }: { city: City }) {
     if (letter === "A") setFrom(end);
     else setTo(end);
     setSelected(0);
+    setCursor(null);
     setPlacing(letter === "A" ? "B" : "A");
+  }
+
+  function selectRoute(index: number) {
+    if (index !== selected) setCursor(null);
+    setSelected(index);
   }
 
   // The date is read in the browser: the page is prerendered, and a date
@@ -167,7 +176,12 @@ function CompareFor({ city }: { city: City }) {
   const layers = scenarioLeg ? recording?.layers ?? EMPTY_LAYERS : liveLayers.layers;
   const spots = useMemo(() => layers.spots.filter((spot) => PLACE_KINDS.includes(spot.kind)), [layers.spots]);
   const crowdSpots = useMemo(() => layers.spots.filter((spot) => CROWD_KINDS.includes(spot.kind)), [layers.spots]);
-  const reports = useMemo(() => (source === "osm" ? [] : ev.reports), [source, ev.reports]);
+  const reports = useMemo(() => (showReports ? ev.reports : []), [showReports, ev.reports]);
+  // Where lighting was loaded. Nothing is drawn outside it, so it is outlined.
+  const lightArea = useMemo(
+    () => (scenarioLeg ? boundsAround(layers.litWays.flatMap((way) => way.path), 0) : routeBox),
+    [scenarioLeg, layers.litWays, routeBox],
+  );
 
   /* ── each route, decomposed ─────────────────────────────────────────── */
   const evidence = useMemo<(RouteEvidence | null)[]>(
@@ -186,7 +200,7 @@ function CompareFor({ city }: { city: City }) {
   useEffect(() => {
     void (async () => {
       if (!chosenRoute) return;
-      ev.setRoute({ cityId: city.id, label: `Route ${routeLetter(chosen)}, ${from.label} → ${to.label}`, path: chosenRoute.path });
+      ev.setRoute({ cityId: city.id, label: `Route ${routeLetter(chosen)}, ${from.label} to ${to.label}`, path: chosenRoute.path });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- routeKey captures the route
   }, [routeKey]);
@@ -211,17 +225,21 @@ function CompareFor({ city }: { city: City }) {
     return spots.filter((spot) => ids.has(spot.id));
   }, [evidence, spots]);
 
-  const factors = [
-    { title: "Time (min)", values: evidence.map((e, i) => (routes[i] ? minutes[i]! : e?.minutes ?? null)), max: niceMax(Math.max(10, ...minutes) * 1.08) },
-    { title: "Mapped lit (%)", values: evidence.map((e) => e?.litPct ?? null), max: 100 },
-    { title: "Unknown lighting (%)", values: evidence.map((e) => e?.unknownPct ?? null), max: 100 },
-    { title: "Places to go in (count)", values: evidence.map((e) => e?.places.length ?? null), max: niceMax(Math.max(5, ...evidence.map((e) => e?.places.length ?? 0))) },
-    { title: "Busy streets (count)", values: evidence.map((e) => e?.busy.length ?? null), max: niceMax(Math.max(5, ...evidence.map((e) => e?.busy.length ?? 0))) },
-    { title: "Bars & cafés (count)", values: evidence.map((e) => e?.nightlife.length ?? null), max: niceMax(Math.max(5, ...evidence.map((e) => e?.nightlife.length ?? 0))) },
-    { title: "Through parks (m)", values: evidence.map((e) => e?.parklandM ?? null), max: niceMax(Math.max(100, ...evidence.map((e) => e?.parklandM ?? 0))) },
-    { title: "Reported places nearby", values: evidence.map((e) => e?.reports.length ?? null), max: niceMax(Math.max(3, ...evidence.map((e) => e?.reports.length ?? 0))) },
+  const count = (of: (e: RouteEvidence) => number) => evidence.map((e) => (e ? of(e) : null));
+  // Same groups, same names, same order as the timeline's tracks (`TRACKS`).
+  const columns: FactorColumn[] = [
+    { group: "Duration", title: "Minutes, start to destination", kind: "bar", values: routes.map((_, i) => minutes[i] ?? null), unit: " min" },
+    { group: "Lighting", title: "Share of the route: lit · unlit · unknown", kind: "lighting", shares: evidence.map((e) => (e ? { lit: e.litPct, unlit: e.unlitPct, unknown: e.unknownPct } : null)) },
+    { group: "Places to go in", title: "Within 100 m", kind: "bar", values: count((e) => e.places.length) },
+    {
+      group: "Reported places", title: "Within 75 m", kind: "bar", values: count((e) => e.reports.length),
+      hiddenNote: showReports ? undefined : "Hidden — you switched them off",
+    },
+    { group: "Crowd", title: "Busy streets & squares", kind: "bar", values: count((e) => e.busy.length) },
+    { group: "Crowd", title: "Bars, pubs & cafés", kind: "bar", values: count((e) => e.nightlife.length) },
+    { group: "Parks & underpasses", title: "Through parks (m)", kind: "bar", values: count((e) => e.parklandM) },
+    { group: "Parks & underpasses", title: "Underpasses", kind: "bar", values: count((e) => e.underpasses.length) },
   ];
-  const rowH = 52;
 
   const sky = useMemo(() => {
     const at = new Date(`${date}T${departure}:00`);
@@ -236,13 +254,13 @@ function CompareFor({ city }: { city: City }) {
     <main className="board compare">
       <BoardHeader
         title="Plan a route"
-        note={<>Three ways from A to B, side by side: how lit, how busy, what is nearby, what people reported. There is no <b>overall score</b> — you decide.</>}
+        note={<>Three different ways from your start to your destination, side by side: how lit, how busy, what is nearby, what people reported. None of them is recommended and there is no <b>overall score</b> — you decide.</>}
       />
 
       {/* ── the trip ────────────────────────────────────────────────── */}
       <section className="card trip-bar" aria-label="Trip">
-        <PlaceField label="Starting point" letter="A" value={from} presets={presets} onPick={(end) => { setFrom(end); setSelected(0); }} />
-        <PlaceField label="Destination" letter="B" value={to} presets={presets} onPick={(end) => { setTo(end); setSelected(0); }} />
+        <PlaceField label="Start" value={from} presets={presets} onPick={(end) => { setFrom(end); setSelected(0); setCursor(null); }} />
+        <PlaceField label="Destination" value={to} presets={presets} onPick={(end) => { setTo(end); setSelected(0); setCursor(null); }} />
         <div className="trip-field">
           <label htmlFor="mode">Travel mode</label>
           <div className="trip-input">
@@ -272,15 +290,12 @@ function CompareFor({ city }: { city: City }) {
           </div>
         </div>
         <div className="trip-field wide">
-          <label htmlFor="source">Data source</label>
-          <div className="trip-input">
-            <Database size={16} aria-hidden />
-            <select id="source" value={source} onChange={(e) => setSource(e.target.value as Source)}>
-              <option value="osm+reports">OpenStreetMap + community reports{city.scenario ? ` (${city.name})` : ""}</option>
-              <option value="osm">OpenStreetMap only</option>
-            </select>
-            <ChevronDown size={16} aria-hidden className="chev" />
-          </div>
+          <span className="trip-label">Reported places</span>
+          <label className="check reports-switch">
+            <input type="checkbox" checked={showReports} onChange={() => setShowReports(!showReports)} />
+            <span>Show places people reported{city.scenario ? ` (${city.name})` : ""}</span>
+          </label>
+          <small className="trip-hint">Streets, lighting and places always come from OpenStreetMap.</small>
         </div>
       </section>
 
@@ -296,7 +311,7 @@ function CompareFor({ city }: { city: City }) {
               routes={routes}
               hidden={hidden}
               selected={chosen}
-              onSelect={setSelected}
+              onSelect={selectRoute}
               highlight={highlight}
               litWays={layers.litWays}
               places={nearPlaces}
@@ -306,30 +321,19 @@ function CompareFor({ city }: { city: City }) {
               onTiles={setTilesOk}
               placing={placing}
               onPlace={place}
+              lightArea={lightArea}
+              cursor={cursor}
+              onCursor={(route, at) => { setSelected(route); setCursor(at); setBrush([Math.max(0, at - 0.03), Math.min(1, at + 0.03)]); }}
             />
             <div className="map-place" role="group" aria-label="Tap the map to set">
               <span>Tap map to set</span>
-              {(["A", "B"] as const).map((letter) => (
+              {([["A", "Start"], ["B", "Destination"]] as const).map(([letter, word]) => (
                 <button key={letter} type="button" aria-pressed={placing === letter} onClick={() => setPlacing(letter)}>
-                  {letter}
+                  {word}
                 </button>
               ))}
             </div>
             <span className="north" aria-hidden>N<br />▲</span>
-            <div className={`map-key boxed${keyOpen ? "" : " folded"}`}>
-              <button type="button" className="key-fold" onClick={() => setKeyOpen(!keyOpen)} aria-expanded={keyOpen}>
-                {keyOpen ? "Hide key ▾" : "Key ▸"}
-              </button>
-              {keyOpen && <>
-              <span><span className="heart">♥</span> Places to go in</span>
-              <span><i className="sw sw-line" style={{ background: "var(--lit)" }} /> Mapped lighting</span>
-              <span><span className="rank-ramp">{[0, 2, 4].map((r) => <RankDot key={r} rank={r} />)}</span> Reported places — tap one to read it</span>
-              <label className="key-toggle">
-                <input type="checkbox" checked={showCrowd} onChange={() => setShowCrowd(!showCrowd)} />
-                <span><span className="crowd-mark">+</span> busy streets · <span className="bar-mark" /> bars</span>
-              </label>
-              </>}
-            </div>
             {!tilesOk && <p className="map-banner">The basemap did not load — the routes are still drawn.</p>}
             {routing && <p className="map-banner">Asking for routes…</p>}
             {routeError && <p className="map-banner warn">{routeError}</p>}
@@ -337,108 +341,137 @@ function CompareFor({ city }: { city: City }) {
           </div>
           {handoff && (
             <a className="handoff" href={handoff.url} target="_blank" rel="noreferrer">
-              <ExternalLink size={14} /> {mode.label} Route {routeLetter(chosen)} in Google Maps — the route travels as {handoff.waypoints} waypoints; the evidence stays here
+              <ExternalLink size={14} /> {mode.label} <RouteChip index={chosen} /> in Google Maps — the route travels as {handoff.waypoints} waypoints; the evidence stays here
             </a>
           )}
         </section>
 
-        {/* ── dot plots ───────────────────────────────────────────────── */}
+        {/* ── the routes in numbers ───────────────────────────────────── */}
         <section className="card factors">
-          <div className="card-head"><h2>The routes, factor by factor</h2></div>
-          <p className="card-sub">One row per route, one column per factor. Tap a route to follow it on the map and below.</p>
+          <div className="card-head"><h2>The routes in numbers</h2></div>
+          <p className="card-sub">The totals for each whole route, from start to destination. Tap a route to follow it on the map and in the comparison below.</p>
           {routes.length === 0 ? (
             <p className="empty">{routing ? "Asking for routes…" : "No routes yet — pick a start and a destination above."}</p>
           ) : (
-            <div className="dot-grid" style={{ ["--rows" as string]: routes.length, ["--cols" as string]: factors.length }}>
-              <div className="dot-names" style={{ paddingTop: 34 + 22 }}>
-                {routes.map((_, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    style={{ height: rowH }}
-                    className={i === chosen ? "on" : undefined}
-                    onClick={() => setSelected(i)}
-                  >
-                    {routeLetter(i)}
-                  </button>
-                ))}
-              </div>
-              {factors.map((factor) => (
-                <DotColumn
-                  key={factor.title}
-                  title={factor.title}
-                  max={factor.max}
-                  rowH={rowH}
-                  selected={chosen}
-                  onPick={setSelected}
-                  rows={factor.values.map((value, i) => ({ value, colour: inks[i]!, muted: hidden[i] }))}
-                />
-              ))}
-            </div>
+            <FactorBars
+              columns={columns}
+              routes={routes.length}
+              inks={inks}
+              muted={hidden}
+              selected={chosen}
+              onPick={selectRoute}
+              chip={(i) => <RouteChip index={i} on={i === chosen} note={hidden[i] ? "over the time budget" : undefined} />}
+            />
           )}
+          {hidden.some(Boolean) && <p className="note">Faded: over the time budget you set (Explore trade-offs).</p>}
           {reading && <p className="note">Reading what OpenStreetMap records along each route…</p>}
           {live.error && !scenarioLeg && <p className="note warn">{live.error}</p>}
-          {routes.length > 0 && (
-            <Key items={routes.map((_, i) => ({
-              swatch: <svg width="26" height="8" aria-hidden><line x1="1" x2="25" y1="4" y2="4" stroke={inks[i]} strokeWidth="3" strokeDasharray={ROUTE_DASH[i]} /></svg>,
-              label: `Route ${routeLetter(i)}${hidden[i] ? " — over the time budget" : ""}`,
-            }))} />
-          )}
+        </section>
+
+        {/* ── one legend, for the map and the comparison ──────────────── */}
+        <section className="card compare-legend" aria-label="What the marks mean">
+          <h2>What the marks mean</h2>
+          <div className="legend-grid">
+            <div className="legend-group">
+              <h3>Routes</h3>
+              <span className="legend-row">
+                {routes.map((_, i) => <RouteChip key={i} index={i} on={i === chosen} onClick={() => selectRoute(i)} />)}
+              </span>
+              <span className="legend-row">Three different ways from start to destination, in no order of preference. The one you picked is solid; the others are a little faded.</span>
+              <span className="legend-row"><span className="cursor-swatch" aria-hidden /> The point you tapped on a route — the comparison below marks the same point.</span>
+            </div>
+            <div className="legend-group">
+              <h3>Lighting</h3>
+              <span className="legend-row"><i className="sw sw-line" style={{ background: "var(--lit)" }} /> Lit — street lighting is mapped</span>
+              <span className="legend-row"><Swatch colour="var(--unlit)" /> Unlit — mapped as having no lighting</span>
+              <span className="legend-row"><Swatch colour="" hatch /> Unknown lighting — nobody has mapped it</span>
+              <span className="legend-row"><span className="area-swatch" aria-hidden /> The area where lighting is drawn</span>
+              <small className="legend-note">On the map only <b>lit</b> streets are drawn, and only inside the dashed outline — outside it nothing was loaded. Unlit and unknown lighting are shown in the comparison below, not on the map.</small>
+            </div>
+            <div className="legend-group">
+              <h3>Places to go in</h3>
+              <span className="legend-row"><span className="heart">♥</span> A station, shop, pharmacy… — a door to go in, usually with people</span>
+            </div>
+            <div className="legend-group">
+              <h3>Reported places</h3>
+              <span className="legend-row">
+                <span className="rank-ramp">{[0, 1, 2, 3, 4].map((r) => <RankDot key={r} rank={r} />)}</span>
+                A place a woman reported in Pointer&apos;s survey, with why. Darker = more serious. Tap a dot to read it.
+              </span>
+              {!showReports && <small className="legend-note struck-note">Hidden: you switched reported places off above. They are still there.</small>}
+              <button type="button" className="section-toggle" onClick={() => setShadeOpen(!shadeOpen)} aria-expanded={shadeOpen}>
+                <span>What each shade means</span>
+                <ChevronDown size={16} aria-hidden className={shadeOpen ? "flip" : undefined} />
+              </button>
+              {shadeOpen && <ImportancePanel compact />}
+            </div>
+            <div className="legend-group">
+              <h3>Crowd</h3>
+              <span className="legend-row"><span className="crowd-mark">+</span> Busy street or square</span>
+              <span className="legend-row"><span className="bar-mark" /> Bar, pub or café — a crowd, but not every crowd feels the same</span>
+              <label className="check legend-row">
+                <input type="checkbox" checked={showCrowd} onChange={() => setShowCrowd(!showCrowd)} />
+                <span>Show them on the map too</span>
+              </label>
+            </div>
+            <div className="legend-group">
+              <h3>Parks &amp; underpasses</h3>
+              <span className="legend-row"><Swatch colour="var(--park)" /> Through a park</span>
+              <span className="legend-row"><span className="arch" aria-hidden>∩</span> Underpass (under a bridge or road)</span>
+              <small className="legend-note">In the comparison below only.</small>
+            </div>
+          </div>
         </section>
 
         {/* ── timeline ────────────────────────────────────────────────── */}
         <section className="card timeline-card">
           <div className="card-head">
-            <h2>Where do differences occur?</h2>
-            <span className="card-hint">Drag along a route to look at one stretch of it.</span>
+            <h2>Compare the routes along the way</h2>
+            <span className="card-hint">Move along a route to see that point on the map; drag to look at one stretch.</span>
           </div>
-          <p className="card-sub">Each route from start (0) to destination (100%): where it is dark, where there are places to go in, where people reported something, where it is busy, and where it runs through a park or under a bridge.</p>
+          <p className="card-sub">Each route from start (0) to destination (100%), in the same order as the numbers above: lighting, places to go in, reported places, crowd, and parks &amp; underpasses.</p>
           {routes.length > 0 && (
-            <Timeline evidence={evidence} inks={inks} hidden={hidden} selected={chosen} onSelect={setSelected} brush={brush} onBrush={setBrush} rankOf={(report) => rankOf(report, ev.order)} />
+            <Timeline
+              evidence={evidence}
+              inks={inks}
+              hidden={hidden}
+              selected={chosen}
+              onSelect={selectRoute}
+              brush={brush}
+              onBrush={setBrush}
+              rankOf={(report) => rankOf(report, ev.order)}
+              cursor={cursor}
+              onCursor={setCursor}
+              reportsHidden={!showReports}
+            />
           )}
-          <Key items={[
-            { swatch: <Swatch colour="var(--lit)" />, label: "Mapped lit (street lighting present)" },
-            { swatch: <Swatch colour="var(--unlit)" />, label: "Mapped unlit" },
-            { swatch: <Swatch colour="" hatch />, label: "Unknown lighting" },
-            { swatch: <span className="heart">♥</span>, label: "Place to go in (station, shop, pharmacy…)" },
-            { swatch: <span className="rank-ramp">{[0, 2, 4].map((r) => <RankDot key={r} rank={r} />)}</span>, label: "Reported place (darker = more serious)" },
-            { swatch: <span className="crowd-mark">+</span>, label: "Busy street or square" },
-            { swatch: <span className="bar-mark" />, label: "Bar, pub or café" },
-            { swatch: <Swatch colour="var(--park)" />, label: "Through a park" },
-            { swatch: <span className="arch" aria-hidden>∩</span>, label: "Underpass (under a bridge or road)" },
-          ]} />
-          <button type="button" className="section-toggle" onClick={() => setShadeOpen(!shadeOpen)} aria-expanded={shadeOpen}>
-            <span>How the report dots are shaded</span>
-            <ChevronDown size={16} aria-hidden className={shadeOpen ? "flip" : undefined} />
-          </button>
-          {shadeOpen && <ImportancePanel compact />}
         </section>
 
         {/* ── the brushed interval, and the trade-off ─────────────────── */}
         <div className="side-stack">
           <section className="card interval">
-            <h2>Selected interval <span>· Route {routeLetter(chosen)}</span></h2>
+            <h2 className="interval-title">Selected stretch <RouteChip index={chosen} /></h2>
             {!brush || !summary ? (
-              <p className="note">Drag across Route {routeLetter(chosen)}&apos;s tracks to choose a stretch.</p>
+              <p className="note">Drag across the tracks of <RouteChip index={chosen} /> to choose a stretch.</p>
             ) : (
               <>
-                <p className="card-sub">{Math.round(Math.min(...brush) * 100)}–{Math.round(Math.max(...brush) * 100)}% of route</p>
+                <p className="card-sub">{Math.round(Math.min(...brush) * 100)}–{Math.round(Math.max(...brush) * 100)}% of the way</p>
                 <div className="interval-box">
                   <dl>
                     <dt>Lighting:</dt><dd>{summary.lighting}</dd>
-                    <dt>Place opening hours:</dt><dd>{summary.openingHours}</dd>
-                    <dt>Mapped features:</dt><dd>OpenStreetMap</dd>
+                    <dt>Places to go in:</dt><dd>{summary.places === 0 ? "none nearby" : `${summary.places} · opening hours: ${summary.openingHours}`}</dd>
+                    <dt>Reported places:</dt><dd>{showReports ? summary.reports : <span className="struck-note">hidden — switched off above</span>}</dd>
                     <dt>Crowd:</dt><dd>{summary.crowd}</dd>
-                    <dt>Reports:</dt><dd>{summary.reports}</dd>
                   </dl>
                   <h3>What people said here</h3>
-                  {summary.stories.length > 0 ? (
+                  {!showReports ? (
+                    <p className="note">Reported places are switched off, so their stories are hidden too.</p>
+                  ) : summary.stories.length > 0 ? (
                     <ul className="stories">
                       {summary.stories.map((story) => (
                         <li key={story.id}>
                           <p className="narrative-label">{SOURCE_LABEL[story.source]}{story.place ? `, ${story.place}` : ""}:</p>
-                          <q className="narrative">{story.note}</q>
-                          <a className="translate" href={translateLink(story.note ?? "")} target="_blank" rel="noreferrer">Translate ↗</a>
+                          <Story text={story.note ?? ""} />
                         </li>
                       ))}
                     </ul>
@@ -457,12 +490,12 @@ function CompareFor({ city }: { city: City }) {
               <b>{extra} min</b>
               <input type="range" min={0} max={30} value={extra} onChange={(e) => setExtra(Number(e.target.value))} />
             </label>
-            <p className="note">Filters route options; does not re-score.</p>
+            <p className="note">Fades routes that take longer than this; does not rank them.</p>
           </section>
         </div>
       </div>
 
-      <p className="caveat">Route progress aligns relative position; distances differ. Reported places are context; nothing here adds the factors up.</p>
+      <p className="caveat">Progress along a route lines the three up; their lengths differ. Reported places are context; nothing here adds the factors up or recommends a route.</p>
       <Sources />
     </main>
   );

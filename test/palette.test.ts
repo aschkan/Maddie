@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 
 import {
-  CONTEXT, CROWD, hsl, LIGHT, MEANINGS, NIGHTLIFE, PARK, PLACE, POLICE, REPORT, REPORT_OPACITY, REPORT_RADIUS,
+  CONTEXT, CROWD, hsl, REPORT_OPACITY_NIGHT, LIGHT, MEANINGS, NIGHTLIFE, PARK, PLACE, POLICE, REPORT, REPORT_OPACITY, REPORT_RADIUS,
   REPORT_RAMP, ROUTE_INK, SELECTION, TRIP, UNKNOWN, UNLIT, type Swatch,
 } from "../src/lib/palette.ts";
 import { VERDICT_EXPLAIN, VERDICT_LABEL } from "../src/lib/verdict.ts";
@@ -79,9 +79,37 @@ test("the start and the destination carry no hue — colour is kept for evidence
   for (const hex of tones(TRIP)) assert.ok(chroma(hex) < 0.1, `${hex} carries a hue — an end of the trip should not`);
 });
 
-test("the three routes differ by line style, not only by ink", async () => {
-  const { ROUTE_DASH } = await import("../src/lib/palette.ts");
-  assert.equal(new Set(ROUTE_DASH.map(String)).size, ROUTE_INK.length);
+test("the three routes differ by hue alone — none blue, none heavier than another", async () => {
+  // 25 Nov 2026: line style on top of ink was a double encoding, and the
+  // dashes read as "less recommended". One encoding; blue is selection only.
+  const palette = await import("../src/lib/palette.ts");
+  assert.equal("ROUTE_DASH" in palette, false, "routes must not carry a line style any more");
+  const gap = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+  for (const tone of ["day", "night"] as const) {
+    const inks = ROUTE_INK.map((swatch) => hsl(swatch[tone]));
+    for (const ink of inks) {
+      assert.ok(ink.s > 0.3, `${tone}: a route ink without enough hue`);
+      assert.ok(gap(ink.h, hsl(SELECTION[tone]).h) >= 45, `${tone}: a route ink is too close to the selection blue`);
+    }
+    for (let a = 0; a < inks.length; a++) {
+      for (let b = a + 1; b < inks.length; b++) assert.ok(gap(inks[a]!.h, inks[b]!.h) >= 40, `${tone}: routes ${a} and ${b} are too close in hue`);
+    }
+    const ls = inks.map((ink) => ink.l);
+    assert.ok(Math.max(...ls) - Math.min(...ls) <= 0.2, `${tone}: one route is much lighter or darker than the others`);
+  }
+});
+
+test("bars are a much darker brown than the orange route, so a square never reads as a piece of Route B", () => {
+  for (const tone of ["day", "night"] as const) {
+    const gap = hsl(ROUTE_INK[1]![tone]).l - hsl(NIGHTLIFE[tone]).l;
+    assert.ok(gap >= 0.12, `${tone}: bars (${NIGHTLIFE[tone]}) are too close in lightness to Route B (${ROUTE_INK[1]![tone]})`);
+  }
+});
+
+test("at night every report dot keeps enough body to read as a dot, most serious first", () => {
+  assert.equal(REPORT_OPACITY_NIGHT.length, REPORT_OPACITY.length);
+  for (let i = 1; i < REPORT_OPACITY_NIGHT.length; i++) assert.ok(REPORT_OPACITY_NIGHT[i]! < REPORT_OPACITY_NIGHT[i - 1]!);
+  assert.ok(Math.min(...REPORT_OPACITY_NIGHT) >= 0.3, "the faintest night dot disappears into the map");
 });
 
 test("police figures are a texture in a neutral ink, never a hue a report could be confused with", () => {

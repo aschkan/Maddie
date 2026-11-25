@@ -26,10 +26,12 @@
  *      is neither lit nor unlit, and is never folded into either.
  *   5. **Shape carries meaning too**, so nothing depends on colour alone:
  *      hearts are places, round dots are reports, squares are bars, ticks are
- *      busy streets, ∩ is an underpass, a hatched area is a police figure,
- *      and the three routes differ by line style (solid / dashed / dotted).
- *   6. **Selection is blue.** The selected area, the brushed interval and the
- *      selected route's row are one idea — "what you picked" — in one colour.
+ *      busy streets, ∩ is an underpass, a hatched area is a police figure.
+ *      The three routes are told apart by hue alone (see `ROUTE_INK`).
+ *   6. **Selection is blue, and blue is ONLY selection.** The selected area
+ *      and the brushed interval are "what you picked". A selected ROUTE is
+ *      shown by opacity (full vs 80%), never by turning its label blue — that
+ *      made route C read as related to whatever else was blue.
  *
  * Two values per token, one per theme. Leaflet and the SVG charts take a
  * string, so these are hex rather than CSS variables; `globals.css` keeps the
@@ -65,6 +67,12 @@ export const REPORT_RAMP: Swatch[] = [
 ];
 /** Fill opacity per rank — the serious ones stand out, the light ones recede. */
 export const REPORT_OPACITY = [0.95, 0.82, 0.62, 0.42, 0.18];
+/**
+ * The same at night. Light-grey dots at a fifth of their opacity on a dark grey
+ * map came out as smudges the colour of the roads ("very ugly"); at night every
+ * dot keeps enough body to read as a dot, and the darkest rank is a ring.
+ */
+export const REPORT_OPACITY_NIGHT = [1, 0.9, 0.78, 0.6, 0.35];
 /** Dot radius per rank, in pixels. */
 export const REPORT_RADIUS = [6.2, 5.4, 4.7, 4.1, 3.8];
 
@@ -76,7 +84,10 @@ export const CROWD: Swatch = { day: "#11898a", night: "#2cc8c8" };
  * reassuring — participants named late-night drinking crowds as the kind that
  * is not. Shown as its OWN mark so the reader can tell the two apart.
  */
-export const NIGHTLIFE: Swatch = { day: "#a6611a", night: "#d08c3c" };
+export const NIGHTLIFE: Swatch = { day: "#7f4a12", night: "#a0601c" };
+// Kept DARK on purpose (25 Nov 2026): Route B is orange, and a brown of the
+// same lightness read as "a bit of Route B". The squares differ from the line
+// by shape AND by being much darker; `test/palette.test.ts` checks the gap.
 
 /** A nearby place — a pink HEART. Somewhere with a door and usually a person. */
 export const PLACE: Swatch = { day: "#ec4899", night: "#f472b6" };
@@ -112,15 +123,27 @@ export const POLICE: Swatch = { day: "#475569", night: "#cbd5e1" };
 export const TRIP: Swatch = { day: "#111827", night: "#f8fafc" };
 
 /**
- * The three routes, told apart by line style FIRST (solid, dashed, dotted) and
- * by ink second, so the comparison survives a greyscale print.
+ * The three routes — told apart by COLOUR ONLY, every line solid and the same
+ * width. The meeting of 25 Nov 2026: solid / dashed / dotted on top of three
+ * inks was a double encoding, and the dashes read as "less certain" or "less
+ * recommended" — while the app recommends no route ("that's their decision").
+ * So:
+ *
+ *   * one encoding (hue), no line style, no extra width or vividness for A;
+ *   * NONE of them is blue — blue means "what you picked" and nothing else;
+ *   * none is a hue already taken (lit yellow, place pink, crowd teal, park
+ *     green, the greys of reports and unlit), and the three sit at a similar
+ *     lightness so no route looks heavier than another. `test/palette.test.ts`
+ *     checks the hue gaps and the lightness spread.
  */
 export const ROUTE_INK: Swatch[] = [
-  { day: "#13254d", night: "#e2e8f0" },
-  { day: "#3d8fe0", night: "#38bdf8" },
-  { day: "#71757d", night: "#94a3b8" },
+  { day: "#7a4fa3", night: "#b08fd6" },
+  { day: "#d95f02", night: "#fd8d3c" },
+  { day: "#ae017e", night: "#dd3497" },
 ];
-export const ROUTE_DASH: (string | undefined)[] = [undefined, "9 7", "2 7"];
+
+/** A route that is not the selected one: same colour, a little fainter. */
+export const ROUTE_UNSELECTED_OPACITY = 0.8;
 
 /**
  * The old verdict scale (Favourable / Mixed / Look closer / Not enough data).

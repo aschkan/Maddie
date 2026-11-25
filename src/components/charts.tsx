@@ -941,3 +941,183 @@ export function MonthBars({
     </div>
   );
 }
+
+/* ── the routes in numbers: one bar per route per factor ─────────────── */
+
+/**
+ * Replaces the dot-plot columns (meeting of 25 Nov 2026): "if it's a number
+ * thing … just put some bar charts", and the two kinds Franconeri names —
+ * ABSOLUTE bars (duration, counts, metres), each column its own scale from
+ * zero with the number printed at the end; and a PART-OF-A-WHOLE bar for
+ * lighting, where the whole bar is the route and the parts are lit / unlit /
+ * unknown (hatched). No 0–50–100 axis on a duration.
+ *
+ * Columns sit under GROUP headers named exactly like the timeline's tracks, in
+ * the same order, so "Lighting" above and "Lighting" below read as one idea.
+ * A route is selected by OPACITY (full vs 80%), never by a second colour.
+ */
+export interface FactorColumn {
+  /** The group header, shared with the timeline track of the same name. */
+  group: string;
+  title: string;
+  kind: "bar" | "lighting";
+  /** One value per route (bar), or null while it is being read. */
+  values?: (number | null)[];
+  /** One {lit, unlit, unknown} per route, percentages (lighting). */
+  shares?: ({ lit: number; unlit: number; unknown: number } | null)[];
+  unit?: string;
+  /** Shown instead of the bars — e.g. reports switched off by the reader. */
+  hiddenNote?: string;
+}
+
+export function FactorBars({
+  columns, routes, inks, muted, selected, onPick, chip,
+}: {
+  columns: FactorColumn[];
+  routes: number;
+  inks: string[];
+  muted: boolean[];
+  selected: number;
+  onPick: (index: number) => void;
+  /** The "Route A" chip, drawn by the board so it is the same component everywhere. */
+  chip: (index: number) => ReactNode;
+}) {
+  // Consecutive columns with the same group share one header.
+  const groups: { name: string; span: number }[] = [];
+  for (const column of columns) {
+    const last = groups[groups.length - 1];
+    if (last && last.name === column.group) last.span++;
+    else groups.push({ name: column.group, span: 1 });
+  }
+  return (
+    <div
+      className="fbars"
+      style={{ gridTemplateColumns: `70px ${columns.map((c) => (c.kind === "lighting" ? "minmax(150px, 1.7fr)" : "minmax(84px, 1fr)")).join(" ")}` }}
+    >
+      <div className="fb-corner" style={{ gridRow: "1 / span 2" }} />
+      {groups.map((group, g) => (
+        <div key={g} className="fb-group" style={{ gridColumn: `span ${group.span}` }}>{group.name}</div>
+      ))}
+      {columns.map((column) => (
+        <div key={column.title} className={`fb-title${column.hiddenNote ? " struck" : ""}`}>{column.title}</div>
+      ))}
+      {Array.from({ length: routes }, (_, i) => (
+        <div key={i} className="fb-row" style={{ opacity: muted[i] ? 0.35 : i === selected ? 1 : 0.8 }} onClick={() => onPick(i)}>
+          <div className="fb-name">{chip(i)}</div>
+          {columns.map((column) => (
+            <div key={column.title} className="fb-cell">
+              {column.hiddenNote ? (
+                <span className="fb-hidden">{i === 0 ? column.hiddenNote : "hidden"}</span>
+              ) : column.kind === "lighting" ? (
+                <LightingBar share={column.shares?.[i] ?? null} />
+              ) : (
+                <AbsoluteBar
+                  value={column.values?.[i] ?? null}
+                  max={Math.max(1e-9, ...(column.values ?? []).map((v) => v ?? 0))}
+                  colour={inks[i] ?? "var(--ink)"}
+                  unit={column.unit ?? ""}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AbsoluteBar({ value, max, colour, unit }: { value: number | null; max: number; colour: string; unit: string }) {
+  const [ref, width] = useWidth<HTMLDivElement>(90);
+  if (value === null) return <div ref={ref} className="fb-reading">reading…</div>;
+  const label = `${Math.round(value)}${unit}`;
+  const labelW = 8 + label.length * 7.2;
+  const barW = Math.max(value > 0 ? 2 : 0, ((width - labelW) * value) / max);
+  return (
+    <div ref={ref} className="fb-bar">
+      <svg width={width} height={22} role="img" aria-label={label}>
+        <line x1={0.5} x2={0.5} y1={2} y2={20} className="axis" />
+        <rect x={1} y={5} width={barW} height={12} style={{ fill: colour }} />
+        <text x={barW + 5} y={15.5} className="value">{label}</text>
+      </svg>
+    </div>
+  );
+}
+
+function LightingBar({ share }: { share: { lit: number; unlit: number; unknown: number } | null }) {
+  const [ref, width] = useWidth<HTMLDivElement>(120);
+  const hatch = useSvgId("fb-hatch");
+  if (!share) return <div ref={ref} className="fb-reading">reading…</div>;
+  const total = share.lit + share.unlit + share.unknown || 1;
+  const w = (v: number) => (width * v) / total;
+  return (
+    <div ref={ref} className="fb-bar">
+      <svg width={width} height={16} role="img" aria-label={`Lit ${Math.round(share.lit)}%, unlit ${Math.round(share.unlit)}%, unknown ${Math.round(share.unknown)}%`}>
+        <defs><Hatch id={hatch} /></defs>
+        <rect x={0} y={3} width={w(share.lit)} height={12} style={{ fill: "var(--lit)" }} />
+        <rect x={w(share.lit)} y={3} width={w(share.unlit)} height={12} style={{ fill: "var(--unlit)" }} />
+        <rect x={w(share.lit) + w(share.unlit)} y={3} width={w(share.unknown)} height={12} style={{ fill: `url(#${hatch})`, stroke: "var(--unknown)" }} strokeWidth={0.6} />
+        <rect x={0.5} y={3} width={Math.max(0, width - 1)} height={12} fill="none" className="axis" />
+      </svg>
+      <span className="fb-share">
+        {Math.round(share.lit)}% lit{share.unlit >= 0.5 ? ` · ${Math.round(share.unlit)}% unlit` : ""} · {Math.round(share.unknown)}% unknown
+      </span>
+    </div>
+  );
+}
+
+/* ── shares: the whole bar is 100% ────────────────────────────────────── */
+
+/**
+ * A percentage drawn as a percentage (meeting of 25 Nov 2026, after
+ * Franconeri): every bar's full length is the 100% — everyone who answered —
+ * and the filled part is the share that gave this answer. Replaces two
+ * same-length bars (selection vs everything) that showed the same thing twice
+ * whenever nothing was selected.
+ */
+export function ShareBars({
+  rows, of, labelWidth = 220, ofLabel,
+}: {
+  rows: { id: string; label: string; value: number }[];
+  /** What 100% is — e.g. the number of respondents who answered. */
+  of: number;
+  labelWidth?: number;
+  ofLabel: string;
+}) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const tip = useTip(ref);
+  const labelW = Math.min(labelWidth, Math.max(92, width * 0.42));
+  const right = 64;
+  const rowH = 34;
+  const plotW = Math.max(60, width - labelW - right);
+  const height = rows.length * rowH + 30;
+  return (
+    <div ref={ref} className="chart">
+      <svg width={width} height={height} role="img" aria-label="Percentage bars">
+        {[0, 50, 100].map((tick) => (
+          <g key={tick}>
+            <line x1={labelW + (tick / 100) * plotW} x2={labelW + (tick / 100) * plotW} y1={0} y2={rows.length * rowH} className={tick === 50 ? "grid dashed" : "grid"} />
+            <text x={labelW + (tick / 100) * plotW} y={rows.length * rowH + 14} className="tick" textAnchor="middle">{tick}%</text>
+          </g>
+        ))}
+        <text x={labelW + plotW / 2} y={height - 2} className="axis-title" textAnchor="middle">{`Share of ${ofLabel}`}</text>
+        {rows.map((row, i) => {
+          const y = i * rowH + 8;
+          const share = of > 0 ? row.value / of : 0;
+          return (
+            <g
+              key={row.id}
+              onPointerMove={(event) => tip.show(event, (<><b>{row.label}</b><span>{row.value.toLocaleString("en-GB")} of {of.toLocaleString("en-GB")} ({pct(row.value, of)})</span></>))}
+              onPointerLeave={tip.hide}
+            >
+              <text x={labelW - 10} y={y + 13} className="row-label" textAnchor="end">{row.label}</text>
+              <rect x={labelW} y={y} width={plotW} height={18} style={{ fill: "var(--context)" }} />
+              <rect x={labelW} y={y} width={share * plotW} height={18} style={{ fill: "var(--report)" }} />
+              <text x={labelW + plotW + 6} y={y + 13.5} className="value">{pct(row.value, of)}</text>
+            </g>
+          );
+        })}
+      </svg>
+      {tip.node}
+    </div>
+  );
+}

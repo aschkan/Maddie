@@ -37,7 +37,7 @@ export default function BoardHeader({ title, note }: { title: string; note: Reac
     <header className="board-head">
       <div className="board-title">
         <h1>Maddie — {title}</h1>
-        <p className="board-sub">See what is known about the streets between A and B — and decide for yourself.</p>
+        <p className="board-sub">See what is known about the streets between your start and your destination — and decide for yourself.</p>
       </div>
       <p className="board-note">{note}</p>
       <nav className="board-nav" aria-label="Boards">
@@ -73,7 +73,7 @@ export function Sources() {
   return (
     <footer className="sources">
       <p>
-        <b>Reports:</b>{" "}
+        <b>Reported places:</b>{" "}
         {reportsLoading
           ? "loading…"
           : `${reports.length.toLocaleString("en-GB")} within 9 km of ${city.name}`}
@@ -82,9 +82,10 @@ export function Sources() {
       </p>
       <p>
         <b>Source:</b> {POINTER_CREDIT}
-        {pointer?.exportedAt && <> (export of {DATE.format(new Date(pointer.exportedAt))})</>}. Places
-        respondents marked in a national survey, with the reason they gave; not incidents, and not a measure of
-        risk. Not for commercial use.
+        {pointer?.exportedAt && <> (export of {DATE.format(new Date(pointer.exportedAt))})</>}. A reported place is
+        a spot a respondent pointed out in Pointer&apos;s national survey &ldquo;Onveilige plekken&rdquo; (places where people feel
+        uneasy), with the reason they gave — something happened to them, to someone they know, or the place feels
+        threatening. Not police records, and not a measure of risk. Not for commercial use.
       </p>
       <p><b>Streets, lighting and places:</b> © OpenStreetMap contributors.</p>
     </footer>

@@ -28,7 +28,7 @@ import { useMemo, useState } from "react";
 import { CalendarDays, ChevronDown, Info, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import BoardHeader, { Sources } from "@/components/BoardHeader";
-import { GroupedBars, Key, MonthBars, pct, StackBars, Swatch } from "@/components/charts";
+import { Key, MonthBars, pct, ShareBars, StackBars, Swatch } from "@/components/charts";
 import { useEvidence } from "@/components/EvidenceProvider";
 import ImportancePanel, { RankDot } from "@/components/ImportancePanel";
 import { cityBox, PLACE_KINDS, useLiveLayers, usePoliceFigures, useRecording } from "@/components/useMapData";
@@ -183,10 +183,9 @@ function ExploreFor({ city }: { city: City }) {
     id: a.id,
     label: a.label,
     value: adaptSelected.filter((r) => r.adjustments?.includes(a.id)).length,
-    context: adaptBase.filter((r) => r.adjustments?.includes(a.id)).length,
   }))
-    .filter((row) => row.context > 0 && row.id !== "none")
-    .sort((a, b) => b.value - a.value || b.context - a.context)
+    .filter((row) => row.value > 0 && row.id !== "none")
+    .sort((a, b) => b.value - a.value)
     .slice(0, 8);
 
   const faded = useMemo(
@@ -339,7 +338,7 @@ function ExploreFor({ city }: { city: City }) {
             <h2>On the map</h2>
             <label className="check">
               <input type="checkbox" checked={showLighting} onChange={() => setShowLighting(!showLighting)} />
-              <span>Street lighting (mapped)</span>
+              <span>Lit — street lighting is mapped</span>
               <Swatch colour="var(--lit)" round />
             </label>
             <label className="check">
@@ -485,8 +484,8 @@ function ExploreFor({ city }: { city: City }) {
                     <dd>{areaFacts.perKm.toFixed(1)}{areaFacts.cityPerKm !== null && <span className="muted"> · city {areaFacts.cityPerKm.toFixed(1)}</span>}</dd>
                   </>
                 )}
-                <dt>Streets mapped lit</dt>
-                <dd>{areaFacts.lit}% <span className="muted">· unlit {areaFacts.unlit}% · unknown {areaFacts.unknown}%</span></dd>
+                <dt>Lighting</dt>
+                <dd>{areaFacts.lit}% lit <span className="muted">· {areaFacts.unlit}% unlit · {areaFacts.unknown}% unknown lighting</span></dd>
                 <dt>Places to go in</dt>
                 <dd>{areaFacts.places}</dd>
               </dl>
@@ -495,14 +494,14 @@ function ExploreFor({ city }: { city: City }) {
                 <i style={{ width: `${areaFacts.unlit}%`, background: "var(--unlit)" }} />
                 <i className="sw-hatch" style={{ width: `${areaFacts.unknown}%` }} />
               </div>
-              <p className="note">Counts, not a rating: more reports can mean more people answered the survey here.{city.figures === "osm" ? "" : " Lighting and place figures are not measured yet."}</p>
+              <p className="note">Counts, not a rating: more reported places can mean more people answered the survey here.{city.figures === "osm" ? "" : " Lighting and place figures are not measured yet."}</p>
             </section>
           )}
 
           {/* ── when reports were made ───────────────────────────────────── */}
           <section className="card">
             <div className="card-head">
-              <h2>When reports were made</h2>
+              <h2>When places were reported</h2>
               {month && <button type="button" className="link" onClick={() => setMonth(null)}>Clear</button>}
             </div>
             <p className="card-sub">
@@ -519,16 +518,11 @@ function ExploreFor({ city }: { city: City }) {
               &ldquo;Do you change your behaviour because of this place?&rdquo; — {answeredAdapt.toLocaleString("en-GB")} answered,
               {" "}several answers allowed. Percentages are of those who answered.
             </p>
-            <GroupedBars
-              rows={adaptRows}
-              focus={null}
-              onPick={() => undefined}
-              axisLabel="Reported places"
-              labelWidth={240}
-              pctOf={answeredAdapt}
-              selectionLabel={selectionLabel}
-              contextLabel="All displayed"
-            />
+            {answeredAdapt > 0 ? (
+              <ShareBars rows={adaptRows} of={answeredAdapt} ofLabel={`the ${answeredAdapt.toLocaleString("en-GB")} who answered`} labelWidth={240} />
+            ) : (
+              <p className="empty">Nobody in this selection answered this question.</p>
+            )}
           </section>
         </div>
       </div>

@@ -99,7 +99,7 @@ interface ChatReply {
   choices?: { message?: { content?: string } }[];
 }
 
-async function ask(body: string, timeoutMs: number): Promise<string | null> {
+async function ask(body: string, timeoutMs: number, system = SYSTEM, maxTokens = 220): Promise<string | null> {
   const response = await fetch(`${AI_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -109,9 +109,9 @@ async function ask(body: string, timeoutMs: number): Promise<string | null> {
     body: JSON.stringify({
       model: AI_MODEL,
       temperature: 0.2,
-      max_tokens: 220,
+      max_tokens: maxTokens,
       messages: [
-        { role: "system", content: SYSTEM },
+        { role: "system", content: system },
         { role: "user", content: body },
       ],
     }),
@@ -151,5 +151,32 @@ export async function narrate(
     return { text: null, source: null, note: "the model returned an empty reply" };
   } catch (error) {
     return { text: null, source: null, note: error instanceof Error ? error.message : "the model failed" };
+  }
+}
+
+/**
+ * A respondent's story, in English — so it can be read IN the app instead of
+ * on Google Translate's page (meeting of 25 Nov 2026: "can you do it in a
+ * snippet inside the application?"). Same model, same key, same rule as the
+ * narration: never throws, and a failure costs only the translation — the
+ * page then shows the original with the external link.
+ */
+const TRANSLATE_SYSTEM = [
+  "You translate short survey answers, mostly in Dutch, into plain English.",
+  "Translate faithfully: keep the respondent's meaning, tone and first person. Do not add, soften or summarise.",
+  "If the text is already English, return it unchanged.",
+  "Reply with the translation only — no quotes, no notes.",
+].join(" ");
+
+export const TRANSLATE_MAX_CHARS = 1800;
+
+export async function translateToEnglish(text: string, options: { timeoutMs?: number } = {}): Promise<{ text: string | null; note?: string }> {
+  const input = text.trim().slice(0, TRANSLATE_MAX_CHARS);
+  if (!input) return { text: null, note: "nothing to translate" };
+  try {
+    const out = await ask(input, options.timeoutMs ?? AI_TIMEOUT_MS, TRANSLATE_SYSTEM, 700);
+    return out ? { text: out } : { text: null, note: "the model returned an empty reply" };
+  } catch (error) {
+    return { text: null, note: error instanceof Error ? error.message : "the model failed" };
   }
 }
